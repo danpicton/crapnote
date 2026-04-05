@@ -9,6 +9,7 @@ import (
 
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/db"
+	"github.com/danpicton/crapnote/internal/notes"
 )
 
 // newTestMux builds a fully wired mux backed by an in-memory DB.
@@ -25,7 +26,8 @@ func newTestMux(t *testing.T) *http.ServeMux {
 		auth.NewSessionRepo(database),
 		7*24*time.Hour,
 	)
-	return newMux(auth.NewHandler(svc))
+	notesSvc := notes.NewService(notes.NewRepo(database))
+	return newMux(auth.NewHandler(svc), notes.NewHandler(notesSvc))
 }
 
 func TestHealthCheck(t *testing.T) {

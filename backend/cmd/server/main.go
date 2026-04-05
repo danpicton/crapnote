@@ -11,6 +11,7 @@ import (
 
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/db"
+	"github.com/danpicton/crapnote/internal/notes"
 )
 
 func main() {
@@ -35,6 +36,10 @@ func main() {
 	authSvc := auth.NewService(userRepo, sessRepo, time.Duration(ttlDays)*24*time.Hour)
 	authHandler := auth.NewHandler(authSvc)
 
+	notesRepo := notes.NewRepo(database)
+	notesSvc := notes.NewService(notesRepo)
+	notesHandler := notes.NewHandler(notesSvc)
+
 	// Seed initial admin if no users exist.
 	adminUser := os.Getenv("ADMIN_USERNAME")
 	adminPass := os.Getenv("ADMIN_PASSWORD")
@@ -45,7 +50,7 @@ func main() {
 	}
 
 	port := envOrDefault("PORT", "8080")
-	mux := newMux(authHandler)
+	mux := newMux(authHandler, notesHandler)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)
