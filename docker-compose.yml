@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - DATABASE_PATH=/data/notes.db
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
+      - SESSION_SECRET=${SESSION_SECRET:-dev-secret-change-in-production}
+      - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-7}
+    volumes:
+      - notes-data:/data
+
+  # Optional: run with Postgres instead of SQLite
+  # Uncomment and set DATABASE_URL env var in app service to use
+  # postgres:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_DB: crapnote
+  #     POSTGRES_USER: crapnote
+  #     POSTGRES_PASSWORD: secret
+  #   volumes:
+  #     - pg-data:/var/lib/postgresql/data
+
+volumes:
+  notes-data:
+  # pg-data:

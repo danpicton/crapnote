@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crapnote
+  namespace: crapnote
+  labels:
+    app: crapnote
+spec:
+  replicas: 1  # SQLite requires single writer
+  selector:
+    matchLabels:
+      app: crapnote
+  template:
+    metadata:
+      labels:
+        app: crapnote
+    spec:
+      containers:
+        - name: crapnote
+          image: ghcr.io/danpicton/crapnote:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: DATABASE_PATH
+              value: /data/notes.db
+            - name: SESSION_TTL_DAYS
+              value: "7"
+            - name: ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: crapnote-secrets
+                  key: ADMIN_USERNAME
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: crapnote-secrets
+                  key: ADMIN_PASSWORD
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: crapnote-secrets
+                  key: SESSION_SECRET
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: crapnote-data
