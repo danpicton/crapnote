@@ -14,7 +14,7 @@ import (
 //
 // A placeholder index.html is committed so the binary always compiles.
 //
-//go:embed ui/build
+//go:embed all:ui/build
 var uiFS embed.FS
 
 // uiHandler returns an http.Handler that serves the embedded SvelteKit SPA.
