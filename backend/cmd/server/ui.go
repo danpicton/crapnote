@@ -4,7 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
-	"strings"
+	"path"
 )
 
 // uiFS holds the built SvelteKit static output.
@@ -18,7 +18,9 @@ import (
 var uiFS embed.FS
 
 // uiHandler returns an http.Handler that serves the embedded SvelteKit SPA.
-// Unknown paths (i.e., routes handled client-side) fall back to index.html.
+// Requests for static assets (anything with a file extension) are served
+// directly from the embedded FS. Extensionless paths are SvelteKit client-side
+// routes, so they all receive index.html.
 func uiHandler() http.Handler {
 	sub, err := fs.Sub(uiFS, "ui/build")
 	if err != nil {
@@ -26,18 +28,13 @@ func uiHandler() http.Handler {
 	}
 	fileServer := http.FileServer(http.FS(sub))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// fs.FS paths must not start with "/".
-		name := strings.TrimPrefix(r.URL.Path, "/")
-		if name == "" {
-			name = "index.html"
-		}
-		f, openErr := sub.Open(name)
-		if openErr == nil {
-			f.Close()
+		if path.Ext(r.URL.Path) != "" {
+			// Has a file extension (.js, .css, .png, …) — serve the asset.
 			fileServer.ServeHTTP(w, r)
 			return
 		}
-		// Path not found — serve index.html for client-side routing.
+		// No extension — SvelteKit client-side route. Serve index.html so the
+		// SPA can boot and handle routing itself.
 		r2 := *r
 		r2.URL.Path = "/"
 		fileServer.ServeHTTP(w, &r2)
