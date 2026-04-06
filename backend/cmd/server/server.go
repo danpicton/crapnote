@@ -71,6 +71,9 @@ func newMux(
 	protected("DELETE", "/api/trash/{id}", trashHandler.DeleteOne)
 	protected("DELETE", "/api/trash", trashHandler.Empty)
 
+	// SPA frontend — catch-all after all /api/* routes.
+	mux.Handle("/", uiHandler())
+
 	return mux
 }
 
