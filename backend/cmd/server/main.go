@@ -11,6 +11,7 @@ import (
 
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/db"
+	"github.com/danpicton/crapnote/internal/export"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/trash"
@@ -41,7 +42,9 @@ func main() {
 	authHandler := auth.NewHandler(authSvc)
 	adminHandler := auth.NewAdminHandler(auth.NewUserRepo(database))
 
-	notesHandler := notes.NewHandler(notes.NewService(notes.NewRepo(database)))
+	notesSvc := notes.NewService(notes.NewRepo(database))
+	notesHandler := notes.NewHandler(notesSvc)
+	exportHandler := export.NewHandler(notesSvc)
 	tagsHandler := tags.NewHandler(tags.NewService(tags.NewRepo(database)))
 
 	trashRepo := trash.NewRepo(database)
@@ -69,7 +72,7 @@ func main() {
 	}()
 
 	port := envOrDefault("PORT", "8080")
-	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler)
+	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)

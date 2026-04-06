@@ -9,6 +9,7 @@ import (
 
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/db"
+	"github.com/danpicton/crapnote/internal/export"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/trash"
@@ -28,12 +29,14 @@ func newTestMux(t *testing.T) *http.ServeMux {
 		auth.NewSessionRepo(database),
 		7*24*time.Hour,
 	)
+	notesSvc := notes.NewService(notes.NewRepo(database))
 	return newMux(
 		auth.NewHandler(authSvc),
 		auth.NewAdminHandler(auth.NewUserRepo(database)),
-		notes.NewHandler(notes.NewService(notes.NewRepo(database))),
+		notes.NewHandler(notesSvc),
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
+		export.NewHandler(notesSvc),
 	)
 }
 
