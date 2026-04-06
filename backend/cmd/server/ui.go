@@ -4,6 +4,7 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
+	"strings"
 )
 
 // uiFS holds the built SvelteKit static output.
@@ -25,8 +26,12 @@ func uiHandler() http.Handler {
 	}
 	fileServer := http.FileServer(http.FS(sub))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Try to open the requested path inside the embedded FS.
-		f, openErr := sub.Open(r.URL.Path)
+		// fs.FS paths must not start with "/".
+		name := strings.TrimPrefix(r.URL.Path, "/")
+		if name == "" {
+			name = "index.html"
+		}
+		f, openErr := sub.Open(name)
 		if openErr == nil {
 			f.Close()
 			fileServer.ServeHTTP(w, r)
