@@ -39,6 +39,11 @@ frontend/.svelte-kit/
 # Backend binary
 backend/server
 
+# Frontend build artifacts copied into embed dir (run `make build-prod` to populate)
+backend/cmd/server/ui/build/_app/
+backend/cmd/server/ui/build/manifest.json
+backend/cmd/server/ui/build/sw.js
+
 # SQLite database
 *.db
 *.db-shm
