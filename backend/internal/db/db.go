@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"math/rand"
 	"sort"
 	"strings"
 
@@ -44,7 +45,8 @@ func Open(cfg Config) (*DB, error) {
 		}
 		driverName = "sqlite3"
 		if path == ":memory:" {
-			dsn = "file::memory:?_foreign_keys=on&cache=shared"
+			// Each :memory: call gets a unique named DB so test runs don't share state.
+			dsn = fmt.Sprintf("file:memdb%d?mode=memory&cache=shared&_foreign_keys=on", rand.Int63())
 		} else {
 			dsn = fmt.Sprintf("file:%s?_foreign_keys=on&_journal_mode=WAL&cache=shared", path)
 		}

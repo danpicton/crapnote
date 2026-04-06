@@ -10,6 +10,8 @@ import (
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/db"
 	"github.com/danpicton/crapnote/internal/notes"
+	"github.com/danpicton/crapnote/internal/tags"
+	"github.com/danpicton/crapnote/internal/trash"
 )
 
 // newTestMux builds a fully wired mux backed by an in-memory DB.
@@ -21,13 +23,18 @@ func newTestMux(t *testing.T) *http.ServeMux {
 	}
 	t.Cleanup(func() { database.Close() })
 
-	svc := auth.NewService(
+	authSvc := auth.NewService(
 		auth.NewUserRepo(database),
 		auth.NewSessionRepo(database),
 		7*24*time.Hour,
 	)
-	notesSvc := notes.NewService(notes.NewRepo(database))
-	return newMux(auth.NewHandler(svc), notes.NewHandler(notesSvc))
+	return newMux(
+		auth.NewHandler(authSvc),
+		auth.NewAdminHandler(auth.NewUserRepo(database)),
+		notes.NewHandler(notes.NewService(notes.NewRepo(database))),
+		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
+		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
+	)
 }
 
 func TestHealthCheck(t *testing.T) {

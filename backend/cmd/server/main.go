@@ -12,6 +12,8 @@ import (
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/db"
 	"github.com/danpicton/crapnote/internal/notes"
+	"github.com/danpicton/crapnote/internal/tags"
+	"github.com/danpicton/crapnote/internal/trash"
 )
 
 func main() {
@@ -31,14 +33,20 @@ func main() {
 		ttlDays = 7
 	}
 
-	userRepo := auth.NewUserRepo(database)
-	sessRepo := auth.NewSessionRepo(database)
-	authSvc := auth.NewService(userRepo, sessRepo, time.Duration(ttlDays)*24*time.Hour)
+	authSvc := auth.NewService(
+		auth.NewUserRepo(database),
+		auth.NewSessionRepo(database),
+		time.Duration(ttlDays)*24*time.Hour,
+	)
 	authHandler := auth.NewHandler(authSvc)
+	adminHandler := auth.NewAdminHandler(auth.NewUserRepo(database))
 
-	notesRepo := notes.NewRepo(database)
-	notesSvc := notes.NewService(notesRepo)
-	notesHandler := notes.NewHandler(notesSvc)
+	notesHandler := notes.NewHandler(notes.NewService(notes.NewRepo(database)))
+	tagsHandler := tags.NewHandler(tags.NewService(tags.NewRepo(database)))
+
+	trashRepo := trash.NewRepo(database)
+	trashSvc := trash.NewService(trashRepo)
+	trashHandler := trash.NewHandler(trashSvc)
 
 	// Seed initial admin if no users exist.
 	adminUser := os.Getenv("ADMIN_USERNAME")
@@ -49,8 +57,19 @@ func main() {
 		}
 	}
 
+	// Background job: purge trash entries older than 7 days, runs once per day.
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := trashSvc.PurgeExpired(context.Background()); err != nil {
+				log.Printf("purge expired trash: %v", err)
+			}
+		}
+	}()
+
 	port := envOrDefault("PORT", "8080")
-	mux := newMux(authHandler, notesHandler)
+	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)
