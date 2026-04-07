@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/danpicton/crapnote/internal/db"
@@ -37,20 +38,21 @@ func (r *Repo) Create(ctx context.Context, userID int64, title, body string) (*N
 	return r.Get(ctx, id, userID)
 }
 
-// Get returns a note by ID for the given user, excluding trashed notes.
-// Returns ErrNotFound if not found, trashed, or owned by a different user.
+// Get returns a note by ID for the given user, excluding trashed and archived notes.
+// Returns ErrNotFound if not found, trashed, archived, or owned by a different user.
 func (r *Repo) Get(ctx context.Context, id, userID int64) (*Note, error) {
 	n := &Note{}
-	var starred, pinned int
+	var starred, pinned, archived int
 	err := r.db.QueryRowContext(ctx, `
-		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned,
+		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived,
 		       n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.id = ? AND n.user_id = ?
+		  AND n.archived = 0
 		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)
 	`, id, userID).Scan(
 		&n.ID, &n.UserID, &n.Title, &n.Body,
-		&starred, &pinned, &n.CreatedAt, &n.UpdatedAt,
+		&starred, &pinned, &archived, &n.CreatedAt, &n.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -60,6 +62,7 @@ func (r *Repo) Get(ctx context.Context, id, userID int64) (*Note, error) {
 	}
 	n.Starred = starred != 0
 	n.Pinned = pinned != 0
+	n.Archived = archived != 0
 	return n, nil
 }
 
@@ -67,10 +70,11 @@ func (r *Repo) Get(ctx context.Context, id, userID int64) (*Note, error) {
 // Pinned notes appear first, then ordered by updated_at DESC.
 func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*Note, error) {
 	query := `
-		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned,
+		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived,
 		       n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.user_id = ?
+		  AND n.archived = 0
 		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)`
 
 	args := []any{userID}
@@ -89,8 +93,11 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 	}
 
 	if filter.Search != "" {
+		// Quote the term and append * for prefix/character-by-character matching.
+		// e.g. typing "hel" matches "hello", "help", etc.
+		safe := strings.ReplaceAll(filter.Search, `"`, ``)
 		query += ` AND n.id IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?)`
-		args = append(args, filter.Search)
+		args = append(args, `"`+safe+`"*`)
 	}
 
 	query += ` ORDER BY n.pinned DESC, n.updated_at DESC`
@@ -104,15 +111,16 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 	var result []*Note
 	for rows.Next() {
 		n := &Note{}
-		var starred, pinned int
+		var starred, pinned, archived int
 		if err := rows.Scan(
 			&n.ID, &n.UserID, &n.Title, &n.Body,
-			&starred, &pinned, &n.CreatedAt, &n.UpdatedAt,
+			&starred, &pinned, &archived, &n.CreatedAt, &n.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		n.Starred = starred != 0
 		n.Pinned = pinned != 0
+		n.Archived = archived != 0
 		result = append(result, n)
 	}
 	return result, rows.Err()
@@ -183,6 +191,60 @@ func (r *Repo) SoftDelete(ctx context.Context, id, userID int64) error {
 		`INSERT OR IGNORE INTO trash(note_id, user_id) VALUES(?, ?)`, id, userID,
 	)
 	return err
+}
+
+// Archive moves a note to the archive (hidden from normal list but not deleted).
+func (r *Repo) Archive(ctx context.Context, id, userID int64) error {
+	return r.setBool(ctx, "archived", id, userID, true)
+}
+
+// Unarchive restores an archived note back to the normal list.
+func (r *Repo) Unarchive(ctx context.Context, id, userID int64) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE notes SET archived=0 WHERE id=? AND user_id=?`, id, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("unarchive: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ListArchived returns archived, non-trashed notes for a user ordered by updated_at DESC.
+func (r *Repo) ListArchived(ctx context.Context, userID int64) ([]*Note, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived,
+		       n.created_at, n.updated_at
+		FROM notes n
+		WHERE n.user_id = ?
+		  AND n.archived = 1
+		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)
+		ORDER BY n.updated_at DESC
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list archived: %w", err)
+	}
+	defer rows.Close()
+
+	var result []*Note
+	for rows.Next() {
+		n := &Note{}
+		var starred, pinned, archived int
+		if err := rows.Scan(
+			&n.ID, &n.UserID, &n.Title, &n.Body,
+			&starred, &pinned, &archived, &n.CreatedAt, &n.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		n.Starred = starred != 0
+		n.Pinned = pinned != 0
+		n.Archived = archived != 0
+		result = append(result, n)
+	}
+	return result, rows.Err()
 }
 
 // HardDelete permanently removes a note and its trash record.

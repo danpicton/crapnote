@@ -178,6 +178,65 @@ func (h *Handler) TogglePin(w http.ResponseWriter, r *http.Request) {
 	h.toggleFlag(w, r, h.svc.TogglePin)
 }
 
+// Archive handles PATCH /api/notes/{id}/archive
+func (h *Handler) Archive(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid note id")
+		return
+	}
+	if err := h.svc.Archive(r.Context(), id, u.ID); errors.Is(err, ErrNotFound) {
+		writeError(w, http.StatusNotFound, "note not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Unarchive handles PATCH /api/notes/{id}/unarchive
+func (h *Handler) Unarchive(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	id, err := parseID(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid note id")
+		return
+	}
+	if err := h.svc.Unarchive(r.Context(), id, u.ID); errors.Is(err, ErrNotFound) {
+		writeError(w, http.StatusNotFound, "note not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ListArchived handles GET /api/archive
+func (h *Handler) ListArchived(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	notes, err := h.svc.ListArchived(r.Context(), u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, notesToResponse(notes))
+}
+
 func (h *Handler) toggleFlag(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -231,6 +290,7 @@ type noteResponse struct {
 	Body      string `json:"body"`
 	Starred   bool   `json:"starred"`
 	Pinned    bool   `json:"pinned"`
+	Archived  bool   `json:"archived"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -243,6 +303,7 @@ func noteToResponse(n *Note) noteResponse {
 		Body:      n.Body,
 		Starred:   n.Starred,
 		Pinned:    n.Pinned,
+		Archived:  n.Archived,
 		CreatedAt: n.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt: n.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}

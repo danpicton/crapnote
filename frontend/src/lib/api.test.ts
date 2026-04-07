@@ -46,7 +46,7 @@ describe('api.auth', () => {
 });
 
 describe('api.notes', () => {
-	const note = { id: 1, title: 'T', body: 'B', starred: false, pinned: false, created_at: '', updated_at: '' };
+	const note = { id: 1, title: 'T', body: 'B', starred: false, pinned: false, archived: false, created_at: '', updated_at: '' };
 
 	it('list: GET /api/notes', async () => {
 		mockFetch.mockResolvedValueOnce(ok([note]));

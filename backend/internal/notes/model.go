@@ -16,6 +16,7 @@ type Note struct {
 	Body      string
 	Starred   bool
 	Pinned    bool
+	Archived  bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

@@ -59,6 +59,21 @@ func (s *Service) ToggleStar(ctx context.Context, id, userID int64) (*Note, erro
 	return s.repo.Get(ctx, id, userID)
 }
 
+// Archive moves a note to the archive.
+func (s *Service) Archive(ctx context.Context, id, userID int64) error {
+	return s.repo.Archive(ctx, id, userID)
+}
+
+// Unarchive restores a note from the archive.
+func (s *Service) Unarchive(ctx context.Context, id, userID int64) error {
+	return s.repo.Unarchive(ctx, id, userID)
+}
+
+// ListArchived returns all archived notes for a user.
+func (s *Service) ListArchived(ctx context.Context, userID int64) ([]*Note, error) {
+	return s.repo.ListArchived(ctx, userID)
+}
+
 // TogglePin flips the pinned flag and returns the updated note.
 func (s *Service) TogglePin(ctx context.Context, id, userID int64) (*Note, error) {
 	note, err := s.repo.Get(ctx, id, userID)

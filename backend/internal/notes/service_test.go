@@ -130,3 +130,64 @@ func TestService_WrongUser_Blocked(t *testing.T) {
 		t.Fatalf("expected ErrNotFound for wrong user on Update, got %v", err)
 	}
 }
+
+func TestService_Archive(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	svc := notes.NewService(notes.NewRepo(database))
+	ctx := context.Background()
+
+	note, _ := svc.Create(ctx, userID, "A", "")
+
+	if err := svc.Archive(ctx, note.ID, userID); err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+
+	// Normal list must not include it.
+	list, _ := svc.List(ctx, userID, notes.ListFilter{})
+	for _, n := range list {
+		if n.ID == note.ID {
+			t.Fatal("archived note in normal list")
+		}
+	}
+
+	// ListArchived must include it.
+	archived, err := svc.ListArchived(ctx, userID)
+	if err != nil {
+		t.Fatalf("ListArchived: %v", err)
+	}
+	found := false
+	for _, n := range archived {
+		if n.ID == note.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("note not found in ListArchived")
+	}
+}
+
+func TestService_Unarchive(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	svc := notes.NewService(notes.NewRepo(database))
+	ctx := context.Background()
+
+	note, _ := svc.Create(ctx, userID, "B", "")
+	svc.Archive(ctx, note.ID, userID) //nolint:errcheck
+
+	if err := svc.Unarchive(ctx, note.ID, userID); err != nil {
+		t.Fatalf("Unarchive: %v", err)
+	}
+
+	list, _ := svc.List(ctx, userID, notes.ListFilter{})
+	found := false
+	for _, n := range list {
+		if n.ID == note.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("unarchived note not in normal list")
+	}
+}

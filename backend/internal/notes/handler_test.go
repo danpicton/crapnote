@@ -254,3 +254,108 @@ func TestNotesHandler_Get_NotFound(t *testing.T) {
 
 // Unused import guard — time is referenced indirectly.
 var _ = time.Now
+
+func TestNotesHandler_Archive(t *testing.T) {
+	h, user := newHandlerFixture(t)
+
+	// Create a note.
+	req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(`{"title":"Archive me"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.Create(w, req)
+	var created map[string]any
+	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
+	id := int64(created["id"].(float64))
+
+	// Archive it.
+	req2 := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/api/notes/%d/archive", id), nil)
+	req2.SetPathValue("id", fmt.Sprintf("%d", id))
+	req2 = withUser(req2, user)
+	w2 := httptest.NewRecorder()
+	h.Archive(w2, req2)
+
+	if w2.Code != http.StatusNoContent {
+		t.Fatalf("Archive: expected 204, got %d: %s", w2.Code, w2.Body)
+	}
+
+	// Normal GET should now 404.
+	req3 := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/notes/%d", id), nil)
+	req3.SetPathValue("id", fmt.Sprintf("%d", id))
+	req3 = withUser(req3, user)
+	w3 := httptest.NewRecorder()
+	h.Get(w3, req3)
+	if w3.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for archived note, got %d", w3.Code)
+	}
+}
+
+func TestNotesHandler_ListArchived(t *testing.T) {
+	h, user := newHandlerFixture(t)
+
+	// Create and archive a note.
+	req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(`{"title":"In Archive"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.Create(w, req)
+	var created map[string]any
+	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
+	id := int64(created["id"].(float64))
+
+	req2 := httptest.NewRequest(http.MethodPatch, fmt.Sprintf("/api/notes/%d/archive", id), nil)
+	req2.SetPathValue("id", fmt.Sprintf("%d", id))
+	req2 = withUser(req2, user)
+	w2 := httptest.NewRecorder()
+	h.Archive(w2, req2)
+
+	// ListArchived should return it.
+	req3 := httptest.NewRequest(http.MethodGet, "/api/archive", nil)
+	req3 = withUser(req3, user)
+	w3 := httptest.NewRecorder()
+	h.ListArchived(w3, req3)
+
+	if w3.Code != http.StatusOK {
+		t.Fatalf("ListArchived: expected 200, got %d", w3.Code)
+	}
+	var list []map[string]any
+	json.NewDecoder(w3.Body).Decode(&list) //nolint:errcheck
+	if len(list) != 1 || list[0]["title"] != "In Archive" {
+		t.Fatalf("unexpected archived list: %v", list)
+	}
+}
+
+func TestNotesHandler_Unarchive(t *testing.T) {
+	h, user := newHandlerFixture(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(`{"title":"Restore"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.Create(w, req)
+	var created map[string]any
+	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
+	id := int64(created["id"].(float64))
+
+	// Archive then unarchive.
+	for _, method := range []func(http.ResponseWriter, *http.Request){h.Archive, h.Unarchive} {
+		r := httptest.NewRequest(http.MethodPatch, "/", nil)
+		r.SetPathValue("id", fmt.Sprintf("%d", id))
+		r = withUser(r, user)
+		ww := httptest.NewRecorder()
+		method(ww, r)
+		if ww.Code != http.StatusNoContent {
+			t.Fatalf("expected 204, got %d: %s", ww.Code, ww.Body)
+		}
+	}
+
+	// Note should be back in normal GET.
+	req2 := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/notes/%d", id), nil)
+	req2.SetPathValue("id", fmt.Sprintf("%d", id))
+	req2 = withUser(req2, user)
+	w2 := httptest.NewRecorder()
+	h.Get(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 after unarchive, got %d", w2.Code)
+	}
+}

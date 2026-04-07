@@ -14,9 +14,11 @@
 		await auth.init();
 		const currentPath = $page.url.pathname;
 		if (!auth.user && !PUBLIC_PATHS.includes(currentPath)) {
-			goto('/login');
+			// Replace the current history entry so "back" doesn't return to the
+			// protected page after being redirected to login.
+			goto('/login', { replaceState: true });
 		} else if (auth.user && currentPath === '/login') {
-			goto('/');
+			goto('/', { replaceState: true });
 		}
 	});
 </script>

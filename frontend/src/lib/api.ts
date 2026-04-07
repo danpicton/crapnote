@@ -11,6 +11,7 @@ export interface Note {
 	body: string;
 	starred: boolean;
 	pinned: boolean;
+	archived: boolean;
 	created_at: string;
 	updated_at: string;
 }
@@ -82,6 +83,9 @@ export const api = {
 		delete: (id: number) => request<void>('DELETE', `/api/notes/${id}`),
 		toggleStar: (id: number) => request<Note>('PATCH', `/api/notes/${id}/star`),
 		togglePin: (id: number) => request<Note>('PATCH', `/api/notes/${id}/pin`),
+		archive: (id: number) => request<void>('PATCH', `/api/notes/${id}/archive`),
+		unarchive: (id: number) => request<void>('PATCH', `/api/notes/${id}/unarchive`),
+		listArchived: () => request<Note[]>('GET', '/api/archive'),
 	},
 
 	tags: {

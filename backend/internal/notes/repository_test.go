@@ -223,3 +223,117 @@ func TestNoteRepo_SoftDelete(t *testing.T) {
 		t.Fatalf("expected ErrNotFound for deleted note, got %v", err)
 	}
 }
+
+func TestNoteRepo_Archive(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, _ := repo.Create(ctx, userID, "Archivable", "body")
+
+	if err := repo.Archive(ctx, note.ID, userID); err != nil {
+		t.Fatalf("Archive: %v", err)
+	}
+
+	// Archived note must not appear in normal list.
+	list, _ := repo.List(ctx, userID, notes.ListFilter{})
+	for _, n := range list {
+		if n.ID == note.ID {
+			t.Fatal("archived note should not appear in normal list")
+		}
+	}
+
+	// Archived note must not be fetchable via Get (normal).
+	_, err := repo.Get(ctx, note.ID, userID)
+	if err != notes.ErrNotFound {
+		t.Fatalf("expected ErrNotFound for archived note via Get, got %v", err)
+	}
+
+	// But it must appear in ListArchived.
+	archived, err := repo.ListArchived(ctx, userID)
+	if err != nil {
+		t.Fatalf("ListArchived: %v", err)
+	}
+	found := false
+	for _, n := range archived {
+		if n.ID == note.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("archived note not found in ListArchived")
+	}
+}
+
+func TestNoteRepo_Unarchive(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, _ := repo.Create(ctx, userID, "Restore me", "body")
+	repo.Archive(ctx, note.ID, userID) //nolint:errcheck
+
+	if err := repo.Unarchive(ctx, note.ID, userID); err != nil {
+		t.Fatalf("Unarchive: %v", err)
+	}
+
+	// Must reappear in normal list.
+	list, _ := repo.List(ctx, userID, notes.ListFilter{})
+	found := false
+	for _, n := range list {
+		if n.ID == note.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("unarchived note should reappear in normal list")
+	}
+}
+
+func TestNoteRepo_ListArchived_ExcludesTrashed(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, _ := repo.Create(ctx, userID, "Both", "")
+	repo.Archive(ctx, note.ID, userID)  //nolint:errcheck
+	repo.SoftDelete(ctx, note.ID, userID) //nolint:errcheck
+
+	archived, _ := repo.ListArchived(ctx, userID)
+	for _, n := range archived {
+		if n.ID == note.ID {
+			t.Fatal("trashed+archived note should not appear in ListArchived")
+		}
+	}
+}
+
+func TestNoteRepo_List_PrefixSearch(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	repo.Create(ctx, userID, "Elephants are large", "big body text")  //nolint:errcheck
+	repo.Create(ctx, userID, "Nothing matches", "other content")       //nolint:errcheck
+
+	// Typing the first few characters of "Elephants" should match the first note.
+	results, err := repo.List(ctx, userID, notes.ListFilter{Search: "Eleph"})
+	if err != nil {
+		t.Fatalf("List with prefix search: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result for prefix 'Eleph', got %d", len(results))
+	}
+	if results[0].Title != "Elephants are large" {
+		t.Fatalf("unexpected title: %s", results[0].Title)
+	}
+
+	// Single character prefix must match.
+	results2, _ := repo.List(ctx, userID, notes.ListFilter{Search: "E"})
+	if len(results2) != 1 {
+		t.Fatalf("expected 1 result for prefix 'E', got %d", len(results2))
+	}
+}

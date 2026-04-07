@@ -51,6 +51,9 @@ func newMux(
 	protected("DELETE", "/api/notes/{id}", notesHandler.Delete)
 	protected("PATCH", "/api/notes/{id}/star", notesHandler.ToggleStar)
 	protected("PATCH", "/api/notes/{id}/pin", notesHandler.TogglePin)
+	protected("PATCH", "/api/notes/{id}/archive", notesHandler.Archive)
+	protected("PATCH", "/api/notes/{id}/unarchive", notesHandler.Unarchive)
+	protected("GET", "/api/archive", notesHandler.ListArchived)
 
 	// Note–tag associations
 	protected("POST", "/api/notes/{id}/tags", tagsHandler.AddToNote)
