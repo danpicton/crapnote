@@ -9,6 +9,7 @@ export default defineConfig({
 		alias: {
 			$lib: path.resolve('./src/lib'),
 			$app: path.resolve('./src/__mocks__/app'),
+			'lucide-svelte': path.resolve('./src/__mocks__/lucide-svelte.ts'),
 		},
 	},
 	test: {
