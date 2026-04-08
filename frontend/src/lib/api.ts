@@ -93,6 +93,7 @@ export const api = {
 		create: (name: string) => request<Tag>('POST', '/api/tags', { name }),
 		rename: (id: number, name: string) => request<Tag>('PUT', `/api/tags/${id}`, { name }),
 		delete: (id: number) => request<void>('DELETE', `/api/tags/${id}`),
+		listForNote: (noteId: number) => request<Tag[]>('GET', `/api/notes/${noteId}/tags`),
 		addToNote: (noteId: number, tagId: number) =>
 			request<void>('POST', `/api/notes/${noteId}/tags`, { tag_id: tagId }),
 		removeFromNote: (noteId: number, tagId: number) =>

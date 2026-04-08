@@ -14,7 +14,7 @@
 	import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 	import { toggleUnderlineCommand } from '$lib/milkdown/underline';
 	import type { CmdKey } from '@milkdown/kit/core';
-	import { api, type Note } from '$lib/api';
+	import { api, type Note, type Tag } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
 
@@ -23,7 +23,7 @@
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, Minus, Undo2, Redo2,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
-		ChevronLeft, ChevronRight, Search,
+		ChevronLeft, ChevronRight, Search, Tag as TagIcon,
 	} from 'lucide-svelte';
 
 	let notes = $state<Note[]>([]);
@@ -37,6 +37,12 @@
 	// Editor command ref
 	let editorRef = $state<EditorRef | null>(null);
 
+	// Tags
+	let allTags = $state<Tag[]>([]);
+	let noteTags = $state<Tag[]>([]);
+	let showTagPopover = $state(false);
+	let newTagName = $state('');
+
 	let selectedNote = $derived(notes.find((n) => n.id === selectedId) ?? null);
 
 	async function loadNotes() {
@@ -47,7 +53,11 @@
 
 	onMount(async () => {
 		await loadNotes();
-		if (notes.length > 0) selectedId = notes[0].id;
+		allTags = await api.tags.list();
+		if (notes.length > 0) {
+			selectedId = notes[0].id;
+			noteTags = await api.tags.listForNote(notes[0].id);
+		}
 	});
 
 	async function newNote() {
@@ -62,9 +72,38 @@
 		mobileShowEditor = true;
 	}
 
-	function selectNote(id: number) {
+	async function selectNote(id: number) {
 		selectedId = id;
 		mobileShowEditor = true;
+		showTagPopover = false;
+		noteTags = await api.tags.listForNote(id);
+	}
+
+	async function toggleTag(tag: Tag) {
+		if (!selectedId) return;
+		const has = noteTags.find(t => t.id === tag.id);
+		if (has) {
+			await api.tags.removeFromNote(selectedId, tag.id);
+			noteTags = noteTags.filter(t => t.id !== tag.id);
+		} else {
+			await api.tags.addToNote(selectedId, tag.id);
+			noteTags = [...noteTags, tag];
+		}
+	}
+
+	async function createAndAddTag() {
+		if (!selectedId || !newTagName.trim()) return;
+		const name = newTagName.trim();
+		let tag = allTags.find(t => t.name.toLowerCase() === name.toLowerCase());
+		if (!tag) {
+			tag = await api.tags.create(name);
+			allTags = [...allTags, tag];
+		}
+		if (!noteTags.find(t => t.id === tag!.id)) {
+			await api.tags.addToNote(selectedId, tag.id);
+			noteTags = [...noteTags, tag];
+		}
+		newTagName = '';
 	}
 
 	function scheduleAutoSave(field: 'title' | 'body', value: string) {
@@ -262,6 +301,40 @@
 				</button>
 				<span class="tb-spacer"></span>
 				<span class="save-status">{saving ? 'Saving…' : ''}</span>
+
+				<!-- Tag popover -->
+				<div class="tag-popover-wrap">
+					<button
+						class="tb-btn tag-tb-btn"
+						class:tag-active={noteTags.length > 0}
+						onclick={() => (showTagPopover = !showTagPopover)}
+						title="Tags"
+					>
+						<TagIcon size={14} />
+						{#if noteTags.length > 0}<span class="tb-tag-count">{noteTags.length}</span>{/if}
+					</button>
+					{#if showTagPopover}
+						<div class="tag-popover">
+							<p class="popover-label">Tags</p>
+							{#each allTags as tag (tag.id)}
+								<label class="popover-item">
+									<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
+									{tag.name}
+								</label>
+							{/each}
+							<div class="popover-new">
+								<input
+									class="popover-new-input"
+									type="text"
+									placeholder="New tag…"
+									bind:value={newTagName}
+									onkeydown={(e) => e.key === 'Enter' && createAndAddTag()}
+								/>
+								<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={12} /></button>
+							</div>
+						</div>
+					{/if}
+				</div>
 			</div>
 
 			<!-- Title -->
@@ -273,6 +346,13 @@
 					oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
 					placeholder="Note title"
 				/>
+				{#if noteTags.length > 0}
+					<div class="note-tag-chips">
+						{#each noteTags as tag (tag.id)}
+							<span class="note-tag-chip"><TagIcon size={9} />{tag.name}</span>
+						{/each}
+					</div>
+				{/if}
 			</div>
 
 			<!-- Editor body -->
@@ -524,6 +604,102 @@
 		padding: 0.75rem 1rem 0.5rem;
 		border-bottom: 1px solid #e5e7eb;
 		flex-shrink: 0;
+	}
+
+	/* ─── Tag toolbar popover ────────────────────────────── */
+	.tag-popover-wrap { position: relative; }
+
+	.tag-tb-btn { gap: 0.2rem; }
+	.tag-tb-btn.tag-active { color: #6366f1; }
+
+	.tb-tag-count {
+		background: #6366f1;
+		color: white;
+		border-radius: 999px;
+		padding: 0 0.3rem;
+		font-size: 0.6rem;
+	}
+
+	.tag-popover {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 6px);
+		background: white;
+		border: 1px solid #e5e7eb;
+		border-radius: 0.5rem;
+		box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+		padding: 0.5rem;
+		min-width: 11rem;
+		z-index: 30;
+	}
+
+	.popover-label {
+		font-size: 0.7rem;
+		font-weight: 600;
+		color: #9ca3af;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin: 0 0 0.25rem;
+		padding: 0 0.25rem;
+	}
+
+	.popover-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.3rem 0.25rem;
+		border-radius: 0.25rem;
+		cursor: pointer;
+		font-size: 0.85rem;
+	}
+	.popover-item:hover { background: #f3f4f6; }
+
+	.popover-new {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		margin-top: 0.375rem;
+		padding-top: 0.375rem;
+		border-top: 1px solid #f3f4f6;
+	}
+
+	.popover-new-input {
+		flex: 1;
+		border: none;
+		border-bottom: 1px solid #d1d5db;
+		outline: none;
+		font-size: 0.8rem;
+		padding: 0.15rem 0.1rem;
+		background: transparent;
+	}
+	.popover-new-input:focus { border-color: #6366f1; }
+
+	.popover-add-btn {
+		background: none;
+		border: none;
+		cursor: pointer;
+		color: #6366f1;
+		padding: 0.1rem;
+		display: flex;
+	}
+
+	/* ─── Editor header (title) ──────────────────────────── */
+	.note-tag-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		margin-top: 0.375rem;
+	}
+
+	.note-tag-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.1rem 0.4rem;
+		background: #e0e7ff;
+		color: #4338ca;
+		border-radius: 999px;
+		font-size: 0.7rem;
 	}
 
 	.title-input {
