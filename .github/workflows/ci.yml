@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "claude/**"]
+  pull_request:
+
+jobs:
+  # ── Go backend ──────────────────────────────────────────────────────────────
+  backend:
+    name: Backend (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Download modules
+        run: go mod download
+
+      - name: go vet
+        run: CGO_ENABLED=1 go vet -tags sqlite_fts5 ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.5.0
+          working-directory: backend
+
+      - name: Build (with FTS5)
+        run: CGO_ENABLED=1 go build -tags sqlite_fts5 ./...
+
+      - name: Test (with FTS5)
+        run: CGO_ENABLED=1 go test -tags sqlite_fts5 -race ./...
+
+  # ── Svelte / TypeScript frontend ────────────────────────────────────────────
+  frontend:
+    name: Frontend (Node)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Type-check (svelte-check)
+        run: npm run check
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # ── E2E (Playwright) ────────────────────────────────────────────────────────
+  # Runs after both backend and frontend jobs pass.
+  # Builds the full stack, seeds a test DB, and runs browser tests.
+  e2e:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            e2e/package-lock.json
+
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: frontend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+
+      - name: Copy frontend build into backend embed dir
+        run: cp -r frontend/build/. backend/cmd/server/ui/build/
+
+      - name: Build backend (with FTS5)
+        run: CGO_ENABLED=1 go build -tags sqlite_fts5 -o /tmp/crapnote-server ./cmd/server/
+        working-directory: backend
+
+      - name: Install E2E deps
+        run: npm ci
+        working-directory: e2e
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: e2e
+
+      - name: Run E2E tests
+        run: npx playwright test
+        working-directory: e2e
+        env:
+          SERVER_BIN: /tmp/crapnote-server

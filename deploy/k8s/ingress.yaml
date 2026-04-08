@@ -1,0 +1,18 @@
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: crapnote
+  namespace: crapnote
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`notes.example.com`)
+      kind: Rule
+      services:
+        - name: crapnote
+          port: 80
+  tls:
+    secretName: crapnote-tls

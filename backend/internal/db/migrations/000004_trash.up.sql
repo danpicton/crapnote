@@ -1,0 +1,9 @@
+CREATE TABLE IF NOT EXISTS trash (
+    id         INTEGER  PRIMARY KEY AUTOINCREMENT,
+    note_id    INTEGER  NOT NULL UNIQUE REFERENCES notes(id) ON DELETE CASCADE,
+    user_id    INTEGER  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    deleted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_trash_user_id   ON trash(user_id);
+CREATE INDEX IF NOT EXISTS idx_trash_deleted_at ON trash(deleted_at);
