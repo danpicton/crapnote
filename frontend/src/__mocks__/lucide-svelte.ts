@@ -42,6 +42,7 @@ export {
 	noop as Shield,
 	noop as Star,
 	noop as Sun,
+	noop as Tag,
 	noop as Trash,
 	noop as Trash2,
 	noop as Underline,

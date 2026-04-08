@@ -122,6 +122,30 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GetForNote handles GET /api/notes/{id}/tags
+func (h *Handler) GetForNote(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	noteID, err := parseID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid note id")
+		return
+	}
+	list, err := h.svc.ListForNote(r.Context(), noteID, u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	out := make([]tagResponse, 0, len(list))
+	for _, t := range list {
+		out = append(out, tagToResponse(t))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // AddToNote handles POST /api/notes/{id}/tags
 func (h *Handler) AddToNote(w http.ResponseWriter, r *http.Request) {
 	u := auth.UserFromContext(r.Context())

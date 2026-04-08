@@ -30,7 +30,7 @@ vi.mock('$lib/api', () => ({
 			archive: vi.fn(),
 			listArchived: vi.fn(),
 		},
-		tags: { list: vi.fn() },
+		tags: { list: vi.fn(), listForNote: vi.fn().mockResolvedValue([]) },
 		auth: { logout: vi.fn() },
 	},
 }));
