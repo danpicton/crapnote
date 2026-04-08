@@ -1,6 +1,6 @@
 {
-	"name": "CrapNote",
-	"short_name": "CrapNote",
+	"name": "Crapnote",
+	"short_name": "Crapnote",
 	"description": "A simple, fast notes application",
 	"start_url": "/",
 	"scope": "/",

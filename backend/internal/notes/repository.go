@@ -126,13 +126,18 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 	return result, rows.Err()
 }
 
-// Update sets the title and body of a note. Returns ErrNotFound if the note
-// does not exist or belongs to a different user.
-func (r *Repo) Update(ctx context.Context, id, userID int64, title, body string) (*Note, error) {
+// Update performs a partial update of a note's title and/or body. Only non-nil
+// fields are written; the other field keeps its current value.
+// Returns ErrNotFound if the note does not exist or belongs to a different user.
+func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string) (*Note, error) {
 	now := time.Now().UTC()
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE notes SET title=?, body=?, updated_at=? WHERE id=? AND user_id=?`,
-		title, body, now, id, userID,
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE notes
+		SET title      = CASE WHEN ? IS NOT NULL THEN ? ELSE title END,
+		    body       = CASE WHEN ? IS NOT NULL THEN ? ELSE body  END,
+		    updated_at = ?
+		WHERE id = ? AND user_id = ?`,
+		title, title, body, body, now, id, userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)

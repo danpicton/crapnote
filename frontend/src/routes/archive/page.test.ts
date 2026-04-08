@@ -24,6 +24,7 @@ const mockNote = (overrides = {}) => ({
 beforeEach(() => {
 	vi.clearAllMocks();
 	vi.mocked(api.notes.listArchived).mockResolvedValue([mockNote()]);
+	vi.stubGlobal('confirm', () => true);
 });
 
 describe('Archive page', () => {
@@ -47,7 +48,7 @@ describe('Archive page', () => {
 		vi.mocked(api.notes.unarchive).mockResolvedValueOnce(undefined);
 		render(ArchivePage);
 		await waitFor(() => screen.getByText('Archived Note'));
-		await fireEvent.click(screen.getByRole('button', { name: /unarchive/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /restore from archive/i }));
 		await waitFor(() => expect(api.notes.unarchive).toHaveBeenCalledWith(1));
 	});
 
@@ -55,7 +56,7 @@ describe('Archive page', () => {
 		vi.mocked(api.notes.delete).mockResolvedValueOnce(undefined);
 		render(ArchivePage);
 		await waitFor(() => screen.getByText('Archived Note'));
-		await fireEvent.click(screen.getByRole('button', { name: /delete/i }));
+		await fireEvent.click(screen.getByRole('button', { name: /delete permanently/i }));
 		await waitFor(() => expect(api.notes.delete).toHaveBeenCalledWith(1));
 	});
 });

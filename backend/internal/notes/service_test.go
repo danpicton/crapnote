@@ -54,7 +54,7 @@ func TestService_Update_TitleFromFirstLine(t *testing.T) {
 	note, _ := svc.Create(ctx, userID, "Original", "")
 
 	// When the caller sets an explicit title, it should be stored.
-	updated, err := svc.Update(ctx, note.ID, userID, "Renamed", "body text")
+	updated, err := svc.Update(ctx, note.ID, userID, strPtr("Renamed"), strPtr("body text"))
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestService_WrongUser_Blocked(t *testing.T) {
 		t.Fatalf("expected ErrNotFound for wrong user on Get, got %v", err)
 	}
 
-	_, err = svc.Update(ctx, note.ID, userID+1, "Hack", "")
+	_, err = svc.Update(ctx, note.ID, userID+1, strPtr("Hack"), strPtr(""))
 	if err != notes.ErrNotFound {
 		t.Fatalf("expected ErrNotFound for wrong user on Update, got %v", err)
 	}

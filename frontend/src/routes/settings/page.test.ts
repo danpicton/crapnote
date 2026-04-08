@@ -15,11 +15,11 @@ describe('Settings page', () => {
 
 	it('shows export notes button', () => {
 		render(SettingsPage);
-		expect(screen.getByRole('link', { name: /export notes/i })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: /export notes/i })).toBeInTheDocument();
 	});
 
 	it('shows back link to notes', () => {
 		render(SettingsPage);
-		expect(screen.getByRole('link', { name: /← notes/i })).toBeInTheDocument();
+		expect(screen.getByRole('link', { name: /back to notes/i })).toBeInTheDocument();
 	});
 });

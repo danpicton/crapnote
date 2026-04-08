@@ -68,7 +68,7 @@ beforeEach(() => {
 describe('Notes page', () => {
 	it('renders the app title', async () => {
 		render(Page);
-		await waitFor(() => expect(screen.getByText('CrapNote')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText('Crapnote')).toBeInTheDocument());
 	});
 
 	it('shows the note list after load', async () => {

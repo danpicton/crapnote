@@ -1,47 +1,82 @@
 /// <reference lib="webworker" />
 
-const CACHE_NAME = 'crapnote-v1';
-const OFFLINE_QUEUE_KEY = 'offline-queue';
+// Bump this version whenever you want to force a cache refresh.
+const CACHE_NAME = 'crapnote-v2';
 
-// Static assets to cache on install
-const PRECACHE_URLS = ['/', '/login'];
-
+// ─── Install: precache the app shell + ALL /_app/ assets ──────────────────────
 self.addEventListener('install', (event) => {
 	event.waitUntil(
-		caches
-			.open(CACHE_NAME)
-			.then((cache) => cache.addAll(PRECACHE_URLS))
-			.then(() => self.skipWaiting())
+		(async () => {
+			const cache = await caches.open(CACHE_NAME);
+			try {
+				// Fetch the app shell HTML and cache it
+				const shellRes = await fetch('/', { cache: 'reload' });
+				if (shellRes.ok) {
+					await cache.put('/', shellRes.clone());
+
+					// Parse the HTML to discover all SvelteKit-generated assets
+					// (modulepreload, stylesheet, and script references under /_app/)
+					const html = await shellRes.text();
+					const assetUrls = new Set();
+					const re = /["'](\/\_app\/[^"'?#]+)["']/g;
+					let m;
+					while ((m = re.exec(html)) !== null) assetUrls.add(m[1]);
+
+					// Cache every discovered asset in parallel
+					await Promise.allSettled(
+						Array.from(assetUrls).map(async (url) => {
+							const res = await fetch(url, { cache: 'reload' });
+							if (res.ok) await cache.put(url, res);
+						})
+					);
+				}
+
+				// Also precache the login page
+				const loginRes = await fetch('/login', { cache: 'reload' });
+				if (loginRes.ok) await cache.put('/login', loginRes.clone());
+			} catch {
+				// If we're offline during install just skip precaching — the
+				// cache-first handler will populate the cache on the next online visit.
+			}
+
+			// Take control immediately without waiting for old SW to go away.
+			await self.skipWaiting();
+		})()
 	);
 });
 
+// ─── Activate: purge old caches, claim all open pages ─────────────────────────
 self.addEventListener('activate', (event) => {
 	event.waitUntil(
 		caches
 			.keys()
-			.then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))))
+			.then((keys) =>
+				Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+			)
 			.then(() => self.clients.claim())
 	);
 });
 
+// ─── Fetch: route API vs. static ──────────────────────────────────────────────
 self.addEventListener('fetch', (event) => {
 	const { request } = event;
 	const url = new URL(request.url);
 
-	// For API requests: network-first, queue writes when offline
+	// Only handle same-origin requests
+	if (url.origin !== self.location.origin) return;
+
 	if (url.pathname.startsWith('/api/')) {
+		// API requests: network-first; queue mutating requests when offline
 		const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
-		if (isWrite) {
-			event.respondWith(networkOrQueue(request));
-		} else {
-			event.respondWith(networkFirst(request));
-		}
+		event.respondWith(isWrite ? networkOrQueue(request) : networkFirst(request));
 		return;
 	}
 
-	// Static assets: cache-first
+	// Everything else (app shell, JS bundles, CSS): cache-first
 	event.respondWith(cacheFirst(request));
 });
+
+// ─── Strategy helpers ─────────────────────────────────────────────────────────
 
 async function networkFirst(request) {
 	try {
@@ -53,10 +88,13 @@ async function networkFirst(request) {
 		return response;
 	} catch {
 		const cached = await caches.match(request);
-		return cached ?? new Response('{"error":"offline"}', {
-			status: 503,
-			headers: { 'Content-Type': 'application/json' },
-		});
+		return (
+			cached ??
+			new Response('{"error":"offline"}', {
+				status: 503,
+				headers: { 'Content-Type': 'application/json' },
+			})
+		);
 	}
 }
 
@@ -71,6 +109,11 @@ async function cacheFirst(request) {
 		}
 		return response;
 	} catch {
+		// Return offline page for navigation requests; 503 for assets
+		if (request.mode === 'navigate') {
+			const shell = await caches.match('/');
+			if (shell) return shell;
+		}
 		return new Response('Offline', { status: 503 });
 	}
 }
@@ -79,7 +122,6 @@ async function networkOrQueue(request) {
 	try {
 		return await fetch(request.clone());
 	} catch {
-		// Offline: queue the request for later replay
 		await enqueue(request);
 		return new Response(JSON.stringify({ queued: true }), {
 			status: 202,
@@ -87,6 +129,8 @@ async function networkOrQueue(request) {
 		});
 	}
 }
+
+// ─── Offline write queue (IndexedDB) ──────────────────────────────────────────
 
 async function enqueue(request) {
 	const body = await request.text();
@@ -115,7 +159,6 @@ async function flushQueue() {
 		req.onsuccess = () => resolve(req.result);
 		req.onerror = () => reject(req.error);
 	});
-
 	for (const entry of entries) {
 		try {
 			const response = await fetch(entry.url, {
@@ -123,12 +166,9 @@ async function flushQueue() {
 				headers: entry.headers,
 				body: entry.body || undefined,
 			});
-			if (response.ok) {
-				store.delete(entry.id);
-			}
+			if (response.ok) store.delete(entry.id);
 		} catch {
-			// Still offline, leave in queue
-			break;
+			break; // still offline
 		}
 	}
 }
@@ -147,16 +187,10 @@ function openDB() {
 	});
 }
 
-// Flush queued requests when back online
 self.addEventListener('sync', (event) => {
-	if (event.tag === 'flush-offline-queue') {
-		event.waitUntil(flushQueue());
-	}
+	if (event.tag === 'flush-offline-queue') event.waitUntil(flushQueue());
 });
 
-// Also flush on message from page
 self.addEventListener('message', (event) => {
-	if (event.data?.type === 'FLUSH_QUEUE') {
-		event.waitUntil(flushQueue());
-	}
+	if (event.data?.type === 'FLUSH_QUEUE') event.waitUntil(flushQueue());
 });

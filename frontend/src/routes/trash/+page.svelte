@@ -34,7 +34,7 @@
 </script>
 
 <svelte:head>
-	<title>Trash — CrapNote</title>
+	<title>Trash — Crapnote</title>
 </svelte:head>
 
 <div class="page">

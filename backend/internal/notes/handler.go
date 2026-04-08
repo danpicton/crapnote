@@ -122,8 +122,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Title string `json:"title"`
-		Body  string `json:"body"`
+		Title *string `json:"title"`
+		Body  *string `json:"body"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")

@@ -27,11 +27,11 @@
 </script>
 
 <svelte:head>
-	<title>Log in — CrapNote</title>
+	<title>Log in — Crapnote</title>
 </svelte:head>
 
 <div class="login-container">
-	<h1>CrapNote</h1>
+	<h1>Crapnote</h1>
 	<form onsubmit={handleSubmit}>
 		{#if error}
 			<p role="alert" class="error">{error}</p>

@@ -5,6 +5,7 @@ export {
 	noop as Activity,
 	noop as AlertCircle,
 	noop as Archive,
+	noop as ArchiveRestore,
 	noop as Bold,
 	noop as Check,
 	noop as ChevronLeft,

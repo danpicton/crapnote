@@ -62,7 +62,7 @@
 </script>
 
 <svelte:head>
-	<title>User Management — CrapNote</title>
+	<title>User Management — Crapnote</title>
 </svelte:head>
 
 <div class="page">

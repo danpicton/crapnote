@@ -130,14 +130,14 @@
 </script>
 
 <svelte:head>
-	<title>CrapNote</title>
+	<title>Crapnote</title>
 </svelte:head>
 
 <div class="app" class:mobile-editor={mobileShowEditor}>
 	<!-- ── Sidebar ── -->
 	<aside class="sidebar">
 		<header class="sidebar-header">
-			<span class="app-name">CrapNote</span>
+			<span class="app-name">Crapnote</span>
 			<button class="hdr-btn" onclick={newNote} title="New note" aria-label="New note">
 				<Plus size={18} />
 			</button>
@@ -188,8 +188,8 @@
 		</ul>
 
 		<div class="sidebar-bottom">
-			<a href="/archive" class="bottom-btn" title="Archive">
-				<Archive size={16} /><span class="bottom-label">Archive</span>
+			<a href="/archive" class="bottom-btn icon-only" title="Archive">
+				<Archive size={16} />
 			</a>
 			<div class="bottom-right">
 				<a href="/settings" class="bottom-btn icon-only" title="Settings">
@@ -298,6 +298,7 @@
 		border-right: 1px solid #e5e7eb;
 		background: #f9fafb;
 		flex-shrink: 0;
+		overflow: hidden; /* clip children; note-list handles its own scroll */
 	}
 
 	.sidebar-header {
@@ -306,6 +307,7 @@
 		justify-content: space-between;
 		padding: 0.75rem 1rem;
 		border-bottom: 1px solid #e5e7eb;
+		flex-shrink: 0; /* never pushed off-screen */
 	}
 
 	.app-name { font-weight: 700; font-size: 1.125rem; }
@@ -329,6 +331,7 @@
 		padding: 0.5rem 0.75rem;
 		border-bottom: 1px solid #e5e7eb;
 		color: #9ca3af;
+		flex-shrink: 0; /* always visible above note list */
 	}
 
 	.search-box input {
@@ -343,6 +346,7 @@
 	/* ─── Note list ──────────────────────────────────────── */
 	.note-list {
 		flex: 1;
+		min-height: 0; /* required: allows flex-child to shrink below content height */
 		overflow-y: auto;
 		list-style: none;
 		margin: 0;
@@ -429,6 +433,7 @@
 		justify-content: space-between;
 		padding: 0.5rem 0.75rem;
 		border-top: 1px solid #e5e7eb;
+		flex-shrink: 0; /* always visible below note list */
 	}
 
 	.bottom-right { display: flex; gap: 0.25rem; }
@@ -448,7 +453,6 @@
 	}
 	.bottom-btn:hover { background: #e5e7eb; color: #374151; }
 	.bottom-btn.icon-only { padding: 0.375rem; }
-	.bottom-label { font-size: 0.8rem; }
 
 	/* ─── Editor pane ────────────────────────────────────── */
 	.editor-pane {
@@ -456,6 +460,7 @@
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
+		min-height: 0; /* allow flex shrinking */
 		overflow: hidden;
 	}
 

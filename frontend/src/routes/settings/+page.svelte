@@ -1,16 +1,29 @@
 <script lang="ts">
+	import { ChevronLeft } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 
 	let exportPassword = $state('');
+
+	function doExport() {
+		const url = exportPassword
+			? `/api/export?password=${encodeURIComponent(exportPassword)}`
+			: '/api/export';
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = '';
+		a.click();
+	}
 </script>
 
 <svelte:head>
-	<title>Settings — CrapNote</title>
+	<title>Settings — Crapnote</title>
 </svelte:head>
 
 <div class="page">
 	<header class="page-header">
-		<a href="/" class="back-link">← Notes</a>
+		<a href="/" class="back-btn" title="Back to notes" aria-label="Back to notes">
+			<ChevronLeft size={20} />
+		</a>
 		<h1>Settings</h1>
 	</header>
 
@@ -24,13 +37,9 @@
 				bind:value={exportPassword}
 				autocomplete="new-password"
 			/>
-			<a
-				href={exportPassword ? `/api/export?password=${encodeURIComponent(exportPassword)}` : '/api/export'}
-				class="export-btn"
-				download
-			>
+			<button class="export-btn" onclick={doExport}>
 				Export notes
-			</a>
+			</button>
 		</div>
 	</section>
 
@@ -53,21 +62,30 @@
 	.page-header {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
+		gap: 0.5rem;
 		margin-bottom: 1.5rem;
 	}
 
-	h1 { flex: 1; font-size: 1.5rem; margin: 0; }
-	h2 { font-size: 1rem; margin: 0 0 0.5rem; color: #374151; }
+	.back-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.25rem;
+		border-radius: 0.375rem;
+		color: #6b7280;
+		text-decoration: none;
+		flex-shrink: 0;
+	}
+	.back-btn:hover { background: #f3f4f6; color: #111827; }
 
-	.back-link { color: #6366f1; text-decoration: none; font-size: 0.875rem; }
+	h1 { font-size: 1.5rem; margin: 0; }
+	h2 { font-size: 1rem; margin: 0 0 0.5rem; color: #374151; }
 
 	.section {
 		margin-bottom: 2rem;
 		padding-bottom: 1.5rem;
 		border-bottom: 1px solid #e5e7eb;
 	}
-
 	.section:last-child { border-bottom: none; }
 
 	.hint { font-size: 0.875rem; color: #6b7280; margin: 0 0 0.75rem; }
@@ -96,10 +114,8 @@
 		border-radius: 0.375rem;
 		cursor: pointer;
 		font-size: 0.875rem;
-		text-decoration: none;
 		white-space: nowrap;
 	}
-
 	.export-btn:hover { background: #4f46e5; }
 
 	.link-btn {
@@ -108,6 +124,5 @@
 		font-size: 0.875rem;
 		text-decoration: none;
 	}
-
 	.link-btn:hover { text-decoration: underline; }
 </style>

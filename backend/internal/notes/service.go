@@ -34,10 +34,12 @@ func (s *Service) List(ctx context.Context, userID int64, filter ListFilter) ([]
 	return s.repo.List(ctx, userID, filter)
 }
 
-// Update updates a note's title and body. An empty title is re-defaulted.
-func (s *Service) Update(ctx context.Context, id, userID int64, title, body string) (*Note, error) {
-	if title == "" {
-		title = fmt.Sprintf("Note - %s", time.Now().UTC().Format("2006-01-02 15:04:05"))
+// Update performs a partial update. Only non-nil fields are written.
+// If title is provided as an empty string it is replaced with a timestamp default.
+func (s *Service) Update(ctx context.Context, id, userID int64, title, body *string) (*Note, error) {
+	if title != nil && *title == "" {
+		t := fmt.Sprintf("Note - %s", time.Now().UTC().Format("2006-01-02 15:04:05"))
+		title = &t
 	}
 	return s.repo.Update(ctx, id, userID, title, body)
 }

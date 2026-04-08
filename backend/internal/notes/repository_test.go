@@ -9,6 +9,8 @@ import (
 	"github.com/danpicton/crapnote/internal/notes"
 )
 
+func strPtr(s string) *string { return &s }
+
 func openTestDB(t *testing.T) *db.DB {
 	t.Helper()
 	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
@@ -135,7 +137,7 @@ func TestNoteRepo_Update(t *testing.T) {
 	note, _ := repo.Create(ctx, userID, "Old", "old body")
 	time.Sleep(10 * time.Millisecond) // ensure updated_at differs
 
-	updated, err := repo.Update(ctx, note.ID, userID, "New Title", "new body")
+	updated, err := repo.Update(ctx, note.ID, userID, strPtr("New Title"), strPtr("new body"))
 	if err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -154,7 +156,7 @@ func TestNoteRepo_Update_WrongUser(t *testing.T) {
 	ctx := context.Background()
 
 	note, _ := repo.Create(ctx, userID, "Mine", "")
-	_, err := repo.Update(ctx, note.ID, userID+999, "Hacked", "")
+	_, err := repo.Update(ctx, note.ID, userID+999, strPtr("Hacked"), strPtr(""))
 	if err != notes.ErrNotFound {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
