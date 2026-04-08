@@ -18,7 +18,7 @@ self.addEventListener('install', (event) => {
 					// (modulepreload, stylesheet, and script references under /_app/)
 					const html = await shellRes.text();
 					const assetUrls = new Set();
-					const re = /["'](\/\_app\/[^"'?#]+)["']/g;
+					const re = /["'](\/_app\/[^"'?#]+)["']/g;
 					let m;
 					while ((m = re.exec(html)) !== null) assetUrls.add(m[1]);
 

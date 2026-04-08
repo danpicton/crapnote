@@ -51,7 +51,6 @@ func sanitiseFilename(title string) string {
 // If password is non-empty each entry is AES-256 encrypted.
 func Build(w io.Writer, noteList []*notes.Note, password string) error {
 	zw := yzip.NewWriter(w)
-	defer zw.Close()
 
 	seen := make(map[string]int)
 	for _, n := range noteList {
@@ -79,6 +78,10 @@ func Build(w io.Writer, noteList []*notes.Note, password string) error {
 		if _, err := io.Copy(fw, bytes.NewBufferString(content)); err != nil {
 			return fmt.Errorf("write entry %q: %w", name, err)
 		}
+	}
+	// Close must be called to flush the zip central directory.
+	if err := zw.Close(); err != nil {
+		return fmt.Errorf("finalise zip: %w", err)
 	}
 	return nil
 }

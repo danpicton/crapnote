@@ -13,7 +13,7 @@
 	} from '@milkdown/kit/preset/commonmark';
 	import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 	import { toggleUnderlineCommand } from '$lib/milkdown/underline';
-	import { api, type Note, type Tag } from '$lib/api';
+	import { api, type Note } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
 
@@ -26,7 +26,7 @@
 	} from 'lucide-svelte';
 
 	let notes = $state<Note[]>([]);
-	let tags = $state<Tag[]>([]);
+
 	let selectedId = $state<number | null>(null);
 	let search = $state('');
 	let saving = $state(false);
@@ -45,7 +45,7 @@
 	}
 
 	onMount(async () => {
-		await Promise.all([loadNotes(), api.tags.list().then((t) => (tags = t))]);
+		await loadNotes();
 		if (notes.length > 0) selectedId = notes[0].id;
 	});
 

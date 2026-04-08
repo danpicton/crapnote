@@ -2,8 +2,6 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
-	import type { User } from '$lib/api';
-
 	interface AdminUser {
 		id: number;
 		username: string;

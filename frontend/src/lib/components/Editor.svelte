@@ -3,11 +3,10 @@
 	import { Editor, rootCtx, defaultValueCtx, commandsCtx } from '@milkdown/kit/core';
 	import {
 		commonmark,
-		createCodeBlockCommand,
 	} from '@milkdown/kit/preset/commonmark';
 	import { history } from '@milkdown/kit/plugin/history';
 	import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
-	import { underlinePlugin, toggleUnderlineCommand } from '$lib/milkdown/underline';
+	import { underlinePlugin } from '$lib/milkdown/underline';
 
 	export interface EditorRef {
 		call: (key: string, payload?: unknown) => void;

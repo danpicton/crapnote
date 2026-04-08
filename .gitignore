@@ -52,3 +52,4 @@ backend/cmd/server/ui/build/favicon.png
 
 # Migrations (generated)
 # migrations/*.sql kept in VCS intentionally
+node_modules/
