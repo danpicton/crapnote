@@ -20,10 +20,13 @@ export default defineConfig({
       name: 'chromium',
       use: {
         browserName: 'chromium',
+        // Allow overriding the browser path for environments where Playwright's
+        // own browser download is unavailable (e.g. the local dev container).
+        // In CI, npx playwright install provides the correct binary automatically.
         launchOptions: {
-          executablePath:
-            process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ??
-            '/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell',
+          ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH && {
+            executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH,
+          }),
         },
       },
     },

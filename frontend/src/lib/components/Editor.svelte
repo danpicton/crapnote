@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { Editor, rootCtx, defaultValueCtx, commandsCtx } from '@milkdown/kit/core';
+	import { Editor, rootCtx, defaultValueCtx, commandsCtx, type CmdKey } from '@milkdown/kit/core';
 	import {
 		commonmark,
 	} from '@milkdown/kit/preset/commonmark';
@@ -9,7 +9,7 @@
 	import { underlinePlugin } from '$lib/milkdown/underline';
 
 	export interface EditorRef {
-		call: (key: string, payload?: unknown) => void;
+		call: (key: string | CmdKey<unknown>, payload?: unknown) => void;
 	}
 
 	interface Props {
