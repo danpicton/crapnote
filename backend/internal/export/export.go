@@ -68,7 +68,7 @@ func Build(w io.Writer, noteList []*notes.Note, password string) error {
 		var fw io.Writer
 		var err error
 		if password != "" {
-			fw, err = zw.Encrypt(name, password, yzip.AES256Encryption)
+			fw, err = zw.Encrypt(name, password, yzip.StandardEncryption)
 		} else {
 			fw, err = zw.Create(name)
 		}
