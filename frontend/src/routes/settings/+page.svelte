@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronLeft } from 'lucide-svelte';
+	import { ChevronLeft, Users } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 
 	let exportPassword = $state('');
@@ -29,7 +29,7 @@
 
 	<section class="section">
 		<h2>Export</h2>
-		<p class="hint">Download all your notes as a ZIP of Markdown files. Optionally protect with a password (AES-256).</p>
+		<p class="hint">Download all your notes as a ZIP of Markdown files. Optionally protect with a password.</p>
 		<div class="export-row">
 			<input
 				type="password"
@@ -46,7 +46,10 @@
 	{#if auth.user?.is_admin}
 		<section class="section">
 			<h2>Administration</h2>
-			<a href="/admin" class="link-btn">User management →</a>
+			<a href="/admin" class="admin-btn" title="User management" aria-label="User management">
+				<Users size={16} />
+				User management
+			</a>
 		</section>
 	{/if}
 
@@ -118,11 +121,15 @@
 	}
 	.export-btn:hover { background: #4f46e5; }
 
-	.link-btn {
-		display: inline-block;
-		color: #6366f1;
+	.admin-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		padding: 0.375rem 0.625rem;
+		border-radius: 0.375rem;
+		color: #6b7280;
 		font-size: 0.875rem;
 		text-decoration: none;
 	}
-	.link-btn:hover { text-decoration: underline; }
+	.admin-btn:hover { background: #f3f4f6; color: #111827; }
 </style>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { ChevronLeft, RotateCcw, Trash2 } from 'lucide-svelte';
 	import { api, type TrashEntry } from '$lib/api';
 
 	let entries = $state<TrashEntry[]>([]);
@@ -38,7 +39,9 @@
 
 <div class="page">
 	<header class="page-header">
-		<a href="/" class="back-link">← Notes</a>
+		<a href="/" class="back-btn" title="Back to notes" aria-label="Back to notes">
+			<ChevronLeft size={20} />
+		</a>
 		<h1>Trash</h1>
 		<button class="danger-btn" onclick={empty} disabled={entries.length === 0}>
 			Empty trash
@@ -61,8 +64,12 @@
 						</span>
 					</div>
 					<div class="entry-actions">
-						<button class="restore-btn" onclick={() => restore(entry.note_id)}>Restore</button>
-						<button class="delete-btn" onclick={() => deleteOne(entry.note_id)}>Delete permanently</button>
+						<button class="icon-btn restore" onclick={() => restore(entry.note_id)} title="Restore note" aria-label="Restore note">
+							<RotateCcw size={15} />
+						</button>
+						<button class="icon-btn delete" onclick={() => deleteOne(entry.note_id)} title="Delete permanently" aria-label="Delete permanently">
+							<Trash2 size={15} />
+						</button>
 					</div>
 				</li>
 			{/each}
@@ -80,21 +87,23 @@
 	.page-header {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
+		gap: 0.5rem;
 		margin-bottom: 1.5rem;
 	}
 
-	h1 {
-		flex: 1;
-		font-size: 1.5rem;
-		margin: 0;
-	}
-
-	.back-link {
-		color: #6366f1;
+	.back-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.25rem;
+		border-radius: 0.375rem;
+		color: #6b7280;
 		text-decoration: none;
-		font-size: 0.875rem;
+		flex-shrink: 0;
 	}
+	.back-btn:hover { background: #f3f4f6; color: #111827; }
+
+	h1 { font-size: 1.5rem; margin: 0; flex: 1; }
 
 	.danger-btn {
 		padding: 0.375rem 0.75rem;
@@ -105,17 +114,9 @@
 		cursor: pointer;
 		font-size: 0.875rem;
 	}
+	.danger-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-	.danger-btn:disabled {
-		opacity: 0.4;
-		cursor: not-allowed;
-	}
-
-	.status {
-		color: #9ca3af;
-		text-align: center;
-		padding: 2rem;
-	}
+	.status { color: #9ca3af; text-align: center; padding: 2rem; }
 
 	.entry-list {
 		list-style: none;
@@ -142,41 +143,29 @@
 		gap: 0.125rem;
 	}
 
-	.entry-title {
-		font-weight: 500;
-	}
+	.entry-title { font-weight: 500; }
 
-	.entry-meta {
-		font-size: 0.75rem;
-		color: #9ca3af;
-	}
+	.entry-meta { font-size: 0.75rem; color: #9ca3af; }
 
-	.countdown {
-		color: #f59e0b;
-	}
+	.countdown { color: #f59e0b; }
 
-	.entry-actions {
+	.entry-actions { display: flex; gap: 0.375rem; }
+
+	.icon-btn {
 		display: flex;
-		gap: 0.5rem;
-	}
-
-	.restore-btn {
-		padding: 0.25rem 0.625rem;
-		background: #6366f1;
-		color: white;
+		align-items: center;
+		justify-content: center;
+		width: 2rem;
+		height: 2rem;
 		border: none;
 		border-radius: 0.375rem;
 		cursor: pointer;
-		font-size: 0.875rem;
+		background: transparent;
 	}
 
-	.delete-btn {
-		padding: 0.25rem 0.625rem;
-		background: #fee2e2;
-		color: #dc2626;
-		border: 1px solid #fecaca;
-		border-radius: 0.375rem;
-		cursor: pointer;
-		font-size: 0.875rem;
-	}
+	.icon-btn.restore { color: #6366f1; }
+	.icon-btn.restore:hover { background: #eef2ff; }
+
+	.icon-btn.delete { color: #dc2626; }
+	.icon-btn.delete:hover { background: #fef2f2; }
 </style>

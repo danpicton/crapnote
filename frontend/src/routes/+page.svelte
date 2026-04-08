@@ -23,7 +23,7 @@
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, Minus, Undo2, Redo2,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
-		ChevronLeft, Search,
+		ChevronLeft, ChevronRight, Search,
 	} from 'lucide-svelte';
 
 	let notes = $state<Note[]>([]);
@@ -139,6 +139,11 @@
 	<aside class="sidebar">
 		<header class="sidebar-header">
 			<span class="app-name">Crapnote</span>
+			{#if selectedId}
+				<button class="hdr-btn mobile-show-editor" onclick={() => (mobileShowEditor = true)} title="View note" aria-label="View note">
+					<ChevronRight size={18} />
+				</button>
+			{/if}
 			<button class="hdr-btn" onclick={newNote} title="New note" aria-label="New note">
 				<Plus size={18} />
 			</button>
@@ -189,9 +194,14 @@
 		</ul>
 
 		<div class="sidebar-bottom">
-			<a href="/archive" class="bottom-btn icon-only" title="Archive">
-				<Archive size={16} />
-			</a>
+			<div class="bottom-left">
+				<a href="/archive" class="bottom-btn icon-only" title="Archive">
+					<Archive size={16} />
+				</a>
+				<a href="/trash" class="bottom-btn icon-only" title="Trash">
+					<Trash2 size={16} />
+				</a>
+			</div>
 			<div class="bottom-right">
 				<a href="/settings" class="bottom-btn icon-only" title="Settings">
 					<Settings size={16} />
@@ -437,6 +447,7 @@
 		flex-shrink: 0; /* always visible below note list */
 	}
 
+	.bottom-left { display: flex; gap: 0.25rem; }
 	.bottom-right { display: flex; gap: 0.25rem; }
 
 	.bottom-btn {
@@ -506,6 +517,7 @@
 	/* Mobile back button — hidden on desktop */
 	.mobile-back { display: none; }
 	.mobile-sep { display: none; }
+	.mobile-show-editor { display: none; }
 
 	/* ─── Editor header (title) ──────────────────────────── */
 	.editor-header {
@@ -579,6 +591,7 @@
 		/* Show mobile back button */
 		.mobile-back { display: flex; }
 		.mobile-sep { display: block; }
+		.mobile-show-editor { display: flex; }
 
 		/* Tighter sidebar padding */
 		.sidebar-header { padding: 0.625rem 1rem; }

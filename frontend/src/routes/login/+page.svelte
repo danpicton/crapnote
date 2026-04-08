@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { api, ApiError } from '$lib/api';
+	import { ApiError } from '$lib/api';
+	import { auth } from '$lib/stores/auth.svelte';
 
 	let username = $state('');
 	let password = $state('');
@@ -12,7 +13,7 @@
 		error = '';
 		submitting = true;
 		try {
-			await api.auth.login(username, password);
+			await auth.login(username, password);
 			goto('/');
 		} catch (err) {
 			if (err instanceof ApiError) {

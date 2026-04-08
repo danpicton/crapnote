@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
+	import { ChevronLeft, UserPlus, Trash2 } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
+
 	interface AdminUser {
 		id: number;
 		username: string;
@@ -65,7 +67,9 @@
 
 <div class="page">
 	<header class="page-header">
-		<a href="/" class="back-link">← Notes</a>
+		<a href="/settings" class="back-btn" title="Back to settings" aria-label="Back to settings">
+			<ChevronLeft size={20} />
+		</a>
 		<h1>User management</h1>
 	</header>
 
@@ -75,23 +79,15 @@
 			<p role="alert" class="error">{createError}</p>
 		{/if}
 		<form onsubmit={createUser} class="create-form">
-			<input
-				type="text"
-				placeholder="Username"
-				bind:value={newUsername}
-				required
-			/>
-			<input
-				type="password"
-				placeholder="Password"
-				bind:value={newPassword}
-				required
-			/>
+			<input type="text" placeholder="Username" bind:value={newUsername} required />
+			<input type="password" placeholder="Password" bind:value={newPassword} required />
 			<label class="checkbox-label">
 				<input type="checkbox" bind:checked={newIsAdmin} />
 				Admin
 			</label>
-			<button type="submit">Create</button>
+			<button type="submit" class="icon-btn create" title="Create user" aria-label="Create user">
+				<UserPlus size={16} />
+			</button>
 		</form>
 	</section>
 
@@ -117,7 +113,9 @@
 							<td>{new Date(user.created_at).toLocaleDateString()}</td>
 							<td>
 								{#if user.id !== auth.user?.id}
-									<button class="delete-btn" onclick={() => deleteUser(user.id)}>Delete</button>
+									<button class="icon-btn delete" onclick={() => deleteUser(user.id)} title="Delete user" aria-label="Delete user">
+										<Trash2 size={14} />
+									</button>
 								{/if}
 							</td>
 						</tr>
@@ -138,30 +136,27 @@
 	.page-header {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
+		gap: 0.5rem;
 		margin-bottom: 1.5rem;
 	}
 
-	h1 {
-		font-size: 1.5rem;
-		margin: 0;
-	}
-
-	h2 {
-		font-size: 1.125rem;
-		margin: 0 0 0.75rem;
-	}
-
-	.back-link {
-		color: #6366f1;
+	.back-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.25rem;
+		border-radius: 0.375rem;
+		color: #6b7280;
 		text-decoration: none;
-		font-size: 0.875rem;
+		flex-shrink: 0;
 	}
+	.back-btn:hover { background: #f3f4f6; color: #111827; }
+
+	h1 { font-size: 1.5rem; margin: 0; }
+	h2 { font-size: 1.125rem; margin: 0 0 0.75rem; }
 
 	.create-section,
-	.users-section {
-		margin-bottom: 2rem;
-	}
+	.users-section { margin-bottom: 2rem; }
 
 	.create-form {
 		display: flex;
@@ -185,15 +180,23 @@
 		font-size: 0.875rem;
 	}
 
-	.create-form button {
-		padding: 0.375rem 0.875rem;
-		background: #6366f1;
-		color: white;
+	.icon-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 2rem;
+		height: 2rem;
 		border: none;
 		border-radius: 0.375rem;
 		cursor: pointer;
-		font-size: 0.875rem;
+		background: transparent;
 	}
+
+	.icon-btn.create { color: #6366f1; }
+	.icon-btn.create:hover { background: #eef2ff; }
+
+	.icon-btn.delete { color: #dc2626; }
+	.icon-btn.delete:hover { background: #fef2f2; }
 
 	.error {
 		color: #dc2626;
@@ -217,18 +220,5 @@
 		border-bottom: 1px solid #e5e7eb;
 	}
 
-	.users-table th {
-		font-weight: 600;
-		color: #6b7280;
-	}
-
-	.delete-btn {
-		padding: 0.25rem 0.5rem;
-		background: #fee2e2;
-		color: #dc2626;
-		border: 1px solid #fecaca;
-		border-radius: 0.25rem;
-		cursor: pointer;
-		font-size: 0.75rem;
-	}
+	.users-table th { font-weight: 600; color: #6b7280; }
 </style>
