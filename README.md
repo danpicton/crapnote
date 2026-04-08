@@ -116,15 +116,22 @@ Migrations live in `backend/internal/db/migrations/` as versioned SQL files (`00
 
 ### Schema
 
-```
-users       id, username, password_hash, salt, is_admin, created_at
-sessions    id, user_id, expires_at, created_at
-notes       id, user_id, title, body, starred, pinned, created_at, updated_at
-tags        id, user_id, name, created_at
-note_tags   note_id, tag_id
-trash       id, note_id, user_id, deleted_at
-notes_fts   FTS5 virtual table (mirrors notes.title + notes.body, kept in sync via triggers)
-```
+| Table | Purpose |
+|---|---|
+| `users` | User accounts — username, bcrypt password hash, salt, admin flag |
+| `sessions` | Login sessions — token ID, user reference, expiry timestamp |
+| `notes` | The notes themselves — title, body (markdown), starred/pinned/archived flags, per-user |
+| `tags` | Tag definitions — name, per-user, unique per user |
+| `note_tags` | Many-to-many join between notes and tags |
+| `trash` | Soft-delete records — points to a note in `notes`, records when it was deleted (permanent deletion after 30 days) |
+| `schema_migrations` | Migration tracking — records which `.up.sql` files have been applied |
+| `notes_fts` | FTS5 virtual table mirroring `notes.title` + `notes.body`; kept in sync via INSERT/UPDATE/DELETE triggers |
+| `notes_fts_data` | FTS5 internal: inverted index B-tree data |
+| `notes_fts_config` | FTS5 internal: configuration metadata |
+| `notes_fts_docsize` | FTS5 internal: per-document token counts |
+| `notes_fts_idx` | FTS5 internal: segment index for fast prefix lookups |
+
+The four `notes_fts_*` tables are managed entirely by SQLite — never written to directly.
 
 ---
 
