@@ -43,6 +43,7 @@ backend/server
 backend/cmd/server/ui/build/_app/
 backend/cmd/server/ui/build/manifest.json
 backend/cmd/server/ui/build/sw.js
+backend/cmd/server/ui/build/favicon.png
 
 # SQLite database
 *.db
