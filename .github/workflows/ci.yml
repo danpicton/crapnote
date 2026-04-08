@@ -26,7 +26,7 @@ jobs:
         run: go mod download
 
       - name: go vet
-        run: go vet ./...
+        run: CGO_ENABLED=1 go vet -tags sqlite_fts5 ./...
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
@@ -35,10 +35,10 @@ jobs:
           working-directory: backend
 
       - name: Build (with FTS5)
-        run: CGO_ENABLED=1 go build -tags fts5 ./...
+        run: CGO_ENABLED=1 go build -tags sqlite_fts5 ./...
 
       - name: Test (with FTS5)
-        run: CGO_ENABLED=1 go test -tags fts5 -race ./...
+        run: CGO_ENABLED=1 go test -tags sqlite_fts5 -race ./...
 
   # ── Svelte / TypeScript frontend ────────────────────────────────────────────
   frontend:
@@ -108,7 +108,7 @@ jobs:
         run: cp -r frontend/build/. backend/cmd/server/ui/build/
 
       - name: Build backend (with FTS5)
-        run: CGO_ENABLED=1 go build -tags fts5 -o /tmp/crapnote-server ./cmd/server/
+        run: CGO_ENABLED=1 go build -tags sqlite_fts5 -o /tmp/crapnote-server ./cmd/server/
         working-directory: backend
 
       - name: Install E2E deps

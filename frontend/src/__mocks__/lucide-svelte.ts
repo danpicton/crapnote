@@ -35,6 +35,7 @@ export {
 	noop as Quote,
 	noop as Redo2,
 	noop as RefreshCw,
+	noop as RotateCcw,
 	noop as Search,
 	noop as Settings,
 	noop as Share,
@@ -46,5 +47,7 @@ export {
 	noop as Underline,
 	noop as Undo2,
 	noop as User,
+	noop as UserPlus,
+	noop as Users,
 	noop as X,
 };
