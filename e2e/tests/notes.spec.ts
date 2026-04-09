@@ -12,13 +12,15 @@ async function login(page: Page) {
 async function createNote(page: Page, title: string) {
   await page.getByLabel('New note').click();
   const titleInput = page.getByPlaceholder(/note title/i);
-  // triple-click selects all existing text, then type replaces it atomically
-  await titleInput.click({ clickCount: 3 });
-  // Wait a tick so Svelte's one-way binding doesn't re-set the value mid-type
-  await page.waitForTimeout(50);
-  await titleInput.pressSequentially(title, { delay: 20 });
-  // Wait for the 800ms autosave debounce + network round-trip
-  await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'PUT');
+  // Register the response listener BEFORE fill() so a fast autosave can't
+  // arrive before the listener is attached (race condition).
+  // fill() replaces any existing text atomically and fires Svelte's input
+  // binding without needing keystroke delays or an explicit waitForTimeout.
+  const saved = page.waitForResponse(
+    (r) => r.url().includes('/api/notes') && r.request().method() === 'PUT',
+  );
+  await titleInput.fill(title);
+  await saved;
 }
 
 test.describe('Notes', () => {
@@ -34,19 +36,23 @@ test.describe('Notes', () => {
   test('title change does not erase body', async ({ page }) => {
     await createNote(page, 'My Note');
 
-    // Type in editor
+    // Type in editor (ProseMirror is a contenteditable — pressSequentially is
+    // correct here; fill() does not work on rich-text editors).
     const editor = page.locator('.ProseMirror');
     await editor.click();
+    const bodySaved = page.waitForResponse(
+      (r) => r.url().includes('/api/notes') && r.request().method() === 'PUT',
+    );
     await editor.pressSequentially('Hello world');
-
-    // Wait for body autosave
-    await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'PUT');
+    await bodySaved;
 
     // Rename the note
     const titleInput = page.getByPlaceholder(/note title/i);
-    await titleInput.clear();
-    await titleInput.pressSequentially('Renamed Note', { delay: 20 });
-    await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'PUT');
+    const titleSaved = page.waitForResponse(
+      (r) => r.url().includes('/api/notes') && r.request().method() === 'PUT',
+    );
+    await titleInput.fill('Renamed Note');
+    await titleSaved;
 
     // Reload to confirm both title and body persisted
     await page.reload();
@@ -88,11 +94,12 @@ test.describe('Notes', () => {
     await createNote(page, 'Apple note');
     await createNote(page, 'Banana note');
 
-    // Type into the search box and wait for the API response
     const searchBox = page.getByPlaceholder(/search/i);
-    await searchBox.click();
-    await page.keyboard.type('Apple');
-    await page.waitForResponse((r) => r.url().includes('/api/notes') && r.url().includes('search=Apple'));
+    const searchDone = page.waitForResponse(
+      (r) => r.url().includes('/api/notes') && r.url().includes('search=Apple'),
+    );
+    await searchBox.fill('Apple');
+    await searchDone;
 
     await expect(page.locator('.note-item').filter({ hasText: 'Apple note' })).toBeVisible();
     await expect(page.locator('.note-item').filter({ hasText: 'Banana note' })).not.toBeVisible();
