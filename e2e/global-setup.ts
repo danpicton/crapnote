@@ -23,17 +23,22 @@ export async function startServer() {
     stdio: 'pipe',
   });
 
-  // Wait for the server to be ready
+  // Poll the server's HTTP port rather than watching stderr logs, so that the
+  // readiness check is independent of Go's log format and tests actual TCP
+  // connectivity rather than just process startup.
   await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Server failed to start')), 10_000);
-    // Go's log package writes to stderr by default
-    server.stderr?.on('data', (data: Buffer) => {
-      if (data.toString().includes('listening on')) {
-        clearTimeout(timeout);
-        resolve();
-      }
-    });
-    server.on('error', reject);
+    const deadline = setTimeout(
+      () => reject(new Error('Server failed to start within 10s')),
+      10_000,
+    );
+    server.on('error', (err) => { clearTimeout(deadline); reject(err); });
+
+    const poll = () =>
+      fetch('http://localhost:4173')
+        .then(() => { clearTimeout(deadline); resolve(); })
+        .catch(() => setTimeout(poll, 100));
+
+    setTimeout(poll, 100);
   });
 }
 

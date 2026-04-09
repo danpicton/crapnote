@@ -6,6 +6,9 @@ export default defineConfig({
   timeout: 30_000,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',
+  // SQLite test DB is shared across tests; increase only after adding
+  // per-worker DB isolation (separate server instance per worker).
+  workers: 1,
 
   use: {
     baseURL: 'http://localhost:4173',
