@@ -64,7 +64,6 @@
 
 	.editor-container :global(.milkdown) {
 		max-width: 720px;
-		margin: 0 auto;
 	}
 
 	.editor-container :global(.ProseMirror) {

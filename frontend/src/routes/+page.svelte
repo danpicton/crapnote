@@ -42,12 +42,29 @@
 	let noteTags = $state<Tag[]>([]);
 	let showTagPopover = $state(false);
 	let newTagName = $state('');
+	let activeTagId = $state<number | null>(null);
+
+	const PALETTE = [
+		{ bg: '#fee2e2', text: '#991b1b' },
+		{ bg: '#ffedd5', text: '#9a3412' },
+		{ bg: '#fef9c3', text: '#854d0e' },
+		{ bg: '#dcfce7', text: '#166534' },
+		{ bg: '#dbeafe', text: '#1e3a8a' },
+		{ bg: '#ede9fe', text: '#4c1d95' },
+		{ bg: '#fce7f3', text: '#831843' },
+		{ bg: '#e0f2fe', text: '#0c4a6e' },
+	] as const;
+	function tagColor(tag: Tag) { return PALETTE[tag.id % PALETTE.length]; }
+
+	// Only show tags that have at least one note (active or trashed); pure UI erasure
+	let visibleTags = $derived(allTags.filter(t => t.note_count > 0));
 
 	let selectedNote = $derived(notes.find((n) => n.id === selectedId) ?? null);
 
 	async function loadNotes() {
-		const params: { search?: string } = {};
+		const params: { search?: string; tag_id?: number } = {};
 		if (search) params.search = search;
+		if (activeTagId !== null) params.tag_id = activeTagId;
 		notes = await api.notes.list(params);
 	}
 
@@ -79,6 +96,20 @@
 		noteTags = await api.tags.listForNote(id);
 	}
 
+	async function filterByTag(id: number | null) {
+		activeTagId = id;
+		await loadNotes();
+		// If current selection falls outside filtered list, pick first
+		if (notes.length > 0 && !notes.find(n => n.id === selectedId)) {
+			selectedId = notes[0].id;
+			noteTags = await api.tags.listForNote(notes[0].id);
+		} else if (notes.length === 0) {
+			selectedId = null;
+			noteTags = [];
+			mobileShowEditor = false;
+		}
+	}
+
 	async function toggleTag(tag: Tag) {
 		if (!selectedId) return;
 		const has = noteTags.find(t => t.id === tag.id);
@@ -89,6 +120,8 @@
 			await api.tags.addToNote(selectedId, tag.id);
 			noteTags = [...noteTags, tag];
 		}
+		// Refresh note_count so pseudo-erasure stays accurate
+		allTags = await api.tags.list();
 	}
 
 	async function createAndAddTag() {
@@ -97,13 +130,13 @@
 		let tag = allTags.find(t => t.name.toLowerCase() === name.toLowerCase());
 		if (!tag) {
 			tag = await api.tags.create(name);
-			allTags = [...allTags, tag];
 		}
 		if (!noteTags.find(t => t.id === tag!.id)) {
 			await api.tags.addToNote(selectedId, tag.id);
 			noteTags = [...noteTags, tag];
 		}
 		newTagName = '';
+		allTags = await api.tags.list();
 	}
 
 	function scheduleAutoSave(field: 'title' | 'body', value: string) {
@@ -160,6 +193,7 @@
 		await loadNotes();
 		if (notes.length > 0 && !notes.find((n) => n.id === selectedId)) {
 			selectedId = notes[0].id;
+			noteTags = await api.tags.listForNote(notes[0].id);
 		}
 	}
 
@@ -197,6 +231,26 @@
 				oninput={handleSearch}
 			/>
 		</div>
+
+		{#if visibleTags.length > 0}
+			<div class="tag-filter" role="group" aria-label="Filter by tag">
+				<button
+					class="tag-pill"
+					class:tag-pill-active={activeTagId === null}
+					onclick={() => filterByTag(null)}
+				>All</button>
+				{#each visibleTags as tag (tag.id)}
+					{@const c = tagColor(tag)}
+					<button
+						class="tag-pill"
+						class:tag-pill-active={activeTagId === tag.id}
+						style="--tag-bg:{c.bg};--tag-text:{c.text}"
+						onclick={() => filterByTag(activeTagId === tag.id ? null : tag.id)}
+						title="{tag.name} ({tag.note_count})"
+					>{tag.name}</button>
+				{/each}
+			</div>
+		{/if}
 
 		<ul class="note-list" role="list">
 			{#each notes as note (note.id)}
@@ -317,8 +371,10 @@
 						<div class="tag-popover">
 							<p class="popover-label">Tags</p>
 							{#each allTags as tag (tag.id)}
+								{@const c = tagColor(tag)}
 								<label class="popover-item">
 									<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
+									<span class="popover-tag-dot" style="background:{c.text}"></span>
 									{tag.name}
 								</label>
 							{/each}
@@ -349,7 +405,13 @@
 				{#if noteTags.length > 0}
 					<div class="note-tag-chips">
 						{#each noteTags as tag (tag.id)}
-							<span class="note-tag-chip"><TagIcon size={9} />{tag.name}</span>
+							{@const c = tagColor(tag)}
+							<button
+								class="note-tag-chip"
+								style="--tag-bg:{c.bg};--tag-text:{c.text}"
+								onclick={() => filterByTag(activeTagId === tag.id ? null : tag.id)}
+								title="Filter by {tag.name}"
+							><TagIcon size={9} />{tag.name}</button>
 						{/each}
 					</div>
 				{/if}
@@ -606,6 +668,43 @@
 		flex-shrink: 0;
 	}
 
+	/* ─── Sidebar tag filter ─────────────────────────────── */
+	.tag-filter {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		padding: 0.4rem 0.75rem;
+		border-bottom: 1px solid #e5e7eb;
+		flex-shrink: 0;
+	}
+
+	.tag-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.15rem 0.55rem;
+		border: 1px solid #e5e7eb;
+		border-radius: 999px;
+		background: var(--tag-bg, transparent);
+		color: var(--tag-text, #6b7280);
+		font-size: 0.7rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: opacity 0.1s;
+	}
+	.tag-pill:hover { opacity: 0.8; }
+	.tag-pill-active {
+		border-color: var(--tag-text, #6366f1);
+		box-shadow: 0 0 0 1.5px var(--tag-text, #6366f1);
+	}
+	/* "All" pill has no CSS variables, use indigo */
+	.tag-pill:not([style]).tag-pill-active {
+		background: #e0e7ff;
+		color: #4338ca;
+		border-color: #6366f1;
+		box-shadow: 0 0 0 1.5px #6366f1;
+	}
+
 	/* ─── Tag toolbar popover ────────────────────────────── */
 	.tag-popover-wrap { position: relative; }
 
@@ -654,6 +753,13 @@
 	}
 	.popover-item:hover { background: #f3f4f6; }
 
+	.popover-tag-dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+
 	.popover-new {
 		display: flex;
 		align-items: center;
@@ -683,7 +789,7 @@
 		display: flex;
 	}
 
-	/* ─── Editor header (title) ──────────────────────────── */
+	/* ─── Tag chips below note title ─────────────────────── */
 	.note-tag-chips {
 		display: flex;
 		flex-wrap: wrap;
@@ -695,12 +801,17 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.2rem;
-		padding: 0.1rem 0.4rem;
-		background: #e0e7ff;
-		color: #4338ca;
+		padding: 0.1rem 0.45rem;
+		background: var(--tag-bg, #e0e7ff);
+		color: var(--tag-text, #4338ca);
 		border-radius: 999px;
 		font-size: 0.7rem;
+		font-weight: 500;
+		border: none;
+		cursor: pointer;
+		transition: opacity 0.1s;
 	}
+	.note-tag-chip:hover { opacity: 0.75; }
 
 	.title-input {
 		width: 100%;
