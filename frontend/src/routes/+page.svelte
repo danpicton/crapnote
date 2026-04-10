@@ -43,6 +43,7 @@
 	let showTagPopover = $state(false);
 	let newTagName = $state('');
 	let activeTagId = $state<number | null>(null);
+	let starredOnly = $state(false);
 
 	const PALETTE = [
 		{ bg: '#fee2e2', text: '#991b1b' },
@@ -62,9 +63,10 @@
 	let selectedNote = $derived(notes.find((n) => n.id === selectedId) ?? null);
 
 	async function loadNotes() {
-		const params: { search?: string; tag_id?: number } = {};
+		const params: { search?: string; tag?: number; starred?: boolean } = {};
 		if (search) params.search = search;
-		if (activeTagId !== null) params.tag_id = activeTagId;
+		if (activeTagId !== null) params.tag = activeTagId;
+		if (starredOnly) params.starred = true;
 		notes = await api.notes.list(params);
 	}
 
@@ -96,10 +98,10 @@
 		noteTags = await api.tags.listForNote(id);
 	}
 
-	async function filterByTag(id: number | null) {
-		activeTagId = id;
+	async function applyFilter(tagId: number | null, starred: boolean) {
+		activeTagId = tagId;
+		starredOnly = starred;
 		await loadNotes();
-		// If current selection falls outside filtered list, pick first
 		if (notes.length > 0 && !notes.find(n => n.id === selectedId)) {
 			selectedId = notes[0].id;
 			noteTags = await api.tags.listForNote(notes[0].id);
@@ -108,6 +110,14 @@
 			noteTags = [];
 			mobileShowEditor = false;
 		}
+	}
+
+	function filterByTag(id: number | null) {
+		return applyFilter(id, starredOnly);
+	}
+
+	function toggleStarFilter() {
+		return applyFilter(activeTagId, !starredOnly);
 	}
 
 	async function toggleTag(tag: Tag) {
@@ -232,25 +242,35 @@
 			/>
 		</div>
 
-		{#if visibleTags.length > 0}
-			<div class="tag-filter" role="group" aria-label="Filter by tag">
+		<div class="filter-bar" role="group" aria-label="Filter notes">
+			<div class="filter-fixed">
 				<button
 					class="tag-pill"
-					class:tag-pill-active={activeTagId === null}
-					onclick={() => filterByTag(null)}
+					class:tag-pill-active={activeTagId === null && !starredOnly}
+					onclick={() => applyFilter(null, false)}
 				>All</button>
-				{#each visibleTags as tag (tag.id)}
-					{@const c = tagColor(tag)}
-					<button
-						class="tag-pill"
-						class:tag-pill-active={activeTagId === tag.id}
-						style="--tag-bg:{c.bg};--tag-text:{c.text}"
-						onclick={() => filterByTag(activeTagId === tag.id ? null : tag.id)}
-						title="{tag.name} ({tag.note_count})"
-					>{tag.name}</button>
-				{/each}
+				<button
+					class="tag-pill tag-pill-star"
+					class:tag-pill-active={starredOnly}
+					onclick={toggleStarFilter}
+					title="Starred notes"
+				><Star size={11} /> Starred</button>
 			</div>
-		{/if}
+			{#if visibleTags.length > 0}
+				<div class="filter-tags">
+					{#each visibleTags as tag (tag.id)}
+						{@const c = tagColor(tag)}
+						<button
+							class="tag-pill"
+							class:tag-pill-active={activeTagId === tag.id}
+							style="--tag-bg:{c.bg};--tag-text:{c.text}"
+							onclick={() => filterByTag(activeTagId === tag.id ? null : tag.id)}
+							title="{tag.name} ({tag.note_count})"
+						>{tag.name}</button>
+					{/each}
+				</div>
+			{/if}
+		</div>
 
 		<ul class="note-list" role="list">
 			{#each notes as note (note.id)}
@@ -409,7 +429,7 @@
 							<button
 								class="note-tag-chip"
 								style="--tag-bg:{c.bg};--tag-text:{c.text}"
-								onclick={() => filterByTag(activeTagId === tag.id ? null : tag.id)}
+								onclick={() => applyFilter(activeTagId === tag.id ? null : tag.id, starredOnly)}
 								title="Filter by {tag.name}"
 							><TagIcon size={9} />{tag.name}</button>
 						{/each}
@@ -668,14 +688,27 @@
 		flex-shrink: 0;
 	}
 
-	/* ─── Sidebar tag filter ─────────────────────────────── */
-	.tag-filter {
+	/* ─── Sidebar filter bar ─────────────────────────────── */
+	.filter-bar {
+		border-bottom: 1px solid #e5e7eb;
+		flex-shrink: 0;
+	}
+
+	/* Fixed row: All + Starred — always visible */
+	.filter-fixed {
+		display: flex;
+		gap: 0.25rem;
+		padding: 0.4rem 0.75rem 0.25rem;
+	}
+
+	/* Scrollable tag pills — max ~2 rows then scroll */
+	.filter-tags {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.25rem;
-		padding: 0.4rem 0.75rem;
-		border-bottom: 1px solid #e5e7eb;
-		flex-shrink: 0;
+		padding: 0 0.75rem 0.4rem;
+		max-height: 4rem;
+		overflow-y: auto;
 	}
 
 	.tag-pill {
@@ -697,12 +730,21 @@
 		border-color: var(--tag-text, #6366f1);
 		box-shadow: 0 0 0 1.5px var(--tag-text, #6366f1);
 	}
-	/* "All" pill has no CSS variables, use indigo */
+	/* "All" pill — no CSS vars, use indigo */
 	.tag-pill:not([style]).tag-pill-active {
 		background: #e0e7ff;
 		color: #4338ca;
 		border-color: #6366f1;
 		box-shadow: 0 0 0 1.5px #6366f1;
+	}
+
+	/* Starred pill — amber */
+	.tag-pill-star { --tag-bg: #fef9c3; --tag-text: #854d0e; }
+	.tag-pill-star.tag-pill-active {
+		background: #fef9c3;
+		color: #854d0e;
+		border-color: #d97706;
+		box-shadow: 0 0 0 1.5px #d97706;
 	}
 
 	/* ─── Tag toolbar popover ────────────────────────────── */
