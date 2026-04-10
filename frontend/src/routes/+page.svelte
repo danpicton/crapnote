@@ -32,8 +32,8 @@
 	let search = $state('');
 	let saving = $state(false);
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
-	// Mobile: track which panel is visible
-	let mobileShowEditor = $state(false);
+	// Helpers for detecting mobile viewport
+	function isMobile() { return window.matchMedia('(max-width: 767px)').matches; }
 	// Editor command ref
 	let editorRef = $state<EditorRef | null>(null);
 
@@ -107,7 +107,9 @@
 	onMount(async () => {
 		await loadNotes();
 		allTags = await api.tags.list();
-		if (notes.length > 0 && selectedId === null) {
+		// On mobile the list is the home screen; we never auto-open the editor.
+		// On desktop, pre-select the first note so the editor pane isn't empty.
+		if (!isMobile() && notes.length > 0 && selectedId === null) {
 			const initId = notes[0].id;
 			selectedId = initId;
 			const tags = await api.tags.listForNote(initId);
@@ -129,12 +131,12 @@
 		}
 		selectedId = note.id;
 		noteTags = [];
-		mobileShowEditor = true;
+		if (isMobile()) { goto(`/notes/${note.id}`); return; }
 	}
 
 	async function selectNote(id: number) {
+		if (isMobile()) { goto(`/notes/${id}`); return; }
 		selectedId = id;
-		mobileShowEditor = true;
 		showTagPopover = false;
 		noteTags = await api.tags.listForNote(id);
 	}
@@ -165,7 +167,6 @@
 		} else if (notes.length === 0) {
 			selectedId = null;
 			noteTags = [];
-			mobileShowEditor = false;
 		}
 	}
 
@@ -238,7 +239,6 @@
 		notes = notes.filter((n) => n.id !== id);
 		if (selectedId === id) {
 			selectedId = notes.length > 0 ? notes[0].id : null;
-			if (!selectedId) mobileShowEditor = false;
 		}
 	}
 
@@ -247,7 +247,6 @@
 		notes = notes.filter((n) => n.id !== id);
 		if (selectedId === id) {
 			selectedId = notes.length > 0 ? notes[0].id : null;
-			if (!selectedId) mobileShowEditor = false;
 		}
 	}
 
@@ -274,13 +273,13 @@
 	<title>Crapnote</title>
 </svelte:head>
 
-<div class="app" class:mobile-editor={mobileShowEditor}>
+<div class="app">
 	<!-- ── Sidebar ── -->
 	<aside class="sidebar">
 		<header class="sidebar-header">
 			<span class="app-name">Crapnote</span>
 			{#if selectedId}
-				<button class="hdr-btn mobile-show-editor" onclick={() => (mobileShowEditor = true)} title="View note" aria-label="View note">
+				<button class="hdr-btn mobile-show-editor" onclick={() => goto(`/notes/${selectedId}`)} title="View note" aria-label="View note">
 					<ChevronRight size={18} />
 				</button>
 			{/if}
@@ -993,7 +992,8 @@
 			height: 100dvh;
 		}
 
-		/* On mobile, sidebar is full screen by default */
+		/* On mobile the list is a full-screen page; tapping a note navigates to
+		   /notes/[id] via SvelteKit routing — the editor pane is never shown here */
 		.sidebar {
 			width: 100%;
 			min-width: unset;
@@ -1002,22 +1002,9 @@
 			overflow: hidden;
 		}
 
-		/* Editor pane hidden unless we're in mobile-editor mode */
-		.editor-pane {
-			display: none;
-			position: fixed;
-			inset: 0;
-			z-index: 10;
-			background: #fff;
-		}
+		.editor-pane { display: none; }
 
-		/* When a note is selected on mobile, show editor full-screen */
-		.app.mobile-editor .sidebar { display: none; }
-		.app.mobile-editor .editor-pane { display: flex; }
-
-		/* Show mobile back button */
-		.mobile-back { display: flex; }
-		.mobile-sep { display: block; }
+		/* Show the chevron button to navigate to the currently-selected note */
 		.mobile-show-editor { display: flex; }
 
 		/* Tighter sidebar padding */

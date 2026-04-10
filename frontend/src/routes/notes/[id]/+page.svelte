@@ -1,0 +1,419 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
+	import {
+		toggleStrongCommand,
+		toggleEmphasisCommand,
+		toggleInlineCodeCommand,
+		wrapInBlockquoteCommand,
+		wrapInBulletListCommand,
+		wrapInOrderedListCommand,
+		insertHrCommand,
+		createCodeBlockCommand,
+	} from '@milkdown/kit/preset/commonmark';
+	import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
+	import { toggleUnderlineCommand } from '$lib/milkdown/underline';
+	import type { CmdKey } from '@milkdown/kit/core';
+	import { api, type Note, type Tag } from '$lib/api';
+	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
+	import {
+		Bold, Italic, Underline, Quote, Code, FileCode2,
+		List, ListOrdered, Minus, Undo2, Redo2,
+		Plus, ChevronLeft, Tag as TagIcon,
+	} from 'lucide-svelte';
+
+	const noteId = $derived(Number($page.params.id));
+
+	let note = $state<Note | null>(null);
+	let noteTags = $state<Tag[]>([]);
+	let allTags = $state<Tag[]>([]);
+	let saving = $state(false);
+	let saveTimer: ReturnType<typeof setTimeout> | null = null;
+	let editorRef = $state<EditorRef | null>(null);
+	let showTagPopover = $state(false);
+	let newTagName = $state('');
+
+	// Same palette + hash as the main notes list so tag colours are consistent
+	const PALETTE = [
+		{ bg: '#fee2e2', text: '#991b1b' },
+		{ bg: '#fce7f3', text: '#831843' },
+		{ bg: '#ffe4e6', text: '#881337' },
+		{ bg: '#fecdd3', text: '#9f1239' },
+		{ bg: '#ffedd5', text: '#9a3412' },
+		{ bg: '#fef3c7', text: '#78350f' },
+		{ bg: '#fef9c3', text: '#854d0e' },
+		{ bg: '#ecfccb', text: '#365314' },
+		{ bg: '#dcfce7', text: '#166534' },
+		{ bg: '#d1fae5', text: '#064e3b' },
+		{ bg: '#ccfbf1', text: '#134e4a' },
+		{ bg: '#cffafe', text: '#164e63' },
+		{ bg: '#e0f2fe', text: '#0c4a6e' },
+		{ bg: '#dbeafe', text: '#1e3a8a' },
+		{ bg: '#e0e7ff', text: '#3730a3' },
+		{ bg: '#ede9fe', text: '#4c1d95' },
+		{ bg: '#f3e8ff', text: '#6b21a8' },
+		{ bg: '#fae8ff', text: '#86198f' },
+		{ bg: '#fecaca', text: '#7f1d1d' },
+		{ bg: '#fbcfe8', text: '#9d174d' },
+		{ bg: '#fda4af', text: '#881337' },
+		{ bg: '#fed7aa', text: '#7c2d12' },
+		{ bg: '#fde68a', text: '#78350f' },
+		{ bg: '#bbf7d0', text: '#14532d' },
+		{ bg: '#99f6e4', text: '#134e4a' },
+		{ bg: '#bae6fd', text: '#0c4a6e' },
+		{ bg: '#bfdbfe', text: '#1e40af' },
+		{ bg: '#c7d2fe', text: '#3730a3' },
+		{ bg: '#ddd6fe', text: '#5b21b6' },
+		{ bg: '#e9d5ff', text: '#6b21a8' },
+		{ bg: '#f5d0fe', text: '#86198f' },
+		{ bg: '#a7f3d0', text: '#064e3b' },
+	] as const;
+
+	function tagColor(tag: Tag) {
+		return PALETTE[Math.imul(tag.id, 0x9e3779b9) >>> 27];
+	}
+
+	onMount(async () => {
+		[note, noteTags, allTags] = await Promise.all([
+			api.notes.get(noteId),
+			api.tags.listForNote(noteId),
+			api.tags.list(),
+		]);
+	});
+
+	function scheduleAutoSave(field: 'title' | 'body', value: string) {
+		if (saveTimer) clearTimeout(saveTimer);
+		saveTimer = setTimeout(async () => {
+			saving = true;
+			try {
+				const updated = await api.notes.update(noteId, { [field]: value });
+				note = updated;
+			} finally {
+				saving = false;
+			}
+		}, 800);
+	}
+
+	function cmd(key: string | CmdKey<unknown>, payload?: unknown) {
+		editorRef?.call(key, payload);
+	}
+
+	async function toggleTag(tag: Tag) {
+		const has = noteTags.find(t => t.id === tag.id);
+		if (has) {
+			await api.tags.removeFromNote(noteId, tag.id);
+			noteTags = noteTags.filter(t => t.id !== tag.id);
+		} else {
+			await api.tags.addToNote(noteId, tag.id);
+			noteTags = [...noteTags, tag];
+		}
+		allTags = await api.tags.list();
+	}
+
+	async function createAndAddTag() {
+		if (!newTagName.trim()) return;
+		const name = newTagName.trim();
+		let tag = allTags.find(t => t.name.toLowerCase() === name.toLowerCase());
+		if (!tag) {
+			tag = await api.tags.create(name);
+		}
+		if (!noteTags.find(t => t.id === tag!.id)) {
+			await api.tags.addToNote(noteId, tag.id);
+			noteTags = [...noteTags, tag];
+		}
+		newTagName = '';
+		allTags = await api.tags.list();
+	}
+</script>
+
+<svelte:head>
+	<title>{note?.title || 'Note'} — Crapnote</title>
+</svelte:head>
+
+{#if note}
+<div class="note-page">
+	<div class="toolbar" role="toolbar" aria-label="Formatting">
+		<button class="tb-btn" onclick={() => goto('/')} title="Back to notes" aria-label="Back to notes">
+			<ChevronLeft size={16} />
+		</button>
+		<span class="tb-sep"></span>
+
+		<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold"><Bold size={14} /></button>
+		<button class="tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic"><Italic size={14} /></button>
+		<button class="tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline"><Underline size={14} /></button>
+		<span class="tb-sep"></span>
+		<button class="tb-btn" onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote"><Quote size={14} /></button>
+		<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code"><Code size={14} /></button>
+		<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={14} /></button>
+		<span class="tb-sep"></span>
+		<button class="tb-btn" onclick={() => cmd(wrapInBulletListCommand.key)} title="Bullet list"><List size={14} /></button>
+		<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list"><ListOrdered size={14} /></button>
+		<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={14} /></button>
+		<span class="tb-sep"></span>
+		<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={14} /></button>
+		<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo"><Redo2 size={14} /></button>
+		<span class="tb-spacer"></span>
+		<span class="save-status">{saving ? 'Saving…' : ''}</span>
+	</div>
+
+	<div class="editor-header">
+		{#if noteTags.length > 0}
+			<div class="note-tags-chips">
+				{#each noteTags as tag (tag.id)}
+					{@const c = tagColor(tag)}
+					<span class="note-tag-chip" style="--tag-bg:{c.bg};--tag-text:{c.text}">
+						<TagIcon size={9} />{tag.name}
+					</span>
+				{/each}
+			</div>
+		{/if}
+		<input
+			class="title-input"
+			type="text"
+			value={note.title}
+			oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
+			placeholder="Note title"
+		/>
+		<div class="tag-popover-wrap">
+			<button
+				class="tag-chip-btn"
+				class:tag-chip-btn-active={noteTags.length > 0}
+				onclick={() => (showTagPopover = !showTagPopover)}
+				title="Tags"
+			>
+				<TagIcon size={11} />
+				{#if noteTags.length > 0}<span class="tb-tag-count">{noteTags.length}</span>{/if}
+			</button>
+			{#if showTagPopover}
+				<div class="tag-popover">
+					<p class="popover-label">Tags</p>
+					{#each allTags as tag (tag.id)}
+						{@const c = tagColor(tag)}
+						<label class="popover-item">
+							<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
+							<span class="popover-tag-dot" style="background:{c.text}"></span>
+							{tag.name}
+						</label>
+					{/each}
+					<div class="popover-new">
+						<input
+							class="popover-new-input"
+							type="text"
+							placeholder="New tag…"
+							bind:value={newTagName}
+							onkeydown={(e) => e.key === 'Enter' && createAndAddTag()}
+						/>
+						<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={12} /></button>
+					</div>
+				</div>
+			{/if}
+		</div>
+	</div>
+
+	{#key noteId}
+		<Editor
+			value={note.body}
+			onchange={(md) => scheduleAutoSave('body', md)}
+			bind:ref={editorRef}
+		/>
+	{/key}
+</div>
+{:else}
+<div class="loading">Loading…</div>
+{/if}
+
+<style>
+	.note-page {
+		display: flex;
+		flex-direction: column;
+		height: 100dvh;
+		background: #fff;
+	}
+
+	.loading {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		height: 100dvh;
+		color: #9ca3af;
+		font-size: 0.875rem;
+	}
+
+	/* ─── Toolbar ──────────────────────────────── */
+	.toolbar {
+		display: flex;
+		align-items: center;
+		gap: 0.125rem;
+		padding: 0.375rem 0.75rem;
+		border-bottom: 1px solid #e5e7eb;
+		background: #fafafa;
+		flex-shrink: 0;
+		flex-wrap: wrap;
+	}
+
+	.tb-btn {
+		padding: 0.3rem 0.4rem;
+		background: none;
+		border: 1px solid transparent;
+		border-radius: 0.25rem;
+		cursor: pointer;
+		color: #374151;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+	}
+	.tb-btn:hover { background: #e5e7eb; border-color: #d1d5db; }
+	.tb-btn:active { background: #dbeafe; border-color: #93c5fd; }
+
+	.tb-sep {
+		width: 1px;
+		height: 1rem;
+		background: #e5e7eb;
+		margin: 0 0.2rem;
+		flex-shrink: 0;
+	}
+	.tb-spacer { flex: 1; }
+	.save-status { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; }
+
+	/* ─── Editor header ────────────────────────── */
+	.editor-header {
+		position: relative;
+		padding: 0.45rem 5rem 0.45rem 1rem;
+		border-bottom: 1px solid #e5e7eb;
+		flex-shrink: 0;
+	}
+
+	.note-tags-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		margin-bottom: 0.3rem;
+	}
+
+	.note-tag-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.1rem 0.45rem;
+		background: var(--tag-bg, #e0e7ff);
+		color: var(--tag-text, #4338ca);
+		border-radius: 999px;
+		font-size: 0.7rem;
+		font-weight: 500;
+	}
+
+	.title-input {
+		width: 100%;
+		font-size: 1.25rem;
+		font-weight: 600;
+		border: none;
+		outline: none;
+		padding: 0;
+		background: transparent;
+		font-family: system-ui, -apple-system, sans-serif;
+		color: #111827;
+	}
+
+	/* ─── Tag popover ──────────────────────────── */
+	.tag-popover-wrap {
+		position: absolute;
+		top: 0.45rem;
+		right: 1rem;
+	}
+
+	.tag-chip-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.1rem 0.45rem;
+		background: transparent;
+		color: #9ca3af;
+		border-radius: 999px;
+		font-size: 0.7rem;
+		font-weight: 500;
+		border: 1px dashed #d1d5db;
+		cursor: pointer;
+		transition: all 0.1s;
+	}
+	.tag-chip-btn:hover { background: #f3f4f6; color: #374151; border-color: #9ca3af; }
+	.tag-chip-btn-active { color: #6366f1; border-color: #6366f1; }
+
+	.tb-tag-count {
+		background: #6366f1;
+		color: white;
+		border-radius: 999px;
+		padding: 0 0.3rem;
+		font-size: 0.6rem;
+	}
+
+	.tag-popover {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 4px);
+		background: white;
+		border: 1px solid #e5e7eb;
+		border-radius: 0.5rem;
+		box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+		padding: 0.5rem;
+		min-width: 11rem;
+		z-index: 30;
+	}
+
+	.popover-label {
+		font-size: 0.7rem;
+		font-weight: 600;
+		color: #9ca3af;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin: 0 0 0.25rem;
+		padding: 0 0.25rem;
+	}
+
+	.popover-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.3rem 0.25rem;
+		border-radius: 0.25rem;
+		cursor: pointer;
+		font-size: 0.85rem;
+	}
+	.popover-item:hover { background: #f3f4f6; }
+
+	.popover-tag-dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+
+	.popover-new {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		margin-top: 0.375rem;
+		padding-top: 0.375rem;
+		border-top: 1px solid #f3f4f6;
+	}
+
+	.popover-new-input {
+		flex: 1;
+		border: none;
+		border-bottom: 1px solid #d1d5db;
+		outline: none;
+		font-size: 0.8rem;
+		padding: 0.15rem 0.1rem;
+		background: transparent;
+	}
+	.popover-new-input:focus { border-color: #6366f1; }
+
+	.popover-add-btn {
+		background: none;
+		border: none;
+		cursor: pointer;
+		color: #6366f1;
+		padding: 0.1rem;
+		display: flex;
+	}
+</style>
