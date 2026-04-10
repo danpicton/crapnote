@@ -27,7 +27,16 @@ async function openTagPopover(page: Page) {
 async function createTagInPopover(page: Page, name: string) {
   await page.getByPlaceholder('New tag…').fill(name);
   await page.getByPlaceholder('New tag…').press('Enter');
-  await page.waitForResponse((r) => r.url().includes('/api/tags') && r.request().method() === 'POST');
+  // If the tag already exists in the DB (dirty state from a prior run),
+  // createAndAddTag skips POST /api/tags and only fires the note-tag
+  // association POST /api/notes/{id}/tags/{tagId}.
+  // Accept either so the test is resilient to pre-existing data.
+  await page.waitForResponse(
+    (r) => r.request().method() === 'POST' && (
+      /\/api\/tags$/.test(r.url()) ||
+      /\/api\/notes\/\d+\/tags\/\d+/.test(r.url())
+    )
+  );
 }
 
 test.describe('Tags', () => {

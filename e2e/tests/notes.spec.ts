@@ -88,13 +88,18 @@ test.describe('Notes', () => {
     await createNote(page, 'Apple note');
     await createNote(page, 'Banana note');
 
-    // Type into the search box and wait for the API response
     const searchBox = page.getByPlaceholder(/search/i);
     await searchBox.click();
+    // Register the response waiter before typing so fast responses aren't missed.
+    // Prior runs may have left duplicate 'Apple note' entries in the DB; use
+    // .first() so the assertion doesn't fail on strict-mode multi-element matches.
+    const searchDone = page.waitForResponse(
+      (r) => r.url().includes('/api/notes') && r.url().includes('search=Apple')
+    );
     await page.keyboard.type('Apple');
-    await page.waitForResponse((r) => r.url().includes('/api/notes') && r.url().includes('search=Apple'));
+    await searchDone;
 
-    await expect(page.locator('.note-item').filter({ hasText: 'Apple note' })).toBeVisible();
+    await expect(page.locator('.note-item').filter({ hasText: 'Apple note' }).first()).toBeVisible();
     await expect(page.locator('.note-item').filter({ hasText: 'Banana note' })).not.toBeVisible();
   });
 });
