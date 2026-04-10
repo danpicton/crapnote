@@ -46,14 +46,44 @@
 	let starredOnly = $state(false);
 
 	const PALETTE = [
-		{ bg: '#fee2e2', text: '#991b1b' },
-		{ bg: '#ffedd5', text: '#9a3412' },
-		{ bg: '#fef9c3', text: '#854d0e' },
-		{ bg: '#dcfce7', text: '#166534' },
-		{ bg: '#dbeafe', text: '#1e3a8a' },
-		{ bg: '#ede9fe', text: '#4c1d95' },
-		{ bg: '#fce7f3', text: '#831843' },
-		{ bg: '#e0f2fe', text: '#0c4a6e' },
+		// Reds / Pinks / Rose
+		{ bg: '#fee2e2', text: '#991b1b' },   //  0 red
+		{ bg: '#fce7f3', text: '#831843' },   //  1 pink
+		{ bg: '#ffe4e6', text: '#881337' },   //  2 rose
+		{ bg: '#fecdd3', text: '#9f1239' },   //  3 deep rose
+		// Orange / Amber / Yellow / Lime
+		{ bg: '#ffedd5', text: '#9a3412' },   //  4 orange
+		{ bg: '#fef3c7', text: '#78350f' },   //  5 amber
+		{ bg: '#fef9c3', text: '#854d0e' },   //  6 yellow
+		{ bg: '#ecfccb', text: '#365314' },   //  7 lime
+		// Greens
+		{ bg: '#dcfce7', text: '#166534' },   //  8 green
+		{ bg: '#d1fae5', text: '#064e3b' },   //  9 emerald
+		{ bg: '#ccfbf1', text: '#134e4a' },   // 10 teal
+		// Cyans / Sky / Blues / Indigo
+		{ bg: '#cffafe', text: '#164e63' },   // 11 cyan
+		{ bg: '#e0f2fe', text: '#0c4a6e' },   // 12 sky
+		{ bg: '#dbeafe', text: '#1e3a8a' },   // 13 blue
+		{ bg: '#e0e7ff', text: '#3730a3' },   // 14 indigo
+		// Violet / Purple / Fuchsia
+		{ bg: '#ede9fe', text: '#4c1d95' },   // 15 violet
+		{ bg: '#f3e8ff', text: '#6b21a8' },   // 16 purple
+		{ bg: '#fae8ff', text: '#86198f' },   // 17 fuchsia
+		// Slightly deeper / -200 variants for more variety
+		{ bg: '#fecaca', text: '#7f1d1d' },   // 18 deep red
+		{ bg: '#fbcfe8', text: '#9d174d' },   // 19 deep pink
+		{ bg: '#fda4af', text: '#881337' },   // 20 mid rose
+		{ bg: '#fed7aa', text: '#7c2d12' },   // 21 deep orange
+		{ bg: '#fde68a', text: '#78350f' },   // 22 deep amber
+		{ bg: '#bbf7d0', text: '#14532d' },   // 23 deep green
+		{ bg: '#99f6e4', text: '#134e4a' },   // 24 deep teal
+		{ bg: '#bae6fd', text: '#0c4a6e' },   // 25 deep sky
+		{ bg: '#bfdbfe', text: '#1e40af' },   // 26 deep blue
+		{ bg: '#c7d2fe', text: '#3730a3' },   // 27 deep indigo
+		{ bg: '#ddd6fe', text: '#5b21b6' },   // 28 deep violet
+		{ bg: '#e9d5ff', text: '#6b21a8' },   // 29 deep purple
+		{ bg: '#f5d0fe', text: '#86198f' },   // 30 deep fuchsia
+		{ bg: '#a7f3d0', text: '#064e3b' },   // 31 deep emerald
 	] as const;
 	function tagColor(tag: Tag) { return PALETTE[tag.id % PALETTE.length]; }
 
@@ -401,46 +431,56 @@
 				</button>
 				<span class="tb-spacer"></span>
 				<span class="save-status">{saving ? 'Saving…' : ''}</span>
-
-				<!-- Tag popover -->
-				<div class="tag-popover-wrap">
-					<button
-						class="tb-btn tag-tb-btn"
-						class:tag-active={noteTags.length > 0}
-						onclick={() => (showTagPopover = !showTagPopover)}
-						title="Tags"
-					>
-						<TagIcon size={14} />
-						{#if noteTags.length > 0}<span class="tb-tag-count">{noteTags.length}</span>{/if}
-					</button>
-					{#if showTagPopover}
-						<div class="tag-popover">
-							<p class="popover-label">Tags</p>
-							{#each allTags as tag (tag.id)}
-								{@const c = tagColor(tag)}
-								<label class="popover-item">
-									<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
-									<span class="popover-tag-dot" style="background:{c.text}"></span>
-									{tag.name}
-								</label>
-							{/each}
-							<div class="popover-new">
-								<input
-									class="popover-new-input"
-									type="text"
-									placeholder="New tag…"
-									bind:value={newTagName}
-									onkeydown={(e) => e.key === 'Enter' && createAndAddTag()}
-								/>
-								<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={12} /></button>
-							</div>
-						</div>
-					{/if}
-				</div>
 			</div>
 
-			<!-- Title -->
+			<!-- Tags row + Title -->
 			<div class="editor-header">
+				<div class="note-tags-row">
+					{#each noteTags as tag (tag.id)}
+						{@const c = tagColor(tag)}
+						<button
+							class="note-tag-chip"
+							style="--tag-bg:{c.bg};--tag-text:{c.text}"
+							onclick={() => applyFilter(activeTagId === tag.id ? null : tag.id, starredOnly)}
+							title="Filter by {tag.name}"
+						><TagIcon size={9} />{tag.name}</button>
+					{/each}
+					<!-- Tag popover button, always visible on the tag row -->
+					<div class="tag-popover-wrap">
+						<button
+							class="tag-chip-btn"
+							class:tag-chip-btn-active={noteTags.length > 0}
+							onclick={() => (showTagPopover = !showTagPopover)}
+							title="Tags"
+						>
+							<TagIcon size={11} />
+							{#if noteTags.length > 0}<span class="tb-tag-count">{noteTags.length}</span>{/if}
+						</button>
+						{#if showTagPopover}
+							<div class="tag-popover">
+								<p class="popover-label">Tags</p>
+								{#each allTags as tag (tag.id)}
+									{@const c = tagColor(tag)}
+									<label class="popover-item">
+										<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
+										<span class="popover-tag-dot" style="background:{c.text}"></span>
+										{tag.name}
+									</label>
+								{/each}
+								<div class="popover-new">
+									<input
+										class="popover-new-input"
+										type="text"
+										placeholder="New tag…"
+										bind:value={newTagName}
+										onkeydown={(e) => e.key === 'Enter' && createAndAddTag()}
+									/>
+									<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={12} /></button>
+								</div>
+							</div>
+						{/if}
+					</div>
+				</div>
 				<input
 					class="title-input"
 					type="text"
@@ -448,19 +488,6 @@
 					oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
 					placeholder="Note title"
 				/>
-				{#if noteTags.length > 0}
-					<div class="note-tag-chips">
-						{#each noteTags as tag (tag.id)}
-							{@const c = tagColor(tag)}
-							<button
-								class="note-tag-chip"
-								style="--tag-bg:{c.bg};--tag-text:{c.text}"
-								onclick={() => applyFilter(activeTagId === tag.id ? null : tag.id, starredOnly)}
-								title="Filter by {tag.name}"
-							><TagIcon size={9} />{tag.name}</button>
-						{/each}
-					</div>
-				{/if}
 			</div>
 
 			<!-- Editor body -->
@@ -707,11 +734,21 @@
 	.mobile-sep { display: none; }
 	.mobile-show-editor { display: none; }
 
-	/* ─── Editor header (title) ──────────────────────────── */
+	/* ─── Editor header (tags + title) ─────────────────── */
 	.editor-header {
-		padding: 0.75rem 1rem 0.5rem;
+		padding: 0.5rem 1rem 0.5rem;
 		border-bottom: 1px solid #e5e7eb;
 		flex-shrink: 0;
+	}
+
+	/* Row of tag chips + popover button above the title */
+	.note-tags-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.25rem;
+		margin-bottom: 0.35rem;
+		position: relative;
 	}
 
 	/* ─── Sidebar filter bar ─────────────────────────────── */
@@ -727,18 +764,18 @@
 		padding: 0.4rem 0.75rem 0.25rem;
 	}
 
-	/* Scrollable tag pills — 4 rows by default, expands to 5 rows on hover */
+	/* Scrollable tag pills — 2 rows by default, expands to 4 rows (then scrolls) on hover */
 	.filter-tags {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.25rem;
 		padding: 0 0.75rem 0.4rem;
-		max-height: 6.2rem;
+		max-height: 2.55rem;
 		overflow-y: hidden;
 		transition: max-height 0.2s ease;
 	}
 	.filter-tags.expanded {
-		max-height: 7.8rem;
+		max-height: 5.1rem;
 	}
 	.filter-tags.scrollable {
 		overflow-y: auto;
@@ -780,11 +817,26 @@
 		box-shadow: 0 0 0 1.5px #d97706;
 	}
 
-	/* ─── Tag toolbar popover ────────────────────────────── */
+	/* ─── Tag popover (anchored to note-tags-row) ───────── */
 	.tag-popover-wrap { position: relative; }
 
-	.tag-tb-btn { gap: 0.2rem; }
-	.tag-tb-btn.tag-active { color: #6366f1; }
+	/* Chip-style button that lives in the note-tags-row */
+	.tag-chip-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.1rem 0.45rem;
+		background: transparent;
+		color: #9ca3af;
+		border-radius: 999px;
+		font-size: 0.7rem;
+		font-weight: 500;
+		border: 1px dashed #d1d5db;
+		cursor: pointer;
+		transition: all 0.1s;
+	}
+	.tag-chip-btn:hover { background: #f3f4f6; color: #374151; border-color: #9ca3af; }
+	.tag-chip-btn.tag-chip-btn-active { color: #6366f1; border-color: #6366f1; }
 
 	.tb-tag-count {
 		background: #6366f1;
@@ -796,8 +848,8 @@
 
 	.tag-popover {
 		position: absolute;
-		right: 0;
-		top: calc(100% + 6px);
+		left: 0;
+		top: calc(100% + 4px);
 		background: white;
 		border: 1px solid #e5e7eb;
 		border-radius: 0.5rem;
@@ -864,14 +916,7 @@
 		display: flex;
 	}
 
-	/* ─── Tag chips below note title ─────────────────────── */
-	.note-tag-chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.25rem;
-		margin-top: 0.375rem;
-	}
-
+	/* ─── Tag chips in the note-tags-row ────────────────── */
 	.note-tag-chip {
 		display: inline-flex;
 		align-items: center;
