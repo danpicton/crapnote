@@ -98,6 +98,22 @@
 		noteTags = await api.tags.listForNote(id);
 	}
 
+	let tagFilterEl = $state<HTMLDivElement | null>(null);
+	let tagFilterExpanded = $state(false);
+	let tagFilterScrollable = $state(false);
+
+	function onTagFilterMouseEnter() {
+		tagFilterExpanded = true;
+	}
+	function onTagFilterMouseLeave() {
+		tagFilterScrollable = false;
+		tagFilterExpanded = false;
+		if (tagFilterEl) tagFilterEl.scrollTop = 0;
+	}
+	function onTagFilterTransitionEnd() {
+		if (tagFilterExpanded) tagFilterScrollable = true;
+	}
+
 	async function applyFilter(tagId: number | null, starred: boolean) {
 		activeTagId = tagId;
 		starredOnly = starred;
@@ -257,7 +273,17 @@
 				><Star size={11} /> Starred</button>
 			</div>
 			{#if visibleTags.length > 0}
-				<div class="filter-tags">
+				<div
+					class="filter-tags"
+					class:expanded={tagFilterExpanded}
+					class:scrollable={tagFilterScrollable}
+					bind:this={tagFilterEl}
+					role="group"
+					aria-label="Tag filters"
+					onmouseenter={onTagFilterMouseEnter}
+					onmouseleave={onTagFilterMouseLeave}
+					ontransitionend={onTagFilterTransitionEnd}
+				>
 					{#each visibleTags as tag (tag.id)}
 						{@const c = tagColor(tag)}
 						<button
@@ -701,18 +727,20 @@
 		padding: 0.4rem 0.75rem 0.25rem;
 	}
 
-	/* Scrollable tag pills — 2 rows by default, expands to 5 on hover */
+	/* Scrollable tag pills — 4 rows by default, expands to 5 rows on hover */
 	.filter-tags {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.25rem;
 		padding: 0 0.75rem 0.4rem;
-		max-height: 2.55rem;
+		max-height: 6.2rem;
 		overflow-y: hidden;
 		transition: max-height 0.2s ease;
 	}
-	.filter-tags:hover {
-		max-height: 8rem;
+	.filter-tags.expanded {
+		max-height: 7.8rem;
+	}
+	.filter-tags.scrollable {
 		overflow-y: auto;
 	}
 
