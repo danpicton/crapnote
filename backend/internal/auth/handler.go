@@ -16,6 +16,15 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
+// isHTTPS reports whether the request arrived over HTTPS — either directly
+// (r.TLS != nil) or via a reverse proxy that signals it with X-Forwarded-Proto.
+// This is used to set the Secure flag on cookies: hardcoding Secure:true breaks
+// plain-HTTP deployments because browsers silently discard secure cookies sent
+// over HTTP, making every session immediately invalid after login.
+func isHTTPS(r *http.Request) bool {
+	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+}
+
 // Login handles POST /api/auth/login.
 // Body: {"username": "...", "password": "..."}
 // Sets an HttpOnly session cookie on success.
@@ -45,7 +54,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		Expires:  sess.ExpiresAt,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteStrictMode,
 	})
 
@@ -69,7 +78,7 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   isHTTPS(r),
 		SameSite: http.SameSiteStrictMode,
 	})
 

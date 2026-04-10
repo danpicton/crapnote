@@ -52,6 +52,20 @@ vi.mock('$lib/milkdown/underline', () => ({
 
 import { api } from '$lib/api';
 
+// Helper: override matchMedia to simulate a mobile or desktop viewport for one test.
+function mockViewport(mobile: boolean) {
+	vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
+		matches: mobile && query === '(max-width: 767px)',
+		media: query,
+		onchange: null,
+		addListener: vi.fn(),
+		removeListener: vi.fn(),
+		addEventListener: vi.fn(),
+		removeEventListener: vi.fn(),
+		dispatchEvent: vi.fn(),
+	})));
+}
+
 const mockNote = (overrides = {}) => ({
 	id: 1, title: 'Test Note', body: '# Hello',
 	starred: false, pinned: false, archived: false,
@@ -124,5 +138,105 @@ describe('Notes page', () => {
 	it('renders formatting toolbar', async () => {
 		render(Page);
 		await waitFor(() => expect(screen.getByRole('toolbar', { name: /formatting/i })).toBeInTheDocument());
+	});
+});
+
+describe('Mobile navigation', () => {
+	beforeEach(() => {
+		mockViewport(true); // mobile for every test in this block
+	});
+
+	it('clicking a note navigates to /notes/[id] on mobile', async () => {
+		const { goto } = await import('$app/navigation');
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		// Click the note button
+		const noteBtn = screen.getAllByRole('button').find(
+			(b) => b.classList.contains('note-btn')
+		);
+		await fireEvent.click(noteBtn!);
+
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/notes/1'));
+	});
+
+	it('new note navigates to /notes/[id] on mobile', async () => {
+		const { goto } = await import('$app/navigation');
+		vi.mocked(api.notes.create).mockResolvedValueOnce(
+			{ id: 99, title: '', body: '', starred: false, pinned: false, archived: false,
+			  created_at: '', updated_at: '' }
+		);
+
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		// Grab the sidebar header button specifically (title attr distinguishes it from
+		// the empty-state button which is CSS-hidden on mobile but still in the DOM)
+		const newBtn = screen.getByTitle('New note');
+		await fireEvent.click(newBtn);
+
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/notes/99'));
+	});
+
+	it('clicking a note on desktop does NOT navigate — shows editor in-pane', async () => {
+		mockViewport(false); // override to desktop
+		const { goto } = await import('$app/navigation');
+		vi.mocked(api.tags.listForNote).mockResolvedValue([]);
+
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		const noteBtn = screen.getAllByRole('button').find(
+			(b) => b.classList.contains('note-btn')
+		);
+		await fireEvent.click(noteBtn!);
+
+		// No navigation on desktop
+		expect(goto).not.toHaveBeenCalledWith(expect.stringMatching(/\/notes\//));
+	});
+});
+
+describe('Tag filter hover', () => {
+	const mockTags = [
+		{ id: 1, name: 'Alpha', note_count: 1 },
+		{ id: 2, name: 'Beta',  note_count: 1 },
+	];
+
+	beforeEach(() => {
+		vi.mocked(api.tags.list).mockResolvedValue(mockTags);
+	});
+
+	it('adds expanded class on mouseenter on desktop', async () => {
+		mockViewport(false); // desktop
+		render(Page);
+		await waitFor(() => screen.getByText('Alpha'));
+
+		const filterTags = screen.getByRole('group', { name: /tag filters/i });
+		await fireEvent.mouseEnter(filterTags);
+
+		expect(filterTags).toHaveClass('expanded');
+	});
+
+	it('does NOT add expanded class on mouseenter on mobile', async () => {
+		mockViewport(true); // mobile
+		render(Page);
+		await waitFor(() => screen.getByText('Alpha'));
+
+		const filterTags = screen.getByRole('group', { name: /tag filters/i });
+		await fireEvent.mouseEnter(filterTags);
+
+		expect(filterTags).not.toHaveClass('expanded');
+	});
+
+	it('removes expanded class on mouseleave on desktop', async () => {
+		mockViewport(false); // desktop
+		render(Page);
+		await waitFor(() => screen.getByText('Alpha'));
+
+		const filterTags = screen.getByRole('group', { name: /tag filters/i });
+		await fireEvent.mouseEnter(filterTags);
+		await fireEvent.mouseLeave(filterTags);
+
+		expect(filterTags).not.toHaveClass('expanded');
 	});
 });

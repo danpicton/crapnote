@@ -58,6 +58,71 @@ func TestHandler_Login_Success(t *testing.T) {
 	}
 }
 
+// Cookie Secure flag must follow the transport, not be hardcoded to true.
+// Hardcoding Secure:true breaks HTTP deployments because browsers silently
+// discard the cookie on every subsequent request, making the session useless.
+
+func TestHandler_Login_Cookie_NotSecure_OverHTTP(t *testing.T) {
+	h, svc := newTestHandler(t)
+	svc.SeedAdmin(t.Context(), "admin", "pass") //nolint:errcheck
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+		bytes.NewBufferString(`{"username":"admin","password":"pass"}`))
+	// Plain HTTP request: r.TLS is nil, no X-Forwarded-Proto header
+	w := httptest.NewRecorder()
+	h.Login(w, req)
+
+	cookie := findCookie(t, w.Result(), "session")
+	if cookie.Secure {
+		t.Fatal("session cookie must NOT be Secure over plain HTTP — browser will discard it")
+	}
+}
+
+func TestHandler_Login_Cookie_Secure_WhenForwardedProtoIsHTTPS(t *testing.T) {
+	h, svc := newTestHandler(t)
+	svc.SeedAdmin(t.Context(), "admin", "pass") //nolint:errcheck
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+		bytes.NewBufferString(`{"username":"admin","password":"pass"}`))
+	req.Header.Set("X-Forwarded-Proto", "https") // reverse proxy signals HTTPS
+	w := httptest.NewRecorder()
+	h.Login(w, req)
+
+	cookie := findCookie(t, w.Result(), "session")
+	if !cookie.Secure {
+		t.Fatal("session cookie must be Secure when behind an HTTPS reverse proxy")
+	}
+}
+
+func TestHandler_Logout_Cookie_MatchesTransport(t *testing.T) {
+	h, svc := newTestHandler(t)
+	svc.SeedAdmin(t.Context(), "admin", "pass") //nolint:errcheck
+	sess, _ := svc.Login(t.Context(), "admin", "pass")
+
+	// Over plain HTTP the cleared cookie should also not be Secure
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: sess.ID})
+	w := httptest.NewRecorder()
+	h.Logout(w, req)
+
+	cookie := findCookie(t, w.Result(), "session")
+	if cookie.Secure {
+		t.Fatal("logout cookie must NOT be Secure over plain HTTP")
+	}
+}
+
+// findCookie is a test helper that fails if the named cookie is absent.
+func findCookie(t *testing.T, resp *http.Response, name string) *http.Cookie {
+	t.Helper()
+	for _, c := range resp.Cookies() {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("cookie %q not found in response", name)
+	return nil
+}
+
 func TestHandler_Login_BadCredentials(t *testing.T) {
 	h, svc := newTestHandler(t)
 	svc.SeedAdmin(t.Context(), "admin", "correct") //nolint:errcheck

@@ -23,7 +23,7 @@
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, Minus, Undo2, Redo2,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
-		ChevronLeft, ChevronRight, Search, Tag as TagIcon,
+		ChevronRight, Search, Tag as TagIcon,
 	} from 'lucide-svelte';
 
 	let notes = $state<Note[]>([]);
@@ -32,8 +32,8 @@
 	let search = $state('');
 	let saving = $state(false);
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
-	// Mobile: track which panel is visible
-	let mobileShowEditor = $state(false);
+	// Helpers for detecting mobile viewport
+	function isMobile() { return window.matchMedia('(max-width: 767px)').matches; }
 	// Editor command ref
 	let editorRef = $state<EditorRef | null>(null);
 
@@ -107,7 +107,9 @@
 	onMount(async () => {
 		await loadNotes();
 		allTags = await api.tags.list();
-		if (notes.length > 0 && selectedId === null) {
+		// On mobile the list is the home screen; we never auto-open the editor.
+		// On desktop, pre-select the first note so the editor pane isn't empty.
+		if (!isMobile() && notes.length > 0 && selectedId === null) {
 			const initId = notes[0].id;
 			selectedId = initId;
 			const tags = await api.tags.listForNote(initId);
@@ -129,12 +131,12 @@
 		}
 		selectedId = note.id;
 		noteTags = [];
-		mobileShowEditor = true;
+		if (isMobile()) { goto(`/notes/${note.id}`); return; }
 	}
 
 	async function selectNote(id: number) {
+		if (isMobile()) { goto(`/notes/${id}`); return; }
 		selectedId = id;
-		mobileShowEditor = true;
 		showTagPopover = false;
 		noteTags = await api.tags.listForNote(id);
 	}
@@ -144,9 +146,11 @@
 	let tagFilterScrollable = $state(false);
 
 	function onTagFilterMouseEnter() {
+		if (isMobile()) return; // touch devices fire mouseenter on tap — skip to avoid layout jump
 		tagFilterExpanded = true;
 	}
 	function onTagFilterMouseLeave() {
+		if (isMobile()) return;
 		tagFilterScrollable = false;
 		tagFilterExpanded = false;
 		if (tagFilterEl) tagFilterEl.scrollTop = 0;
@@ -165,7 +169,6 @@
 		} else if (notes.length === 0) {
 			selectedId = null;
 			noteTags = [];
-			mobileShowEditor = false;
 		}
 	}
 
@@ -238,7 +241,6 @@
 		notes = notes.filter((n) => n.id !== id);
 		if (selectedId === id) {
 			selectedId = notes.length > 0 ? notes[0].id : null;
-			if (!selectedId) mobileShowEditor = false;
 		}
 	}
 
@@ -247,7 +249,6 @@
 		notes = notes.filter((n) => n.id !== id);
 		if (selectedId === id) {
 			selectedId = notes.length > 0 ? notes[0].id : null;
-			if (!selectedId) mobileShowEditor = false;
 		}
 	}
 
@@ -274,13 +275,13 @@
 	<title>Crapnote</title>
 </svelte:head>
 
-<div class="app" class:mobile-editor={mobileShowEditor}>
+<div class="app">
 	<!-- ── Sidebar ── -->
 	<aside class="sidebar">
 		<header class="sidebar-header">
 			<span class="app-name">Crapnote</span>
 			{#if selectedId}
-				<button class="hdr-btn mobile-show-editor" onclick={() => (mobileShowEditor = true)} title="View note" aria-label="View note">
+				<button class="hdr-btn mobile-show-editor" onclick={() => goto(`/notes/${selectedId}`)} title="View note" aria-label="View note">
 					<ChevronRight size={18} />
 				</button>
 			{/if}
@@ -398,12 +399,6 @@
 		{#if selectedNote}
 			<!-- Toolbar (above title) -->
 			<div class="toolbar" role="toolbar" aria-label="Formatting">
-				<!-- Mobile back -->
-				<button class="tb-btn mobile-back" onclick={() => (mobileShowEditor = false)} title="Back to notes">
-					<ChevronLeft size={16} />
-				</button>
-				<span class="tb-sep mobile-sep"></span>
-
 				<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold">
 					<Bold size={14} />
 				</button>
@@ -743,9 +738,6 @@
 
 	.save-status { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; }
 
-	/* Mobile back button — hidden on desktop */
-	.mobile-back { display: none; }
-	.mobile-sep { display: none; }
 	.mobile-show-editor { display: none; }
 
 	/* ─── Editor header (tags + title) ─────────────────── */
@@ -993,7 +985,17 @@
 			height: 100dvh;
 		}
 
-		/* On mobile, sidebar is full screen by default */
+		/* Tag filter: on mobile the hover-expand is disabled (JS guard), so remove
+		   the max-height clip entirely — all tags always visible, no transition */
+		.filter-tags,
+		.filter-tags.expanded {
+			max-height: none;
+			overflow-y: visible;
+			transition: none;
+		}
+
+		/* On mobile the list is a full-screen page; tapping a note navigates to
+		   /notes/[id] via SvelteKit routing — the editor pane is never shown here */
 		.sidebar {
 			width: 100%;
 			min-width: unset;
@@ -1002,22 +1004,9 @@
 			overflow: hidden;
 		}
 
-		/* Editor pane hidden unless we're in mobile-editor mode */
-		.editor-pane {
-			display: none;
-			position: fixed;
-			inset: 0;
-			z-index: 10;
-			background: #fff;
-		}
+		.editor-pane { display: none; }
 
-		/* When a note is selected on mobile, show editor full-screen */
-		.app.mobile-editor .sidebar { display: none; }
-		.app.mobile-editor .editor-pane { display: flex; }
-
-		/* Show mobile back button */
-		.mobile-back { display: flex; }
-		.mobile-sep { display: block; }
+		/* Show the chevron button to navigate to the currently-selected note */
 		.mobile-show-editor { display: flex; }
 
 		/* Tighter sidebar padding */
