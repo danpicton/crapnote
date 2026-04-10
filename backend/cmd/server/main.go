@@ -12,6 +12,7 @@ import (
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/db"
 	"github.com/danpicton/crapnote/internal/export"
+	"github.com/danpicton/crapnote/internal/images"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/trash"
@@ -71,8 +72,10 @@ func main() {
 		}
 	}()
 
+	imagesHandler := images.NewHandler(database)
+
 	port := envOrDefault("PORT", "8080")
-	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler)
+	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler)
 
 	addr := fmt.Sprintf(":%s", port)
 	log.Printf("listening on %s", addr)

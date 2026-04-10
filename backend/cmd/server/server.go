@@ -6,18 +6,20 @@ import (
 
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/export"
+	"github.com/danpicton/crapnote/internal/images"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/trash"
 )
 
 func newMux(
-	authHandler   *auth.Handler,
-	adminHandler  *auth.AdminHandler,
-	notesHandler  *notes.Handler,
-	tagsHandler   *tags.Handler,
-	trashHandler  *trash.Handler,
-	exportHandler *export.Handler,
+	authHandler    *auth.Handler,
+	adminHandler   *auth.AdminHandler,
+	notesHandler   *notes.Handler,
+	tagsHandler    *tags.Handler,
+	trashHandler   *trash.Handler,
+	exportHandler  *export.Handler,
+	imagesHandler  *images.Handler,
 ) *http.ServeMux {
 	mux := http.NewServeMux()
 
@@ -68,6 +70,10 @@ func newMux(
 
 	// Export
 	protected("GET", "/api/export", exportHandler.Export)
+
+	// Images
+	protected("POST", "/api/images", imagesHandler.Upload)
+	protected("GET", "/api/images/{id}", imagesHandler.Serve)
 
 	// Trash
 	protected("GET", "/api/trash", trashHandler.List)
