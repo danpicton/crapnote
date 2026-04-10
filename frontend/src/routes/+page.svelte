@@ -707,7 +707,7 @@
 		flex-wrap: wrap;
 		gap: 0.25rem;
 		padding: 0 0.75rem 0.4rem;
-		max-height: 3.2rem;
+		max-height: 2.55rem;
 		overflow-y: hidden;
 		transition: max-height 0.2s ease;
 	}
