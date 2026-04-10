@@ -33,9 +33,9 @@
 					onchange?.(markdown);
 				});
 			})
+			.use(imagePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(commonmark)
 			.use(underlinePlugin as Parameters<typeof Editor.prototype.use>[0])
-			.use(imagePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(history)
 			.use(listener)
 			.create();
