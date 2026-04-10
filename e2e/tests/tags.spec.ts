@@ -54,7 +54,7 @@ test.describe('Tags', () => {
     await createTagInPopover(page, 'sidebar-tag');
 
     // Sidebar pill should appear
-    await expect(page.locator('.tag-filter .tag-pill', { hasText: 'sidebar-tag' })).toBeVisible();
+    await expect(page.locator('.filter-tags .tag-pill', { hasText: 'sidebar-tag' })).toBeVisible();
   });
 
   test('filtering by tag shows only tagged notes', async ({ page }) => {
@@ -67,7 +67,7 @@ test.describe('Tags', () => {
     await createNote(page, 'Untagged note');
 
     // Click the tag filter pill
-    await page.locator('.tag-filter .tag-pill', { hasText: 'filter-tag' }).click();
+    await page.locator('.filter-tags .tag-pill', { hasText: 'filter-tag' }).click();
     await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
 
     // Only tagged note visible in list
@@ -84,12 +84,12 @@ test.describe('Tags', () => {
     await createNote(page, 'Note B');
 
     // Activate tag filter
-    await page.locator('.tag-filter .tag-pill', { hasText: 'restore-tag' }).click();
+    await page.locator('.filter-tags .tag-pill', { hasText: 'restore-tag' }).click();
     await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
     await expect(page.getByRole('list').getByText('Note B')).not.toBeVisible();
 
     // Click All
-    await page.locator('.tag-filter .tag-pill', { hasText: 'All' }).click();
+    await page.locator('.filter-fixed .tag-pill', { hasText: 'All' }).click();
     await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
     await expect(page.getByRole('list').getByText('Note B')).toBeVisible();
   });
@@ -104,7 +104,7 @@ test.describe('Tags', () => {
     await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
 
     // Sidebar filter pill should be active (has box-shadow / active class)
-    await expect(page.locator('.tag-filter .tag-pill.tag-pill-active', { hasText: 'chip-tag' })).toBeVisible();
+    await expect(page.locator('.filter-tags .tag-pill.tag-pill-active', { hasText: 'chip-tag' })).toBeVisible();
   });
 
   test('can remove a tag from a note', async ({ page }) => {
@@ -121,12 +121,29 @@ test.describe('Tags', () => {
     await expect(page.locator('.note-tag-chip', { hasText: 'remove-tag' })).not.toBeVisible();
   });
 
+  test('starred filter shows only starred notes', async ({ page }) => {
+    await createNote(page, 'Starred note');
+    // Star it via the sidebar action button
+    await page.locator('.note-item').filter({ hasText: 'Starred note' }).hover();
+    await page.locator('.note-item').filter({ hasText: 'Starred note' }).getByTitle('Star').click();
+    await page.waitForResponse((r) => r.url().includes('/star') && r.request().method() === 'PATCH');
+
+    await createNote(page, 'Plain note');
+
+    // Activate starred filter
+    await page.locator('.filter-fixed .tag-pill', { hasText: 'Starred' }).click();
+    await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
+
+    await expect(page.getByRole('list').getByText('Starred note')).toBeVisible();
+    await expect(page.getByRole('list').getByText('Plain note')).not.toBeVisible();
+  });
+
   test('tag disappears from filter when no notes have it', async ({ page }) => {
     await createNote(page, 'Solo tag note');
     await openTagPopover(page);
     await createTagInPopover(page, 'solo-tag');
 
-    await expect(page.locator('.tag-filter .tag-pill', { hasText: 'solo-tag' })).toBeVisible();
+    await expect(page.locator('.filter-tags .tag-pill', { hasText: 'solo-tag' })).toBeVisible();
 
     // Remove the tag from the note
     const checkbox = page.locator('.popover-item').filter({ hasText: 'solo-tag' }).locator('input[type=checkbox]');
@@ -134,6 +151,6 @@ test.describe('Tags', () => {
     await page.waitForResponse((r) => r.url().includes('/tags/') && r.request().method() === 'DELETE');
 
     // Pill should disappear (pseudo-erasure)
-    await expect(page.locator('.tag-filter .tag-pill', { hasText: 'solo-tag' })).not.toBeVisible();
+    await expect(page.locator('.filter-tags .tag-pill', { hasText: 'solo-tag' })).not.toBeVisible();
   });
 });
