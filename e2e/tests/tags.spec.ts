@@ -23,17 +23,16 @@ async function openTagPopover(page: Page) {
   await expect(page.getByText('Tags', { exact: true }).first()).toBeVisible();
 }
 
-/** Create a new tag via the popover's "New tag…" input. */
+/** Create a new tag via the popover's "New tag…" input and wait for the chip. */
 async function createTagInPopover(page: Page, name: string) {
-  // pressSequentially is more reliable than fill() for Svelte bind:value —
-  // each keystroke fires an input event that updates the reactive state.
+  // pressSequentially fires individual input events so Svelte's bind:value
+  // updates newTagName before Enter is pressed.
   const input = page.getByPlaceholder('New tag…');
   await input.click();
   await input.pressSequentially(name, { delay: 20 });
   await input.press('Enter');
-  // Verify the tag was actually applied by checking the chip appears.
-  // This is more robust than matching a specific POST URL, which varies
-  // depending on whether the tag already exists in the DB.
+  // Assert the actual outcome rather than a specific network call — the POST
+  // URL differs depending on whether the tag pre-exists in the DB.
   await expect(page.locator('.note-tag-chip', { hasText: name })).toBeVisible();
 }
 
@@ -47,7 +46,7 @@ test.describe('Tags', () => {
     await openTagPopover(page);
     await createTagInPopover(page, 'e2e-tag');
 
-    // Chip appears below the title
+    // Chip appears above the title
     await expect(page.locator('.note-tag-chip', { hasText: 'e2e-tag' })).toBeVisible();
 
     // Checkbox in popover is checked
@@ -73,9 +72,10 @@ test.describe('Tags', () => {
 
     await createNote(page, 'Untagged note');
 
-    // Click the tag filter pill
+    // Register wait BEFORE the click — the GET fires immediately with no debounce
+    const filterDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
     await page.locator('.filter-tags .tag-pill', { hasText: 'filter-tag' }).click();
-    await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
+    await filterDone;
 
     // Only tagged note visible in list
     await expect(page.getByRole('list').getByText('Tagged note')).toBeVisible();
@@ -90,14 +90,16 @@ test.describe('Tags', () => {
 
     await createNote(page, 'Note B');
 
-    // Activate tag filter
+    // Activate tag filter — set up wait before click
+    let notesDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
     await page.locator('.filter-tags .tag-pill', { hasText: 'restore-tag' }).click();
-    await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
+    await notesDone;
     await expect(page.getByRole('list').getByText('Note B')).not.toBeVisible();
 
-    // Click All
+    // Click All — set up wait before click
+    notesDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
     await page.locator('.filter-fixed .tag-pill', { hasText: 'All' }).click();
-    await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
+    await notesDone;
     await expect(page.getByRole('list').getByText('Note B')).toBeVisible();
   });
 
@@ -106,11 +108,12 @@ test.describe('Tags', () => {
     await openTagPopover(page);
     await createTagInPopover(page, 'chip-tag');
 
-    // Click the chip below the title
+    // Register wait before clicking the chip
+    const filterDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
     await page.locator('.note-tag-chip', { hasText: 'chip-tag' }).click();
-    await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
+    await filterDone;
 
-    // Sidebar filter pill should be active (has box-shadow / active class)
+    // Sidebar filter pill should be active
     await expect(page.locator('.filter-tags .tag-pill.tag-pill-active', { hasText: 'chip-tag' })).toBeVisible();
   });
 
@@ -119,10 +122,11 @@ test.describe('Tags', () => {
     await openTagPopover(page);
     await createTagInPopover(page, 'remove-tag');
 
-    // Uncheck via popover
+    // Uncheck via popover — register wait before unchecking
     const checkbox = page.locator('.popover-item').filter({ hasText: 'remove-tag' }).locator('input[type=checkbox]');
+    const deleteDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.url().includes('/tags/') && r.request().method() === 'DELETE');
     await checkbox.uncheck();
-    await page.waitForResponse((r) => r.url().includes('/api/notes') && r.url().includes('/tags/') && r.request().method() === 'DELETE');
+    await deleteDone;
 
     // Chip should be gone
     await expect(page.locator('.note-tag-chip', { hasText: 'remove-tag' })).not.toBeVisible();
@@ -130,16 +134,20 @@ test.describe('Tags', () => {
 
   test('starred filter shows only starred notes', async ({ page }) => {
     await createNote(page, 'Starred note');
-    // Star it via the sidebar action button
-    await page.locator('.note-item').filter({ hasText: 'Starred note' }).hover();
-    await page.locator('.note-item').filter({ hasText: 'Starred note' }).getByTitle('Star').click();
-    await page.waitForResponse((r) => r.url().includes('/star') && r.request().method() === 'PATCH');
+
+    // Star it — use .first() to tolerate a duplicate from a prior retry
+    const noteItem = page.locator('.note-item').filter({ hasText: 'Starred note' }).first();
+    await noteItem.hover();
+    const starDone = page.waitForResponse((r) => r.url().includes('/star') && r.request().method() === 'PATCH');
+    await noteItem.getByTitle('Star').click();
+    await starDone;
 
     await createNote(page, 'Plain note');
 
-    // Activate starred filter
+    // Activate starred filter — register wait before click
+    const filterDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
     await page.locator('.filter-fixed .tag-pill', { hasText: 'Starred' }).click();
-    await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
+    await filterDone;
 
     await expect(page.getByRole('list').getByText('Starred note')).toBeVisible();
     await expect(page.getByRole('list').getByText('Plain note')).not.toBeVisible();
@@ -152,10 +160,11 @@ test.describe('Tags', () => {
 
     await expect(page.locator('.filter-tags .tag-pill', { hasText: 'solo-tag' })).toBeVisible();
 
-    // Remove the tag from the note
+    // Remove the tag — register wait before unchecking
     const checkbox = page.locator('.popover-item').filter({ hasText: 'solo-tag' }).locator('input[type=checkbox]');
+    const deleteDone = page.waitForResponse((r) => r.url().includes('/tags/') && r.request().method() === 'DELETE');
     await checkbox.uncheck();
-    await page.waitForResponse((r) => r.url().includes('/tags/') && r.request().method() === 'DELETE');
+    await deleteDone;
 
     // Pill should disappear (pseudo-erasure)
     await expect(page.locator('.filter-tags .tag-pill', { hasText: 'solo-tag' })).not.toBeVisible();
