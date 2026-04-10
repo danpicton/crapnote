@@ -25,18 +25,16 @@ async function openTagPopover(page: Page) {
 
 /** Create a new tag via the popover's "New tag…" input. */
 async function createTagInPopover(page: Page, name: string) {
-  await page.getByPlaceholder('New tag…').fill(name);
-  await page.getByPlaceholder('New tag…').press('Enter');
-  // If the tag already exists in the DB (dirty state from a prior run),
-  // createAndAddTag skips POST /api/tags and only fires the note-tag
-  // association POST /api/notes/{id}/tags/{tagId}.
-  // Accept either so the test is resilient to pre-existing data.
-  await page.waitForResponse(
-    (r) => r.request().method() === 'POST' && (
-      /\/api\/tags$/.test(r.url()) ||
-      /\/api\/notes\/\d+\/tags\/\d+/.test(r.url())
-    )
-  );
+  // pressSequentially is more reliable than fill() for Svelte bind:value —
+  // each keystroke fires an input event that updates the reactive state.
+  const input = page.getByPlaceholder('New tag…');
+  await input.click();
+  await input.pressSequentially(name, { delay: 20 });
+  await input.press('Enter');
+  // Verify the tag was actually applied by checking the chip appears.
+  // This is more robust than matching a specific POST URL, which varies
+  // depending on whether the tag already exists in the DB.
+  await expect(page.locator('.note-tag-chip', { hasText: name })).toBeVisible();
 }
 
 test.describe('Tags', () => {
