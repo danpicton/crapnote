@@ -23,7 +23,7 @@
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, Minus, Undo2, Redo2,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
-		ChevronLeft, ChevronRight, Search, Tag as TagIcon,
+		ChevronRight, Search, Tag as TagIcon,
 	} from 'lucide-svelte';
 
 	let notes = $state<Note[]>([]);
@@ -399,12 +399,6 @@
 		{#if selectedNote}
 			<!-- Toolbar (above title) -->
 			<div class="toolbar" role="toolbar" aria-label="Formatting">
-				<!-- Mobile back -->
-				<button class="tb-btn mobile-back" onclick={() => (mobileShowEditor = false)} title="Back to notes">
-					<ChevronLeft size={16} />
-				</button>
-				<span class="tb-sep mobile-sep"></span>
-
 				<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold">
 					<Bold size={14} />
 				</button>
@@ -744,9 +738,6 @@
 
 	.save-status { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; }
 
-	/* Mobile back button — hidden on desktop */
-	.mobile-back { display: none; }
-	.mobile-sep { display: none; }
 	.mobile-show-editor { display: none; }
 
 	/* ─── Editor header (tags + title) ─────────────────── */
