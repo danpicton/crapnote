@@ -85,7 +85,11 @@
 		{ bg: '#f5d0fe', text: '#86198f' },   // 30 deep fuchsia
 		{ bg: '#a7f3d0', text: '#064e3b' },   // 31 deep emerald
 	] as const;
-	function tagColor(tag: Tag) { return PALETTE[tag.id % PALETTE.length]; }
+	function tagColor(tag: Tag) {
+		// Knuth multiplicative hash: top 5 bits of (id × golden-ratio-constant)
+		// Spreads sequential IDs across the full 32-colour palette without clustering
+		return PALETTE[Math.imul(tag.id, 0x9e3779b9) >>> 27];
+	}
 
 	// Only show tags that have at least one note (active or trashed); pure UI erasure
 	let visibleTags = $derived(allTags.filter(t => t.note_count > 0));
@@ -433,54 +437,21 @@
 				<span class="save-status">{saving ? 'Saving…' : ''}</span>
 			</div>
 
-			<!-- Tags row + Title -->
+			<!-- Tags (above title) + Title + Popover button (absolute right) -->
 			<div class="editor-header">
-				<div class="note-tags-row">
-					{#each noteTags as tag (tag.id)}
-						{@const c = tagColor(tag)}
-						<button
-							class="note-tag-chip"
-							style="--tag-bg:{c.bg};--tag-text:{c.text}"
-							onclick={() => applyFilter(activeTagId === tag.id ? null : tag.id, starredOnly)}
-							title="Filter by {tag.name}"
-						><TagIcon size={9} />{tag.name}</button>
-					{/each}
-					<!-- Tag popover button, always visible on the tag row -->
-					<div class="tag-popover-wrap">
-						<button
-							class="tag-chip-btn"
-							class:tag-chip-btn-active={noteTags.length > 0}
-							onclick={() => (showTagPopover = !showTagPopover)}
-							title="Tags"
-						>
-							<TagIcon size={11} />
-							{#if noteTags.length > 0}<span class="tb-tag-count">{noteTags.length}</span>{/if}
-						</button>
-						{#if showTagPopover}
-							<div class="tag-popover">
-								<p class="popover-label">Tags</p>
-								{#each allTags as tag (tag.id)}
-									{@const c = tagColor(tag)}
-									<label class="popover-item">
-										<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
-										<span class="popover-tag-dot" style="background:{c.text}"></span>
-										{tag.name}
-									</label>
-								{/each}
-								<div class="popover-new">
-									<input
-										class="popover-new-input"
-										type="text"
-										placeholder="New tag…"
-										bind:value={newTagName}
-										onkeydown={(e) => e.key === 'Enter' && createAndAddTag()}
-									/>
-									<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={12} /></button>
-								</div>
-							</div>
-						{/if}
+				{#if noteTags.length > 0}
+					<div class="note-tags-chips">
+						{#each noteTags as tag (tag.id)}
+							{@const c = tagColor(tag)}
+							<button
+								class="note-tag-chip"
+								style="--tag-bg:{c.bg};--tag-text:{c.text}"
+								onclick={() => applyFilter(activeTagId === tag.id ? null : tag.id, starredOnly)}
+								title="Filter by {tag.name}"
+							><TagIcon size={9} />{tag.name}</button>
+						{/each}
 					</div>
-				</div>
+				{/if}
 				<input
 					class="title-input"
 					type="text"
@@ -488,6 +459,42 @@
 					oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
 					placeholder="Note title"
 				/>
+				<!-- Popover button: always visible, absolutely pinned to top-right -->
+				<!-- When no tags it sits level with the title; when tags exist it aligns with the first chip row -->
+				<div class="tag-popover-wrap">
+					<button
+						class="tag-chip-btn"
+						class:tag-chip-btn-active={noteTags.length > 0}
+						onclick={() => (showTagPopover = !showTagPopover)}
+						title="Tags"
+					>
+						<TagIcon size={11} />
+						{#if noteTags.length > 0}<span class="tb-tag-count">{noteTags.length}</span>{/if}
+					</button>
+					{#if showTagPopover}
+						<div class="tag-popover">
+							<p class="popover-label">Tags</p>
+							{#each allTags as tag (tag.id)}
+								{@const c = tagColor(tag)}
+								<label class="popover-item">
+									<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
+									<span class="popover-tag-dot" style="background:{c.text}"></span>
+									{tag.name}
+								</label>
+							{/each}
+							<div class="popover-new">
+								<input
+									class="popover-new-input"
+									type="text"
+									placeholder="New tag…"
+									bind:value={newTagName}
+									onkeydown={(e) => e.key === 'Enter' && createAndAddTag()}
+								/>
+								<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={12} /></button>
+							</div>
+						</div>
+					{/if}
+				</div>
 			</div>
 
 			<!-- Editor body -->
@@ -736,19 +743,19 @@
 
 	/* ─── Editor header (tags + title) ─────────────────── */
 	.editor-header {
-		padding: 0.5rem 1rem 0.5rem;
+		position: relative;
+		/* Reserve right-side space for the absolute popover button */
+		padding: 0.45rem 3rem 0.45rem 1rem;
 		border-bottom: 1px solid #e5e7eb;
 		flex-shrink: 0;
 	}
 
-	/* Row of tag chips + popover button above the title */
-	.note-tags-row {
+	/* Chip row above the title (only rendered when note has tags) */
+	.note-tags-chips {
 		display: flex;
 		flex-wrap: wrap;
-		align-items: center;
 		gap: 0.25rem;
-		margin-bottom: 0.35rem;
-		position: relative;
+		margin-bottom: 0.3rem;
 	}
 
 	/* ─── Sidebar filter bar ─────────────────────────────── */
@@ -817,10 +824,15 @@
 		box-shadow: 0 0 0 1.5px #d97706;
 	}
 
-	/* ─── Tag popover (anchored to note-tags-row) ───────── */
-	.tag-popover-wrap { position: relative; }
+	/* ─── Tag popover (pinned to top-right of editor-header) ── */
+	/* Absolute, so it stays top-right whether tags exist or not */
+	.tag-popover-wrap {
+		position: absolute;
+		right: 1rem;
+		top: 0.45rem; /* matches editor-header padding-top */
+	}
 
-	/* Chip-style button that lives in the note-tags-row */
+	/* Chip-style button that triggers the popover */
 	.tag-chip-btn {
 		display: inline-flex;
 		align-items: center;
@@ -848,7 +860,7 @@
 
 	.tag-popover {
 		position: absolute;
-		left: 0;
+		right: 0;
 		top: calc(100% + 4px);
 		background: white;
 		border: 1px solid #e5e7eb;
