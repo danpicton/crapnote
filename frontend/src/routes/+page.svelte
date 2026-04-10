@@ -107,9 +107,15 @@
 	onMount(async () => {
 		await loadNotes();
 		allTags = await api.tags.list();
-		if (notes.length > 0) {
-			selectedId = notes[0].id;
-			noteTags = await api.tags.listForNote(notes[0].id);
+		if (notes.length > 0 && selectedId === null) {
+			const initId = notes[0].id;
+			selectedId = initId;
+			const tags = await api.tags.listForNote(initId);
+			// Only apply if no user action (newNote / selectNote) changed the
+			// selection while we were awaiting the listForNote response.
+			if (selectedId === initId) {
+				noteTags = tags;
+			}
 		}
 	});
 
