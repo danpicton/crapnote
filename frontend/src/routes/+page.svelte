@@ -701,13 +701,18 @@
 		padding: 0.4rem 0.75rem 0.25rem;
 	}
 
-	/* Scrollable tag pills — max ~2 rows then scroll */
+	/* Scrollable tag pills — 2 rows by default, expands to 5 on hover */
 	.filter-tags {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.25rem;
 		padding: 0 0.75rem 0.4rem;
-		max-height: 4rem;
+		max-height: 3.2rem;
+		overflow-y: hidden;
+		transition: max-height 0.2s ease;
+	}
+	.filter-tags:hover {
+		max-height: 8rem;
 		overflow-y: auto;
 	}
 
