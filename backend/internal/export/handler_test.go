@@ -35,7 +35,7 @@ func setup(t *testing.T) (*export.Handler, *auth.User) {
 	notesSvc.Create(context.Background(), user.ID, "First Note", "body one")   //nolint:errcheck
 	notesSvc.Create(context.Background(), user.ID, "Second Note", "body two")  //nolint:errcheck
 
-	h := export.NewHandler(notesSvc)
+	h := export.NewHandler(notesSvc, database)
 	return h, user
 }
 
@@ -123,7 +123,7 @@ func TestExport_FilenamesSanitised(t *testing.T) {
 	notesSvc := notes.NewService(notes.NewRepo(database))
 	notesSvc.Create(context.Background(), user.ID, "Hello/World & More!", "body") //nolint:errcheck
 
-	h := export.NewHandler(notesSvc)
+	h := export.NewHandler(notesSvc, database)
 	req := httptest.NewRequest(http.MethodGet, "/api/export", nil)
 	req = withUser(req, user)
 	w := httptest.NewRecorder()
@@ -145,7 +145,7 @@ func TestExport_EmptyNotes(t *testing.T) {
 	t.Cleanup(func() { database.Close() })
 	userRepo := auth.NewUserRepo(database)
 	user, _ := userRepo.Create(context.Background(), "empty", "$2a$12$x", false)
-	h := export.NewHandler(notes.NewService(notes.NewRepo(database)))
+	h := export.NewHandler(notes.NewService(notes.NewRepo(database)), database)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/export", nil)
 	req = withUser(req, user)

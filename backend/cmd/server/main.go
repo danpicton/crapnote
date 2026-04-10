@@ -45,7 +45,7 @@ func main() {
 
 	notesSvc := notes.NewService(notes.NewRepo(database))
 	notesHandler := notes.NewHandler(notesSvc)
-	exportHandler := export.NewHandler(notesSvc)
+	exportHandler := export.NewHandler(notesSvc, database)
 	tagsHandler := tags.NewHandler(tags.NewService(tags.NewRepo(database)))
 
 	trashRepo := trash.NewRepo(database)

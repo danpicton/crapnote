@@ -1,6 +1,7 @@
 package images
 
 import (
+	"context"
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
@@ -12,6 +13,37 @@ import (
 )
 
 const maxImageSize = 10 << 20 // 10 MB
+
+// Data holds the raw bytes and MIME type of a stored image.
+type Data struct {
+	MimeType string
+	Bytes    []byte
+}
+
+// FetchByIDs returns the image data for the given IDs that belong to userID.
+// IDs not found or belonging to another user are silently omitted.
+func FetchByIDs(ctx context.Context, db *sql.DB, userID int64, ids []string) (map[string]Data, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]Data, len(ids))
+	for _, id := range ids {
+		var uid int64
+		var mime string
+		var data []byte
+		err := db.QueryRowContext(ctx,
+			`SELECT user_id, mime_type, data FROM images WHERE id = ?`, id,
+		).Scan(&uid, &mime, &data)
+		if err == sql.ErrNoRows || uid != userID {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("fetch image %s: %w", id, err)
+		}
+		out[id] = Data{MimeType: mime, Bytes: data}
+	}
+	return out, nil
+}
 
 // Handler holds HTTP handlers for image upload and serving.
 type Handler struct {
