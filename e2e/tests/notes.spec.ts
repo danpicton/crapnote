@@ -101,7 +101,7 @@ test.describe('Notes', () => {
     await searchBox.fill('Apple');
     await searchDone;
 
-    await expect(page.locator('.note-item').filter({ hasText: 'Apple note' })).toBeVisible();
+    await expect(page.locator('.note-item').filter({ hasText: 'Apple note' }).first()).toBeVisible();
     await expect(page.locator('.note-item').filter({ hasText: 'Banana note' })).not.toBeVisible();
   });
 });

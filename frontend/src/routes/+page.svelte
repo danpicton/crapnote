@@ -14,7 +14,7 @@
 	import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 	import { toggleUnderlineCommand } from '$lib/milkdown/underline';
 	import type { CmdKey } from '@milkdown/kit/core';
-	import { api, type Note } from '$lib/api';
+	import { api, type Note, type Tag } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
 
@@ -23,7 +23,7 @@
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, Minus, Undo2, Redo2,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
-		ChevronLeft, ChevronRight, Search,
+		ChevronLeft, ChevronRight, Search, Tag as TagIcon,
 	} from 'lucide-svelte';
 
 	let notes = $state<Note[]>([]);
@@ -37,17 +37,86 @@
 	// Editor command ref
 	let editorRef = $state<EditorRef | null>(null);
 
+	// Tags
+	let allTags = $state<Tag[]>([]);
+	let noteTags = $state<Tag[]>([]);
+	let showTagPopover = $state(false);
+	let newTagName = $state('');
+	let activeTagId = $state<number | null>(null);
+	let starredOnly = $state(false);
+
+	const PALETTE = [
+		// Reds / Pinks / Rose
+		{ bg: '#fee2e2', text: '#991b1b' },   //  0 red
+		{ bg: '#fce7f3', text: '#831843' },   //  1 pink
+		{ bg: '#ffe4e6', text: '#881337' },   //  2 rose
+		{ bg: '#fecdd3', text: '#9f1239' },   //  3 deep rose
+		// Orange / Amber / Yellow / Lime
+		{ bg: '#ffedd5', text: '#9a3412' },   //  4 orange
+		{ bg: '#fef3c7', text: '#78350f' },   //  5 amber
+		{ bg: '#fef9c3', text: '#854d0e' },   //  6 yellow
+		{ bg: '#ecfccb', text: '#365314' },   //  7 lime
+		// Greens
+		{ bg: '#dcfce7', text: '#166534' },   //  8 green
+		{ bg: '#d1fae5', text: '#064e3b' },   //  9 emerald
+		{ bg: '#ccfbf1', text: '#134e4a' },   // 10 teal
+		// Cyans / Sky / Blues / Indigo
+		{ bg: '#cffafe', text: '#164e63' },   // 11 cyan
+		{ bg: '#e0f2fe', text: '#0c4a6e' },   // 12 sky
+		{ bg: '#dbeafe', text: '#1e3a8a' },   // 13 blue
+		{ bg: '#e0e7ff', text: '#3730a3' },   // 14 indigo
+		// Violet / Purple / Fuchsia
+		{ bg: '#ede9fe', text: '#4c1d95' },   // 15 violet
+		{ bg: '#f3e8ff', text: '#6b21a8' },   // 16 purple
+		{ bg: '#fae8ff', text: '#86198f' },   // 17 fuchsia
+		// Slightly deeper / -200 variants for more variety
+		{ bg: '#fecaca', text: '#7f1d1d' },   // 18 deep red
+		{ bg: '#fbcfe8', text: '#9d174d' },   // 19 deep pink
+		{ bg: '#fda4af', text: '#881337' },   // 20 mid rose
+		{ bg: '#fed7aa', text: '#7c2d12' },   // 21 deep orange
+		{ bg: '#fde68a', text: '#78350f' },   // 22 deep amber
+		{ bg: '#bbf7d0', text: '#14532d' },   // 23 deep green
+		{ bg: '#99f6e4', text: '#134e4a' },   // 24 deep teal
+		{ bg: '#bae6fd', text: '#0c4a6e' },   // 25 deep sky
+		{ bg: '#bfdbfe', text: '#1e40af' },   // 26 deep blue
+		{ bg: '#c7d2fe', text: '#3730a3' },   // 27 deep indigo
+		{ bg: '#ddd6fe', text: '#5b21b6' },   // 28 deep violet
+		{ bg: '#e9d5ff', text: '#6b21a8' },   // 29 deep purple
+		{ bg: '#f5d0fe', text: '#86198f' },   // 30 deep fuchsia
+		{ bg: '#a7f3d0', text: '#064e3b' },   // 31 deep emerald
+	] as const;
+	function tagColor(tag: Tag) {
+		// Knuth multiplicative hash: top 5 bits of (id × golden-ratio-constant)
+		// Spreads sequential IDs across the full 32-colour palette without clustering
+		return PALETTE[Math.imul(tag.id, 0x9e3779b9) >>> 27];
+	}
+
+	// Only show tags that have at least one note (active or trashed); pure UI erasure
+	let visibleTags = $derived(allTags.filter(t => t.note_count > 0));
+
 	let selectedNote = $derived(notes.find((n) => n.id === selectedId) ?? null);
 
 	async function loadNotes() {
-		const params: { search?: string } = {};
+		const params: { search?: string; tag?: number; starred?: boolean } = {};
 		if (search) params.search = search;
+		if (activeTagId !== null) params.tag = activeTagId;
+		if (starredOnly) params.starred = true;
 		notes = await api.notes.list(params);
 	}
 
 	onMount(async () => {
 		await loadNotes();
-		if (notes.length > 0) selectedId = notes[0].id;
+		allTags = await api.tags.list();
+		if (notes.length > 0 && selectedId === null) {
+			const initId = notes[0].id;
+			selectedId = initId;
+			const tags = await api.tags.listForNote(initId);
+			// Only apply if no user action (newNote / selectNote) changed the
+			// selection while we were awaiting the listForNote response.
+			if (selectedId === initId) {
+				noteTags = tags;
+			}
+		}
 	});
 
 	async function newNote() {
@@ -59,12 +128,82 @@
 			notes = [...notes.slice(0, firstUnpinned), note, ...notes.slice(firstUnpinned)];
 		}
 		selectedId = note.id;
+		noteTags = [];
 		mobileShowEditor = true;
 	}
 
-	function selectNote(id: number) {
+	async function selectNote(id: number) {
 		selectedId = id;
 		mobileShowEditor = true;
+		showTagPopover = false;
+		noteTags = await api.tags.listForNote(id);
+	}
+
+	let tagFilterEl = $state<HTMLDivElement | null>(null);
+	let tagFilterExpanded = $state(false);
+	let tagFilterScrollable = $state(false);
+
+	function onTagFilterMouseEnter() {
+		tagFilterExpanded = true;
+	}
+	function onTagFilterMouseLeave() {
+		tagFilterScrollable = false;
+		tagFilterExpanded = false;
+		if (tagFilterEl) tagFilterEl.scrollTop = 0;
+	}
+	function onTagFilterTransitionEnd() {
+		if (tagFilterExpanded) tagFilterScrollable = true;
+	}
+
+	async function applyFilter(tagId: number | null, starred: boolean) {
+		activeTagId = tagId;
+		starredOnly = starred;
+		await loadNotes();
+		if (notes.length > 0 && !notes.find(n => n.id === selectedId)) {
+			selectedId = notes[0].id;
+			noteTags = await api.tags.listForNote(notes[0].id);
+		} else if (notes.length === 0) {
+			selectedId = null;
+			noteTags = [];
+			mobileShowEditor = false;
+		}
+	}
+
+	function filterByTag(id: number | null) {
+		return applyFilter(id, starredOnly);
+	}
+
+	function toggleStarFilter() {
+		return applyFilter(activeTagId, !starredOnly);
+	}
+
+	async function toggleTag(tag: Tag) {
+		if (!selectedId) return;
+		const has = noteTags.find(t => t.id === tag.id);
+		if (has) {
+			await api.tags.removeFromNote(selectedId, tag.id);
+			noteTags = noteTags.filter(t => t.id !== tag.id);
+		} else {
+			await api.tags.addToNote(selectedId, tag.id);
+			noteTags = [...noteTags, tag];
+		}
+		// Refresh note_count so pseudo-erasure stays accurate
+		allTags = await api.tags.list();
+	}
+
+	async function createAndAddTag() {
+		if (!selectedId || !newTagName.trim()) return;
+		const name = newTagName.trim();
+		let tag = allTags.find(t => t.name.toLowerCase() === name.toLowerCase());
+		if (!tag) {
+			tag = await api.tags.create(name);
+		}
+		if (!noteTags.find(t => t.id === tag!.id)) {
+			await api.tags.addToNote(selectedId, tag.id);
+			noteTags = [...noteTags, tag];
+		}
+		newTagName = '';
+		allTags = await api.tags.list();
 	}
 
 	function scheduleAutoSave(field: 'title' | 'body', value: string) {
@@ -121,6 +260,7 @@
 		await loadNotes();
 		if (notes.length > 0 && !notes.find((n) => n.id === selectedId)) {
 			selectedId = notes[0].id;
+			noteTags = await api.tags.listForNote(notes[0].id);
 		}
 	}
 
@@ -157,6 +297,46 @@
 				bind:value={search}
 				oninput={handleSearch}
 			/>
+		</div>
+
+		<div class="filter-bar" role="group" aria-label="Filter notes">
+			<div class="filter-fixed">
+				<button
+					class="tag-pill"
+					class:tag-pill-active={activeTagId === null && !starredOnly}
+					onclick={() => applyFilter(null, false)}
+				>All</button>
+				<button
+					class="tag-pill tag-pill-star"
+					class:tag-pill-active={starredOnly}
+					onclick={toggleStarFilter}
+					title="Starred notes"
+				><Star size={11} /> Starred</button>
+			</div>
+			{#if visibleTags.length > 0}
+				<div
+					class="filter-tags"
+					class:expanded={tagFilterExpanded}
+					class:scrollable={tagFilterScrollable}
+					bind:this={tagFilterEl}
+					role="group"
+					aria-label="Tag filters"
+					onmouseenter={onTagFilterMouseEnter}
+					onmouseleave={onTagFilterMouseLeave}
+					ontransitionend={onTagFilterTransitionEnd}
+				>
+					{#each visibleTags as tag (tag.id)}
+						{@const c = tagColor(tag)}
+						<button
+							class="tag-pill"
+							class:tag-pill-active={activeTagId === tag.id}
+							style="--tag-bg:{c.bg};--tag-text:{c.text}"
+							onclick={() => filterByTag(activeTagId === tag.id ? null : tag.id)}
+							title="{tag.name} ({tag.note_count})"
+						>{tag.name}</button>
+					{/each}
+				</div>
+			{/if}
 		</div>
 
 		<ul class="note-list" role="list">
@@ -264,8 +444,21 @@
 				<span class="save-status">{saving ? 'Saving…' : ''}</span>
 			</div>
 
-			<!-- Title -->
+			<!-- Tags (above title) + Title + Popover button (absolute right) -->
 			<div class="editor-header">
+				{#if noteTags.length > 0}
+					<div class="note-tags-chips">
+						{#each noteTags as tag (tag.id)}
+							{@const c = tagColor(tag)}
+							<button
+								class="note-tag-chip"
+								style="--tag-bg:{c.bg};--tag-text:{c.text}"
+								onclick={() => applyFilter(activeTagId === tag.id ? null : tag.id, starredOnly)}
+								title="Filter by {tag.name}"
+							><TagIcon size={9} />{tag.name}</button>
+						{/each}
+					</div>
+				{/if}
 				<input
 					class="title-input"
 					type="text"
@@ -273,6 +466,42 @@
 					oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
 					placeholder="Note title"
 				/>
+				<!-- Popover button: always visible, absolutely pinned to top-right -->
+				<!-- When no tags it sits level with the title; when tags exist it aligns with the first chip row -->
+				<div class="tag-popover-wrap">
+					<button
+						class="tag-chip-btn"
+						class:tag-chip-btn-active={noteTags.length > 0}
+						onclick={() => (showTagPopover = !showTagPopover)}
+						title="Tags"
+					>
+						<TagIcon size={11} />
+						{#if noteTags.length > 0}<span class="tb-tag-count">{noteTags.length}</span>{/if}
+					</button>
+					{#if showTagPopover}
+						<div class="tag-popover">
+							<p class="popover-label">Tags</p>
+							{#each allTags as tag (tag.id)}
+								{@const c = tagColor(tag)}
+								<label class="popover-item">
+									<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
+									<span class="popover-tag-dot" style="background:{c.text}"></span>
+									{tag.name}
+								</label>
+							{/each}
+							<div class="popover-new">
+								<input
+									class="popover-new-input"
+									type="text"
+									placeholder="New tag…"
+									bind:value={newTagName}
+									onkeydown={(e) => e.key === 'Enter' && createAndAddTag()}
+								/>
+								<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={12} /></button>
+							</div>
+						</div>
+					{/if}
+				</div>
 			</div>
 
 			<!-- Editor body -->
@@ -519,12 +748,210 @@
 	.mobile-sep { display: none; }
 	.mobile-show-editor { display: none; }
 
-	/* ─── Editor header (title) ──────────────────────────── */
+	/* ─── Editor header (tags + title) ─────────────────── */
 	.editor-header {
-		padding: 0.75rem 1rem 0.5rem;
+		position: relative;
+		/* Right padding reserves a clear gutter for the absolute popover button.
+		   Sized to comfortably fit the button even with a 2-digit count badge. */
+		padding: 0.45rem 5rem 0.45rem 1rem;
 		border-bottom: 1px solid #e5e7eb;
 		flex-shrink: 0;
 	}
+
+	/* Chip row above the title (only rendered when note has tags) */
+	.note-tags-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		margin-bottom: 0.3rem;
+	}
+
+	/* ─── Sidebar filter bar ─────────────────────────────── */
+	.filter-bar {
+		border-bottom: 1px solid #e5e7eb;
+		flex-shrink: 0;
+	}
+
+	/* Fixed row: All + Starred — always visible */
+	.filter-fixed {
+		display: flex;
+		gap: 0.25rem;
+		padding: 0.4rem 0.75rem 0.25rem;
+	}
+
+	/* Scrollable tag pills — 2 rows by default, expands to 4 rows (then scrolls) on hover */
+	.filter-tags {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		padding: 0 0.75rem 0.4rem;
+		max-height: 2.55rem;
+		overflow-y: hidden;
+		transition: max-height 0.2s ease;
+	}
+	.filter-tags.expanded {
+		max-height: 5.1rem;
+	}
+	.filter-tags.scrollable {
+		overflow-y: auto;
+	}
+
+	.tag-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.15rem 0.55rem;
+		border: 1px solid #e5e7eb;
+		border-radius: 999px;
+		background: var(--tag-bg, transparent);
+		color: var(--tag-text, #6b7280);
+		font-size: 0.7rem;
+		font-weight: 500;
+		cursor: pointer;
+		transition: opacity 0.1s;
+	}
+	.tag-pill:hover { opacity: 0.8; }
+	.tag-pill-active {
+		border-color: var(--tag-text, #6366f1);
+		box-shadow: 0 0 0 1.5px var(--tag-text, #6366f1);
+	}
+	/* "All" pill — no CSS vars, use indigo */
+	.tag-pill:not([style]).tag-pill-active {
+		background: #e0e7ff;
+		color: #4338ca;
+		border-color: #6366f1;
+		box-shadow: 0 0 0 1.5px #6366f1;
+	}
+
+	/* Starred pill — amber */
+	.tag-pill-star { --tag-bg: #fef9c3; --tag-text: #854d0e; }
+	.tag-pill-star.tag-pill-active {
+		background: #fef9c3;
+		color: #854d0e;
+		border-color: #d97706;
+		box-shadow: 0 0 0 1.5px #d97706;
+	}
+
+	/* ─── Tag popover (pinned to top-right of editor-header) ── */
+	/* Absolute, so it stays top-right whether tags exist or not */
+	.tag-popover-wrap {
+		position: absolute;
+		right: 1rem;
+		top: 0.45rem; /* matches editor-header padding-top */
+	}
+
+	/* Chip-style button that triggers the popover */
+	.tag-chip-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.1rem 0.45rem;
+		background: transparent;
+		color: #9ca3af;
+		border-radius: 999px;
+		font-size: 0.7rem;
+		font-weight: 500;
+		border: 1px dashed #d1d5db;
+		cursor: pointer;
+		transition: all 0.1s;
+	}
+	.tag-chip-btn:hover { background: #f3f4f6; color: #374151; border-color: #9ca3af; }
+	.tag-chip-btn.tag-chip-btn-active { color: #6366f1; border-color: #6366f1; }
+
+	.tb-tag-count {
+		background: #6366f1;
+		color: white;
+		border-radius: 999px;
+		padding: 0 0.3rem;
+		font-size: 0.6rem;
+	}
+
+	.tag-popover {
+		position: absolute;
+		right: 0;
+		top: calc(100% + 4px);
+		background: white;
+		border: 1px solid #e5e7eb;
+		border-radius: 0.5rem;
+		box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+		padding: 0.5rem;
+		min-width: 11rem;
+		z-index: 30;
+	}
+
+	.popover-label {
+		font-size: 0.7rem;
+		font-weight: 600;
+		color: #9ca3af;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin: 0 0 0.25rem;
+		padding: 0 0.25rem;
+	}
+
+	.popover-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.3rem 0.25rem;
+		border-radius: 0.25rem;
+		cursor: pointer;
+		font-size: 0.85rem;
+	}
+	.popover-item:hover { background: #f3f4f6; }
+
+	.popover-tag-dot {
+		width: 0.5rem;
+		height: 0.5rem;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+
+	.popover-new {
+		display: flex;
+		align-items: center;
+		gap: 0.25rem;
+		margin-top: 0.375rem;
+		padding-top: 0.375rem;
+		border-top: 1px solid #f3f4f6;
+	}
+
+	.popover-new-input {
+		flex: 1;
+		border: none;
+		border-bottom: 1px solid #d1d5db;
+		outline: none;
+		font-size: 0.8rem;
+		padding: 0.15rem 0.1rem;
+		background: transparent;
+	}
+	.popover-new-input:focus { border-color: #6366f1; }
+
+	.popover-add-btn {
+		background: none;
+		border: none;
+		cursor: pointer;
+		color: #6366f1;
+		padding: 0.1rem;
+		display: flex;
+	}
+
+	/* ─── Tag chips in the note-tags-row ────────────────── */
+	.note-tag-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.2rem;
+		padding: 0.1rem 0.45rem;
+		background: var(--tag-bg, #e0e7ff);
+		color: var(--tag-text, #4338ca);
+		border-radius: 999px;
+		font-size: 0.7rem;
+		font-weight: 500;
+		border: none;
+		cursor: pointer;
+		transition: opacity 0.1s;
+	}
+	.note-tag-chip:hover { opacity: 0.75; }
 
 	.title-input {
 		width: 100%;
