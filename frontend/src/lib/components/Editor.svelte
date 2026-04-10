@@ -33,9 +33,9 @@
 					onchange?.(markdown);
 				});
 			})
-			.use(imagePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(commonmark)
 			.use(underlinePlugin as Parameters<typeof Editor.prototype.use>[0])
+			.use(imagePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(history)
 			.use(listener)
 			.create();
@@ -134,7 +134,7 @@
 	}
 
 	/* ── Image blocks ── */
-	.editor-container :global(figure.crapnote-img-view) {
+	.editor-container :global(span.crapnote-img-view) {
 		position: relative;
 		display: inline-block;
 		margin: 0.5em 0;
@@ -143,7 +143,7 @@
 		user-select: none;
 	}
 
-	.editor-container :global(figure.crapnote-img-view img) {
+	.editor-container :global(span.crapnote-img-view img) {
 		display: block;
 		max-width: 100%;
 		height: auto;
@@ -164,7 +164,7 @@
 		transition: opacity 0.15s;
 	}
 
-	.editor-container :global(figure.crapnote-img-view:hover .crapnote-img-handle) {
+	.editor-container :global(span.crapnote-img-view:hover .crapnote-img-handle) {
 		opacity: 1;
 	}
 </style>
