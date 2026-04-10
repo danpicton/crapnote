@@ -146,9 +146,11 @@
 	let tagFilterScrollable = $state(false);
 
 	function onTagFilterMouseEnter() {
+		if (isMobile()) return; // touch devices fire mouseenter on tap — skip to avoid layout jump
 		tagFilterExpanded = true;
 	}
 	function onTagFilterMouseLeave() {
+		if (isMobile()) return;
 		tagFilterScrollable = false;
 		tagFilterExpanded = false;
 		if (tagFilterEl) tagFilterEl.scrollTop = 0;
@@ -990,6 +992,15 @@
 		.app {
 			flex-direction: column;
 			height: 100dvh;
+		}
+
+		/* Tag filter: on mobile the hover-expand is disabled (JS guard), so remove
+		   the max-height clip entirely — all tags always visible, no transition */
+		.filter-tags,
+		.filter-tags.expanded {
+			max-height: none;
+			overflow-y: visible;
+			transition: none;
 		}
 
 		/* On mobile the list is a full-screen page; tapping a note navigates to
