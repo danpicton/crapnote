@@ -122,6 +122,7 @@
 			notes = [...notes.slice(0, firstUnpinned), note, ...notes.slice(firstUnpinned)];
 		}
 		selectedId = note.id;
+		noteTags = [];
 		mobileShowEditor = true;
 	}
 
@@ -744,8 +745,9 @@
 	/* ─── Editor header (tags + title) ─────────────────── */
 	.editor-header {
 		position: relative;
-		/* Reserve right-side space for the absolute popover button */
-		padding: 0.45rem 3rem 0.45rem 1rem;
+		/* Right padding reserves a clear gutter for the absolute popover button.
+		   Sized to comfortably fit the button even with a 2-digit count badge. */
+		padding: 0.45rem 5rem 0.45rem 1rem;
 		border-bottom: 1px solid #e5e7eb;
 		flex-shrink: 0;
 	}
