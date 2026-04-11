@@ -8,6 +8,7 @@
 	import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
 	import { underlinePlugin } from '$lib/milkdown/underline';
 	import { imagePlugin } from '$lib/milkdown/image';
+	import { linkPlugin } from '$lib/milkdown/link';
 
 	export interface EditorRef {
 		call: (key: string | CmdKey<unknown>, payload?: unknown) => void;
@@ -17,9 +18,10 @@
 		value?: string;
 		onchange?: (markdown: string) => void;
 		ref?: EditorRef | null;
+		oninsertlink?: () => void;
 	}
 
-	let { value = '', onchange, ref = $bindable<EditorRef | null>(null) }: Props = $props();
+	let { value = '', onchange, ref = $bindable<EditorRef | null>(null), oninsertlink }: Props = $props();
 
 	let container: HTMLDivElement;
 	let _editor: Editor | null = null;
@@ -36,9 +38,12 @@
 			.use(commonmark)
 			.use(underlinePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(imagePlugin as Parameters<typeof Editor.prototype.use>[0])
+			.use(linkPlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(history)
 			.use(listener)
 			.create();
+
+		container.addEventListener('crapnote:insert-link', () => oninsertlink?.());
 
 		ref = {
 			call: (key, payload) => {
@@ -131,6 +136,16 @@
 
 	.editor-container :global(u) {
 		text-decoration: underline;
+	}
+
+	.editor-container :global(.ProseMirror a) {
+		color: #4f46e5;
+		text-decoration: underline;
+		cursor: pointer;
+	}
+
+	.editor-container :global(.ProseMirror a:hover) {
+		color: #3730a3;
 	}
 
 	/* ── Image blocks ── */
