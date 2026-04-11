@@ -7,6 +7,7 @@
 	import { history } from '@milkdown/kit/plugin/history';
 	import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
 	import { underlinePlugin } from '$lib/milkdown/underline';
+	import { imagePlugin } from '$lib/milkdown/image';
 
 	export interface EditorRef {
 		call: (key: string | CmdKey<unknown>, payload?: unknown) => void;
@@ -34,6 +35,7 @@
 			})
 			.use(commonmark)
 			.use(underlinePlugin as Parameters<typeof Editor.prototype.use>[0])
+			.use(imagePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(history)
 			.use(listener)
 			.create();
@@ -129,5 +131,40 @@
 
 	.editor-container :global(u) {
 		text-decoration: underline;
+	}
+
+	/* ── Image blocks ── */
+	.editor-container :global(span.crapnote-img-view) {
+		position: relative;
+		display: inline-block;
+		margin: 0.5em 0;
+		line-height: 0;
+		max-width: 100%;
+		user-select: none;
+	}
+
+	.editor-container :global(span.crapnote-img-view img) {
+		display: block;
+		max-width: 100%;
+		height: auto;
+		border-radius: 0.25em;
+	}
+
+	.editor-container :global(.crapnote-img-handle) {
+		position: absolute;
+		right: -5px;
+		top: 50%;
+		transform: translateY(-50%);
+		width: 10px;
+		height: 36px;
+		background: #6366f1;
+		border-radius: 4px;
+		cursor: ew-resize;
+		opacity: 0;
+		transition: opacity 0.15s;
+	}
+
+	.editor-container :global(span.crapnote-img-view:hover .crapnote-img-handle) {
+		opacity: 1;
 	}
 </style>

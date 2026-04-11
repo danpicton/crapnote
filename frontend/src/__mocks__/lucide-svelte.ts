@@ -19,6 +19,7 @@ export {
 	noop as EyeOff,
 	noop as FileCode2,
 	noop as Home,
+	noop as Image,
 	noop as Info,
 	noop as Italic,
 	noop as Key,

@@ -13,6 +13,7 @@
 	} from '@milkdown/kit/preset/commonmark';
 	import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 	import { toggleUnderlineCommand } from '$lib/milkdown/underline';
+	import { insertImageCommand } from '$lib/milkdown/image';
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, type Note, type Tag } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -21,7 +22,7 @@
 	// Lucide icons
 	import {
 		Bold, Italic, Underline, Quote, Code, FileCode2,
-		List, ListOrdered, Minus, Undo2, Redo2,
+		List, ListOrdered, Minus, Undo2, Redo2, Image,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search, Tag as TagIcon,
 	} from 'lucide-svelte';
@@ -434,6 +435,10 @@
 				</button>
 				<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo">
 					<Redo2 size={14} />
+				</button>
+				<span class="tb-sep"></span>
+				<button class="tb-btn" onclick={() => cmd(insertImageCommand.key)} title="Insert image">
+					<Image size={14} />
 				</button>
 				<span class="tb-spacer"></span>
 				<span class="save-status">{saving ? 'Saving…' : ''}</span>
