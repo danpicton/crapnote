@@ -11,7 +11,10 @@ vi.mock('@milkdown/kit/preset/commonmark', () => ({
 	wrapInOrderedListCommand: { key: 'WrapInOrderedList' },
 	insertHrCommand: { key: 'InsertHr' },
 	createCodeBlockCommand: { key: 'CreateCodeBlock' },
+	toggleLinkCommand: { key: 'ToggleLink' },
 }));
+
+vi.mock('$lib/milkdown/link', () => ({ linkPlugin: [] }));
 vi.mock('@milkdown/kit/plugin/history', () => ({
 	undoCommand: { key: 'Undo' },
 	redoCommand: { key: 'Redo' },
@@ -162,5 +165,71 @@ describe('/notes/[id] page', () => {
 		await waitFor(() =>
 			expect(api.tags.removeFromNote).toHaveBeenCalledWith(42, 1)
 		);
+	});
+});
+
+describe('Link toolbar', () => {
+	it('shows the Insert link button', async () => {
+		render(NotePage);
+		await waitFor(() =>
+			expect(screen.getByTitle('Insert link (Ctrl+K)')).toBeInTheDocument()
+		);
+	});
+
+	it('clicking the link button shows the URL input dialog', async () => {
+		render(NotePage);
+		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
+
+		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
+
+		expect(screen.getByPlaceholderText(/https/i)).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: /apply/i })).toBeInTheDocument();
+	});
+
+	it('pressing Escape closes the dialog', async () => {
+		render(NotePage);
+		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
+
+		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
+		const input = screen.getByPlaceholderText(/https/i);
+
+		await fireEvent.keyDown(input, { key: 'Escape' });
+
+		expect(screen.queryByPlaceholderText(/https/i)).not.toBeInTheDocument();
+	});
+
+	it('clicking the backdrop closes the dialog', async () => {
+		render(NotePage);
+		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
+
+		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
+		expect(screen.getByPlaceholderText(/https/i)).toBeInTheDocument();
+
+		await fireEvent.click(document.querySelector('.link-dialog-backdrop')!);
+
+		expect(screen.queryByPlaceholderText(/https/i)).not.toBeInTheDocument();
+	});
+
+	it('pressing Enter in the URL input closes the dialog', async () => {
+		render(NotePage);
+		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
+
+		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
+		const input = screen.getByPlaceholderText(/https/i);
+		await fireEvent.input(input, { target: { value: 'https://example.com' } });
+
+		await fireEvent.keyDown(input, { key: 'Enter' });
+
+		expect(screen.queryByPlaceholderText(/https/i)).not.toBeInTheDocument();
+	});
+
+	it('clicking Apply closes the dialog', async () => {
+		render(NotePage);
+		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
+
+		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
+		await fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+
+		expect(screen.queryByPlaceholderText(/https/i)).not.toBeInTheDocument();
 	});
 });

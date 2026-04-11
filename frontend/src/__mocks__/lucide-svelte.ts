@@ -23,6 +23,7 @@ export {
 	noop as Info,
 	noop as Italic,
 	noop as Key,
+	noop as Link,
 	noop as List,
 	noop as ListOrdered,
 	noop as Lock,

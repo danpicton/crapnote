@@ -25,11 +25,11 @@ import type { EditorView } from '@milkdown/kit/prose/view';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function isUrl(s: string): boolean {
+export function isUrl(s: string): boolean {
 	return /^https?:\/\/\S+/.test(s) || /^www\.\S+\.\S+/.test(s);
 }
 
-function normalizeUrl(url: string): string {
+export function normalizeUrl(url: string): string {
 	const t = url.trim();
 	return t.startsWith('http://') || t.startsWith('https://') ? t : `https://${t}`;
 }
