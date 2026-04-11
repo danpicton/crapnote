@@ -141,7 +141,7 @@
 	.editor-container :global(.ProseMirror a) {
 		color: #4f46e5;
 		text-decoration: underline;
-		cursor: text;
+		cursor: pointer;
 	}
 
 	.editor-container :global(.ProseMirror a:hover) {

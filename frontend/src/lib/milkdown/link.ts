@@ -40,6 +40,17 @@ export const linkKeymapPlugin = $prose(() =>
 	new Plugin({
 		key: new PluginKey('crapnote-link-keymap'),
 		props: {
+			// Open links on click.
+			handleDOMEvents: {
+				click(_view: EditorView, event: MouseEvent): boolean {
+					const anchor = (event.target as HTMLElement).closest('a');
+					if (!anchor?.href) return false;
+					event.preventDefault();
+					window.open(anchor.href, '_blank', 'noopener,noreferrer');
+					return true;
+				},
+			},
+
 			handleKeyDown(view: EditorView, event: KeyboardEvent): boolean {
 				if (!((event.ctrlKey || event.metaKey) && event.key === 'k')) return false;
 				event.preventDefault();
