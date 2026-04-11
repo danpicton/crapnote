@@ -14,12 +14,13 @@
 	} from '@milkdown/kit/preset/commonmark';
 	import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 	import { toggleUnderlineCommand } from '$lib/milkdown/underline';
+	import { toggleLinkCommand } from '@milkdown/kit/preset/commonmark';
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, type Note, type Tag } from '$lib/api';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
 	import {
 		Bold, Italic, Underline, Quote, Code, FileCode2,
-		List, ListOrdered, Minus, Undo2, Redo2,
+		List, ListOrdered, Minus, Undo2, Redo2, Link,
 		Plus, ChevronLeft, Tag as TagIcon,
 	} from 'lucide-svelte';
 
@@ -99,6 +100,26 @@
 		editorRef?.call(key, payload);
 	}
 
+	// Link dialog
+	let showLinkDialog = $state(false);
+	let linkDialogHref = $state('');
+
+	function openLinkDialog() {
+		linkDialogHref = '';
+		showLinkDialog = true;
+	}
+
+	function applyLink() {
+		const href = linkDialogHref.trim();
+		if (href) cmd(toggleLinkCommand.key as CmdKey<unknown>, { href });
+		showLinkDialog = false;
+	}
+
+	function linkInputKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') { e.preventDefault(); applyLink(); }
+		if (e.key === 'Escape') { showLinkDialog = false; }
+	}
+
 	async function toggleTag(tag: Tag) {
 		const has = noteTags.find(t => t.id === tag.id);
 		if (has) {
@@ -142,6 +163,24 @@
 		<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold"><Bold size={14} /></button>
 		<button class="tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic"><Italic size={14} /></button>
 		<button class="tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline"><Underline size={14} /></button>
+		<div class="link-btn-wrap">
+			<button class="tb-btn" onclick={openLinkDialog} title="Insert link (Ctrl+K)"><Link size={14} /></button>
+			{#if showLinkDialog}
+				<div class="link-dialog-backdrop" onclick={() => (showLinkDialog = false)} role="presentation"></div>
+				<div class="link-dialog" role="dialog" aria-label="Insert link">
+					<!-- svelte-ignore a11y_autofocus -->
+					<input
+						class="link-dialog-input"
+						type="url"
+						placeholder="https://…"
+						bind:value={linkDialogHref}
+						onkeydown={linkInputKeydown}
+						autofocus
+					/>
+					<button class="link-dialog-btn" onclick={applyLink}>Apply</button>
+				</div>
+			{/if}
+		</div>
 		<span class="tb-sep"></span>
 		<button class="tb-btn" onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote"><Quote size={14} /></button>
 		<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code"><Code size={14} /></button>
@@ -216,6 +255,7 @@
 			value={note.body}
 			onchange={(md) => scheduleAutoSave('body', md)}
 			bind:ref={editorRef}
+			oninsertlink={openLinkDialog}
 		/>
 	{/key}
 </div>
@@ -275,6 +315,56 @@
 	}
 	.tb-spacer { flex: 1; }
 	.save-status { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; }
+
+	.link-btn-wrap {
+		position: relative;
+		display: inline-flex;
+	}
+
+	.link-dialog-backdrop {
+		position: fixed;
+		inset: 0;
+		z-index: 49;
+	}
+
+	.link-dialog {
+		position: absolute;
+		top: calc(100% + 4px);
+		left: 0;
+		background: white;
+		border: 1px solid #e5e7eb;
+		border-radius: 0.5rem;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+		padding: 0.4rem;
+		display: flex;
+		gap: 0.25rem;
+		z-index: 50;
+		min-width: 14rem;
+	}
+
+	.link-dialog-input {
+		flex: 1;
+		border: 1px solid #d1d5db;
+		border-radius: 0.25rem;
+		padding: 0.25rem 0.4rem;
+		font-size: 0.8rem;
+		outline: none;
+		min-width: 0;
+	}
+	.link-dialog-input:focus { border-color: #6366f1; }
+
+	.link-dialog-btn {
+		background: #6366f1;
+		color: white;
+		border: none;
+		border-radius: 0.25rem;
+		padding: 0.25rem 0.6rem;
+		font-size: 0.8rem;
+		cursor: pointer;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+	.link-dialog-btn:hover { background: #4f46e5; }
 
 	/* ─── Editor header ────────────────────────── */
 	.editor-header {
