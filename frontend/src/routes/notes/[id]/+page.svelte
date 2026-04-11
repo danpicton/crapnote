@@ -104,6 +104,10 @@
 	let showLinkDialog = $state(false);
 	let linkDialogHref = $state('');
 
+	function focusInput(node: HTMLInputElement) {
+		node.focus();
+	}
+
 	function openLinkDialog() {
 		linkDialogHref = '';
 		showLinkDialog = true;
@@ -168,14 +172,13 @@
 			{#if showLinkDialog}
 				<div class="link-dialog-backdrop" onclick={() => (showLinkDialog = false)} role="presentation"></div>
 				<div class="link-dialog" role="dialog" aria-label="Insert link">
-					<!-- svelte-ignore a11y_autofocus -->
 					<input
 						class="link-dialog-input"
 						type="url"
 						placeholder="https://…"
 						bind:value={linkDialogHref}
 						onkeydown={linkInputKeydown}
-						autofocus
+						use:focusInput
 					/>
 					<button class="link-dialog-btn" onclick={applyLink}>Apply</button>
 				</div>
