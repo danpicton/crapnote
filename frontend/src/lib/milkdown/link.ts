@@ -143,7 +143,7 @@ export const linkPasteRule = $pasteRule(() => ({
 // ─── 3. Input rule ([text](url) → link as you type) ──────────────────────────
 
 export const linkInputRule = $inputRule(
-	(_ctx) =>
+	() =>
 		new InputRule(/\[([^\]\n]+)\]\(([^)\s]+)\)$/, (state, match, start, end) => {
 			const [, linkText, rawHref] = match;
 			const markType = state.schema.marks['link'];
