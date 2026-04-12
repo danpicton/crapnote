@@ -525,7 +525,7 @@
 					{#if showTagPopover}
 						<div class="tag-popover">
 							<p class="popover-label">Tags</p>
-							{#each allTags as tag (tag.id)}
+							{#each visibleTags as tag (tag.id)}
 								{@const c = tagColor(tag)}
 								<label class="popover-item">
 									<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
