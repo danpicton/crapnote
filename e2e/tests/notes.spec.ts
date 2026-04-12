@@ -1,6 +1,9 @@
 import { test, expect, type Page } from '@playwright/test';
 
 async function login(page: Page) {
+  // Clear any existing session cookie so the layout's onMount auth-redirect
+  // doesn't race with the form submission when a prior test left a valid session.
+  await page.context().clearCookies();
   await page.goto('/login');
   await page.getByRole('textbox', { name: /username/i }).fill('admin');
   await page.getByRole('textbox', { name: /password/i }).fill('admin123');
