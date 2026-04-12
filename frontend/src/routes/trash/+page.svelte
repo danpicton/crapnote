@@ -97,17 +97,17 @@
 		justify-content: center;
 		padding: 0.25rem;
 		border-radius: 0.375rem;
-		color: #6b7280;
+		color: var(--text-3);
 		text-decoration: none;
 		flex-shrink: 0;
 	}
-	.back-btn:hover { background: #f3f4f6; color: #111827; }
+	.back-btn:hover { background: var(--bg-hover); color: var(--text); }
 
 	h1 { font-size: 1.5rem; margin: 0; flex: 1; }
 
 	.danger-btn {
 		padding: 0.375rem 0.75rem;
-		background: #dc2626;
+		background: var(--danger);
 		color: white;
 		border: none;
 		border-radius: 0.375rem;
@@ -116,7 +116,7 @@
 	}
 	.danger-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-	.status { color: #9ca3af; text-align: center; padding: 2rem; }
+	.status { color: var(--text-4); text-align: center; padding: 2rem; }
 
 	.entry-list {
 		list-style: none;
@@ -132,7 +132,7 @@
 		align-items: center;
 		gap: 1rem;
 		padding: 0.75rem 1rem;
-		border: 1px solid #e5e7eb;
+		border: 1px solid var(--border);
 		border-radius: 0.5rem;
 	}
 
@@ -145,7 +145,7 @@
 
 	.entry-title { font-weight: 500; }
 
-	.entry-meta { font-size: 0.75rem; color: #9ca3af; }
+	.entry-meta { font-size: 0.75rem; color: var(--text-4); }
 
 	.countdown { color: #f59e0b; }
 
@@ -163,9 +163,9 @@
 		background: transparent;
 	}
 
-	.icon-btn.restore { color: #6366f1; }
-	.icon-btn.restore:hover { background: #eef2ff; }
+	.icon-btn.restore { color: var(--accent); }
+	.icon-btn.restore:hover { background: var(--accent-lt); }
 
-	.icon-btn.delete { color: #dc2626; }
-	.icon-btn.delete:hover { background: #fef2f2; }
+	.icon-btn.delete { color: var(--danger); }
+	.icon-btn.delete:hover { background: var(--danger-bg); }
 </style>

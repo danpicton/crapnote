@@ -1,6 +1,7 @@
 <script lang="ts">
-	import { ChevronLeft, Users } from 'lucide-svelte';
+	import { ChevronLeft, Moon, Sun, Users } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { theme } from '$lib/stores/theme.svelte';
 
 	let exportPassword = $state('');
 
@@ -54,6 +55,20 @@
 	{/if}
 
 	<section class="section">
+		<h2>Appearance</h2>
+		<button
+			class="theme-btn"
+			onclick={() => theme.toggle()}
+		>
+			{#if theme.current === 'light'}
+				<Moon size={15} /> Enable dark mode
+			{:else}
+				<Sun size={15} /> Enable light mode
+			{/if}
+		</button>
+	</section>
+
+	<section class="section">
 		<h2>Account</h2>
 		<p class="hint">Logged in as <strong>{auth.user?.username}</strong></p>
 	</section>
@@ -75,23 +90,23 @@
 		justify-content: center;
 		padding: 0.25rem;
 		border-radius: 0.375rem;
-		color: #6b7280;
+		color: var(--text-3);
 		text-decoration: none;
 		flex-shrink: 0;
 	}
-	.back-btn:hover { background: #f3f4f6; color: #111827; }
+	.back-btn:hover { background: var(--bg-hover); color: var(--text); }
 
 	h1 { font-size: 1.5rem; margin: 0; }
-	h2 { font-size: 1rem; margin: 0 0 0.5rem; color: #374151; }
+	h2 { font-size: 1rem; margin: 0 0 0.5rem; color: var(--text-2); }
 
 	.section {
 		margin-bottom: 2rem;
 		padding-bottom: 1.5rem;
-		border-bottom: 1px solid #e5e7eb;
+		border-bottom: 1px solid var(--border);
 	}
 	.section:last-child { border-bottom: none; }
 
-	.hint { font-size: 0.875rem; color: #6b7280; margin: 0 0 0.75rem; }
+	.hint { font-size: 0.875rem; color: var(--text-3); margin: 0 0 0.75rem; }
 
 	.export-row {
 		display: flex;
@@ -102,16 +117,18 @@
 
 	.export-row input {
 		padding: 0.375rem 0.625rem;
-		border: 1px solid #d1d5db;
+		border: 1px solid var(--border-md);
 		border-radius: 0.375rem;
 		font-size: 0.875rem;
 		flex: 1;
 		min-width: 150px;
+		background: var(--bg);
+		color: var(--text);
 	}
 
 	.export-btn {
 		padding: 0.375rem 0.875rem;
-		background: #6366f1;
+		background: var(--accent);
 		color: white;
 		border: none;
 		border-radius: 0.375rem;
@@ -119,7 +136,7 @@
 		font-size: 0.875rem;
 		white-space: nowrap;
 	}
-	.export-btn:hover { background: #4f46e5; }
+	.export-btn:hover { background: var(--accent-dk); }
 
 	.admin-btn {
 		display: inline-flex;
@@ -127,9 +144,23 @@
 		gap: 0.375rem;
 		padding: 0.375rem 0.625rem;
 		border-radius: 0.375rem;
-		color: #6b7280;
+		color: var(--text-3);
 		font-size: 0.875rem;
 		text-decoration: none;
 	}
-	.admin-btn:hover { background: #f3f4f6; color: #111827; }
+	.admin-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+	.theme-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		padding: 0.375rem 0.75rem;
+		border: 1px solid var(--border-md);
+		border-radius: 0.375rem;
+		background: transparent;
+		color: var(--text-2);
+		font-size: 0.875rem;
+		cursor: pointer;
+	}
+	.theme-btn:hover { background: var(--bg-hover); }
 </style>

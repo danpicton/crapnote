@@ -146,11 +146,11 @@
 		justify-content: center;
 		padding: 0.25rem;
 		border-radius: 0.375rem;
-		color: #6b7280;
+		color: var(--text-3);
 		text-decoration: none;
 		flex-shrink: 0;
 	}
-	.back-btn:hover { background: #f3f4f6; color: #111827; }
+	.back-btn:hover { background: var(--bg-hover); color: var(--text); }
 
 	h1 { font-size: 1.5rem; margin: 0; }
 	h2 { font-size: 1.125rem; margin: 0 0 0.75rem; }
@@ -168,9 +168,11 @@
 	.create-form input[type='text'],
 	.create-form input[type='password'] {
 		padding: 0.375rem 0.625rem;
-		border: 1px solid #d1d5db;
+		border: 1px solid var(--border-md);
 		border-radius: 0.375rem;
 		font-size: 0.875rem;
+		background: var(--bg);
+		color: var(--text);
 	}
 
 	.checkbox-label {
@@ -192,17 +194,17 @@
 		background: transparent;
 	}
 
-	.icon-btn.create { color: #6366f1; }
-	.icon-btn.create:hover { background: #eef2ff; }
+	.icon-btn.create { color: var(--accent); }
+	.icon-btn.create:hover { background: var(--accent-lt); }
 
-	.icon-btn.delete { color: #dc2626; }
-	.icon-btn.delete:hover { background: #fef2f2; }
+	.icon-btn.delete { color: var(--danger); }
+	.icon-btn.delete:hover { background: var(--danger-bg); }
 
 	.error {
-		color: #dc2626;
+		color: var(--danger);
 		font-size: 0.875rem;
 		padding: 0.375rem 0.625rem;
-		background: #fef2f2;
+		background: var(--danger-bg);
 		border-radius: 0.375rem;
 		margin-bottom: 0.5rem;
 	}
@@ -217,8 +219,8 @@
 	.users-table td {
 		text-align: left;
 		padding: 0.5rem 0.75rem;
-		border-bottom: 1px solid #e5e7eb;
+		border-bottom: 1px solid var(--border);
 	}
 
-	.users-table th { font-weight: 600; color: #6b7280; }
+	.users-table th { font-weight: 600; color: var(--text-3); }
 </style>

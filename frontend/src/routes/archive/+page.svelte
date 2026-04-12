@@ -100,24 +100,24 @@
 		justify-content: center;
 		padding: 0.25rem;
 		border-radius: 0.375rem;
-		color: #6b7280;
+		color: var(--text-3);
 		text-decoration: none;
 		flex-shrink: 0;
 	}
-	.back-btn:hover { background: #f3f4f6; color: #111827; }
+	.back-btn:hover { background: var(--bg-hover); color: var(--text); }
 
 	h1 { font-size: 1.5rem; margin: 0; }
 
-	.status { color: #9ca3af; text-align: center; padding: 2rem; }
+	.status { color: var(--text-4); text-align: center; padding: 2rem; }
 
 	.note-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.375rem; }
 
 	.note-item {
-		border: 1px solid #e5e7eb;
+		border: 1px solid var(--border);
 		border-radius: 0.5rem;
 		overflow: hidden;
 	}
-	.note-item.expanded { border-color: #c7d2fe; }
+	.note-item.expanded { border-color: var(--border-hi); }
 
 	.note-row {
 		display: flex;
@@ -138,8 +138,8 @@
 		padding: 0.25rem 0;
 	}
 
-	.note-title { font-weight: 600; font-size: 0.9rem; color: #111827; }
-	.note-meta { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; }
+	.note-title { font-weight: 600; font-size: 0.9rem; color: var(--text); }
+	.note-meta { font-size: 0.75rem; color: var(--text-4); white-space: nowrap; }
 
 	.note-actions { display: flex; gap: 0.25rem; flex-shrink: 0; }
 
@@ -151,14 +151,14 @@
 		border: none;
 		border-radius: 0.25rem;
 		cursor: pointer;
-		color: #6b7280;
+		color: var(--text-3);
 	}
-	.act-btn:hover { background: #f3f4f6; color: #374151; }
-	.act-btn.danger:hover { background: #fef2f2; color: #dc2626; }
+	.act-btn:hover { background: var(--bg-hover); color: var(--text-2); }
+	.act-btn.danger:hover { background: var(--danger-bg); color: var(--danger); }
 
 	.note-body {
-		border-top: 1px solid #e5e7eb;
-		background: #f9fafb;
+		border-top: 1px solid var(--border);
+		background: var(--bg-alt);
 		padding: 0.75rem 1rem;
 	}
 
@@ -166,7 +166,7 @@
 		margin: 0;
 		font-family: system-ui, -apple-system, sans-serif;
 		font-size: 0.875rem;
-		color: #374151;
+		color: var(--text-2);
 		white-space: pre-wrap;
 		word-break: break-word;
 		line-height: 1.5;
