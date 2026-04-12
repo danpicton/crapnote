@@ -265,6 +265,56 @@ describe('Link toolbar', () => {
 	});
 });
 
+describe('Tag popover', () => {
+	const mockTag = (overrides = {}) => ({
+		id: 1,
+		name: 'work',
+		note_count: 2,
+		...overrides,
+	});
+
+	it('shows tags with note_count > 0 as checkboxes in the popover', async () => {
+		vi.mocked(api.tags.list).mockResolvedValue([mockTag({ id: 1, name: 'work', note_count: 2 })]);
+		render(Page);
+
+		await waitFor(() => screen.getByTitle('Tags'));
+		await fireEvent.click(screen.getByTitle('Tags'));
+
+		await waitFor(() => {
+			expect(screen.getByRole('checkbox', { name: /work/i })).toBeInTheDocument();
+		});
+	});
+
+	it('does not show orphaned tags (note_count 0) in the popover', async () => {
+		vi.mocked(api.tags.list).mockResolvedValue([mockTag({ id: 2, name: 'orphaned', note_count: 0 })]);
+		render(Page);
+
+		await waitFor(() => screen.getByTitle('Tags'));
+		await fireEvent.click(screen.getByTitle('Tags'));
+
+		// Confirm the popover is open (the new-tag input is inside it).
+		await waitFor(() => expect(screen.getByPlaceholderText('New tag…')).toBeInTheDocument());
+
+		expect(screen.queryByRole('checkbox', { name: /orphaned/i })).not.toBeInTheDocument();
+	});
+
+	it('shows active tag but hides orphaned tag when both exist', async () => {
+		vi.mocked(api.tags.list).mockResolvedValue([
+			mockTag({ id: 1, name: 'active-tag', note_count: 3 }),
+			mockTag({ id: 2, name: 'dead-tag', note_count: 0 }),
+		]);
+		render(Page);
+
+		await waitFor(() => screen.getByTitle('Tags'));
+		await fireEvent.click(screen.getByTitle('Tags'));
+
+		await waitFor(() => {
+			expect(screen.getByRole('checkbox', { name: /active-tag/i })).toBeInTheDocument();
+		});
+		expect(screen.queryByRole('checkbox', { name: /dead-tag/i })).not.toBeInTheDocument();
+	});
+});
+
 describe('Tag filter hover', () => {
 	const mockTags = [
 		{ id: 1, name: 'Alpha', note_count: 1 },
