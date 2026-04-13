@@ -9,6 +9,81 @@
 		<style>
 			/* Remove default browser margin so the app fills the viewport exactly */
 			html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+
+			/* ── CSS design tokens ───────────────────────────────── */
+			:root {
+				--bg:         #ffffff;
+				--bg-alt:     #f9fafb;
+				--bg-toolbar: #fafafa;
+				--bg-hover:   #f3f4f6;
+				--bg-select:  #e0e7ff;
+				--bg-active:  #dbeafe;
+
+				--border:     #e5e7eb;
+				--border-md:  #d1d5db;
+				--border-hi:  #93c5fd;
+
+				--text:       #111827;
+				--text-2:     #374151;
+				--text-3:     #6b7280;
+				--text-4:     #9ca3af;
+
+				--accent:     #6366f1;
+				--accent-dk:  #4f46e5;
+				--accent-lt:  #eef2ff;
+				--accent-tx:  #4338ca;
+
+				--danger:     #dc2626;
+				--danger-bg:  #fef2f2;
+				--danger-bd:  #fecaca;
+
+				--focus-ring: rgba(99, 102, 241, 0.25);
+				--shadow:     0 4px 16px rgba(0, 0, 0, 0.12);
+			}
+
+			[data-theme="dark"] {
+				--bg:         #0f172a;
+				--bg-alt:     #1e293b;
+				--bg-toolbar: #1e293b;
+				--bg-hover:   #334155;
+				--bg-select:  #1e3a5f;
+				--bg-active:  #1e3a5f;
+
+				--border:     #334155;
+				--border-md:  #475569;
+				--border-hi:  #3b82f6;
+
+				--text:       #f1f5f9;
+				--text-2:     #cbd5e1;
+				--text-3:     #94a3b8;
+				--text-4:     #64748b;
+
+				--accent:     #818cf8;
+				--accent-dk:  #6366f1;
+				--accent-lt:  #1e1b4b;
+				--accent-tx:  #c7d2fe;
+
+				--danger:     #f87171;
+				--danger-bg:  #450a0a;
+				--danger-bd:  #7f1d1d;
+
+				--focus-ring: rgba(129, 140, 248, 0.25);
+				--shadow:     0 4px 24px rgba(0, 0, 0, 0.5);
+			}
+
+			/* Base colours on the root so the background is always themed */
+			body { background: var(--bg); color: var(--text); }
+
+			/* Milkdown / ProseMirror editor ─ ensure it follows the theme */
+			.ProseMirror { color: var(--text) !important; caret-color: var(--text); }
+			.ProseMirror code, .ProseMirror pre {
+				background: var(--bg-hover) !important;
+				color: var(--text-2) !important;
+			}
+			.ProseMirror blockquote {
+				border-left-color: var(--border-md) !important;
+				color: var(--text-3) !important;
+			}
 		</style>
 		%sveltekit.head%
 	</head>

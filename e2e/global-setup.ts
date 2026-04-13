@@ -23,6 +23,14 @@ export async function startServer() {
     stdio: 'pipe',
   });
 
+  // Drain stdout/stderr so the OS pipe buffer never fills.  The logging
+  // middleware writes one line per request; once the 64 KB pipe buffer is
+  // full every handler goroutine blocks after sending its response.  That
+  // stalls keep-alive connections and causes subsequent page loads to hang
+  // until Playwright times out with ERR_ABORTED.
+  server.stdout?.pipe(process.stdout);
+  server.stderr?.pipe(process.stderr);
+
   // Poll the server's HTTP port rather than watching stderr logs, so that the
   // readiness check is independent of Go's log format and tests actual TCP
   // connectivity rather than just process startup.

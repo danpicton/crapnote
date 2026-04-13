@@ -7,6 +7,7 @@ import (
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/export"
 	"github.com/danpicton/crapnote/internal/images"
+	"github.com/danpicton/crapnote/internal/middleware"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/trash"
@@ -22,6 +23,9 @@ func newMux(
 	imagesHandler  *images.Handler,
 ) *http.ServeMux {
 	mux := http.NewServeMux()
+
+	// Observability (public — Prometheus scrapes this).
+	mux.Handle("GET /metrics", middleware.MetricsHandler())
 
 	// Public.
 	mux.HandleFunc("GET /api/health", handleHealth)

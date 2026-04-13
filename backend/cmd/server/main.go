@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -13,12 +13,16 @@ import (
 	"github.com/danpicton/crapnote/internal/db"
 	"github.com/danpicton/crapnote/internal/export"
 	"github.com/danpicton/crapnote/internal/images"
+	"github.com/danpicton/crapnote/internal/middleware"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/trash"
 )
 
 func main() {
+	logger := newLogger()
+	slog.SetDefault(logger)
+
 	cfg := db.Config{
 		SQLitePath:  envOrDefault("DATABASE_PATH", "notes.db"),
 		PostgresURL: os.Getenv("DATABASE_URL"),
@@ -26,7 +30,8 @@ func main() {
 
 	database, err := db.Open(cfg)
 	if err != nil {
-		log.Fatalf("open database: %v", err)
+		logger.Error("open database", "error", err)
+		os.Exit(1)
 	}
 	defer database.Close()
 
@@ -57,7 +62,8 @@ func main() {
 	adminPass := os.Getenv("ADMIN_PASSWORD")
 	if adminUser != "" && adminPass != "" {
 		if err := authSvc.SeedAdmin(context.Background(), adminUser, adminPass); err != nil {
-			log.Fatalf("seed admin: %v", err)
+			logger.Error("seed admin", "error", err)
+			os.Exit(1)
 		}
 	}
 
@@ -67,7 +73,9 @@ func main() {
 		defer ticker.Stop()
 		for range ticker.C {
 			if err := trashSvc.PurgeExpired(context.Background()); err != nil {
-				log.Printf("purge expired trash: %v", err)
+				logger.Error("purge expired trash", "error", err)
+			} else {
+				logger.Info("purged expired trash entries")
 			}
 		}
 	}()
@@ -77,11 +85,36 @@ func main() {
 	port := envOrDefault("PORT", "8080")
 	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler)
 
+	// Wrap with observability middleware (metrics outermost, then logging).
+	handler := middleware.Metrics()(middleware.Logging(logger)(mux))
+
 	addr := fmt.Sprintf(":%s", port)
-	log.Printf("listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatalf("server error: %v", err)
+	logger.Info("server starting", "addr", addr)
+	if err := http.ListenAndServe(addr, handler); err != nil {
+		logger.Error("server error", "error", err)
+		os.Exit(1)
 	}
+}
+
+// newLogger creates a slog.Logger.  Set LOG_FORMAT=json for JSON output (e.g.
+// in production for Loki ingestion).  Set LOG_LEVEL=debug|info|warn|error to
+// control verbosity (default: info).
+func newLogger() *slog.Logger {
+	level := slog.LevelInfo
+	switch os.Getenv("LOG_LEVEL") {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+
+	opts := &slog.HandlerOptions{Level: level}
+	if os.Getenv("LOG_FORMAT") == "json" {
+		return slog.New(slog.NewJSONHandler(os.Stdout, opts))
+	}
+	return slog.New(slog.NewTextHandler(os.Stdout, opts))
 }
 
 func envOrDefault(key, fallback string) string {

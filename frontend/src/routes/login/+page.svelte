@@ -99,20 +99,22 @@
 
 	input {
 		padding: 0.5rem 0.75rem;
-		border: 1px solid #d1d5db;
+		border: 1px solid var(--border-md);
 		border-radius: 0.375rem;
 		font-size: 1rem;
+		background: var(--bg);
+		color: var(--text);
 	}
 
 	input:focus {
 		outline: none;
-		border-color: #6366f1;
-		box-shadow: 0 0 0 2px #6366f140;
+		border-color: var(--accent);
+		box-shadow: 0 0 0 2px var(--focus-ring);
 	}
 
 	button {
 		padding: 0.625rem;
-		background: #6366f1;
+		background: var(--accent);
 		color: white;
 		border: none;
 		border-radius: 0.375rem;
@@ -127,11 +129,11 @@
 	}
 
 	.error {
-		color: #dc2626;
+		color: var(--danger);
 		font-size: 0.875rem;
 		padding: 0.5rem 0.75rem;
-		background: #fef2f2;
-		border: 1px solid #fecaca;
+		background: var(--danger-bg);
+		border: 1px solid var(--danger-bd);
 		border-radius: 0.375rem;
 	}
 </style>

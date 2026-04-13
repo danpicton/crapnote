@@ -1,0 +1,29 @@
+// Grafana Alloy configuration — tail Docker container logs and forward to Loki.
+
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.docker.containers.targets
+  forward_to = [loki.write.default.receiver]
+
+  // Parse JSON log lines emitted by the app (when LOG_FORMAT=json).
+  relabel_rules {
+    rule {
+      source_labels = ["__meta_docker_container_name"]
+      target_label  = "container"
+    }
+    rule {
+      source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+      target_label  = "service"
+    }
+  }
+}
+
+loki.write "default" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

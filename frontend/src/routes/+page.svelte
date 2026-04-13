@@ -525,7 +525,7 @@
 					{#if showTagPopover}
 						<div class="tag-popover">
 							<p class="popover-label">Tags</p>
-							{#each allTags as tag (tag.id)}
+							{#each visibleTags as tag (tag.id)}
 								{@const c = tagColor(tag)}
 								<label class="popover-item">
 									<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
@@ -580,8 +580,8 @@
 		min-width: 200px;
 		display: flex;
 		flex-direction: column;
-		border-right: 1px solid #e5e7eb;
-		background: #f9fafb;
+		border-right: 1px solid var(--border);
+		background: var(--bg-alt);
 		flex-shrink: 0;
 		overflow: hidden; /* clip children; note-list handles its own scroll */
 	}
@@ -591,7 +591,7 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 0.75rem 1rem;
-		border-bottom: 1px solid #e5e7eb;
+		border-bottom: 1px solid var(--border);
 		flex-shrink: 0; /* never pushed off-screen */
 	}
 
@@ -601,21 +601,21 @@
 		background: none;
 		border: none;
 		cursor: pointer;
-		color: #6b7280;
+		color: var(--text-3);
 		padding: 0.25rem;
 		border-radius: 0.375rem;
 		display: flex;
 		align-items: center;
 	}
-	.hdr-btn:hover { background: #e5e7eb; color: #111827; }
+	.hdr-btn:hover { background: var(--border); color: var(--text); }
 
 	.search-box {
 		display: flex;
 		align-items: center;
 		gap: 0.375rem;
 		padding: 0.5rem 0.75rem;
-		border-bottom: 1px solid #e5e7eb;
-		color: #9ca3af;
+		border-bottom: 1px solid var(--border);
+		color: var(--text-4);
 		flex-shrink: 0; /* always visible above note list */
 	}
 
@@ -625,7 +625,7 @@
 		background: none;
 		font-size: 0.875rem;
 		outline: none;
-		color: #111827;
+		color: var(--text);
 	}
 
 	/* ─── Note list ──────────────────────────────────────── */
@@ -644,8 +644,8 @@
 		border-radius: 0.375rem;
 	}
 
-	.note-item.selected { background: #e0e7ff; }
-	.note-item:hover:not(.selected) { background: #f3f4f6; }
+	.note-item.selected { background: var(--bg-select); }
+	.note-item:hover:not(.selected) { background: var(--bg-hover); }
 
 	.note-btn {
 		width: 100%;
@@ -673,17 +673,17 @@
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
-		color: #111827;
+		color: var(--text);
 	}
 
 	.note-badges {
 		display: flex;
 		gap: 0.125rem;
 		flex-shrink: 0;
-		color: #9ca3af;
+		color: var(--text-4);
 	}
 
-	.note-date { font-size: 0.7rem; color: #9ca3af; padding-left: 0.125rem; }
+	.note-date { font-size: 0.7rem; color: var(--text-4); padding-left: 0.125rem; }
 
 	.note-actions {
 		display: flex;
@@ -700,16 +700,16 @@
 		cursor: pointer;
 		padding: 0.2rem 0.3rem;
 		border-radius: 0.25rem;
-		color: #9ca3af;
+		color: var(--text-4);
 		display: flex;
 		align-items: center;
 	}
-	.act-btn:hover { background: #e5e7eb; color: #374151; }
-	.act-btn.danger:hover { color: #dc2626; background: #fef2f2; }
+	.act-btn:hover { background: var(--border); color: var(--text-2); }
+	.act-btn.danger:hover { color: var(--danger); background: var(--danger-bg); }
 
-	:global(.icon-active) { color: #6366f1; }
+	:global(.icon-active) { color: var(--accent); }
 
-	.empty { padding: 1.5rem 1rem; color: #9ca3af; font-size: 0.875rem; text-align: center; }
+	.empty { padding: 1.5rem 1rem; color: var(--text-4); font-size: 0.875rem; text-align: center; }
 
 	/* ─── Sidebar bottom ─────────────────────────────────── */
 	.sidebar-bottom {
@@ -717,7 +717,7 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 0.5rem 0.75rem;
-		border-top: 1px solid #e5e7eb;
+		border-top: 1px solid var(--border);
 		flex-shrink: 0; /* always visible below note list */
 	}
 
@@ -731,13 +731,13 @@
 		padding: 0.375rem 0.5rem;
 		border-radius: 0.375rem;
 		font-size: 0.8rem;
-		color: #6b7280;
+		color: var(--text-3);
 		background: none;
 		border: none;
 		cursor: pointer;
 		text-decoration: none;
 	}
-	.bottom-btn:hover { background: #e5e7eb; color: #374151; }
+	.bottom-btn:hover { background: var(--border); color: var(--text-2); }
 	.bottom-btn.icon-only { padding: 0.375rem; }
 
 	/* ─── Editor pane ────────────────────────────────────── */
@@ -748,6 +748,7 @@
 		min-width: 0;
 		min-height: 0; /* allow flex shrinking */
 		overflow: hidden;
+		background: var(--bg);
 	}
 
 	/* ─── Toolbar ────────────────────────────────────────── */
@@ -756,8 +757,8 @@
 		align-items: center;
 		gap: 0.125rem;
 		padding: 0.375rem 0.75rem;
-		border-bottom: 1px solid #e5e7eb;
-		background: #fafafa;
+		border-bottom: 1px solid var(--border);
+		background: var(--bg-toolbar);
 		flex-shrink: 0;
 		flex-wrap: wrap;
 	}
@@ -768,25 +769,25 @@
 		border: 1px solid transparent;
 		border-radius: 0.25rem;
 		cursor: pointer;
-		color: #374151;
+		color: var(--text-2);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 	}
-	.tb-btn:hover { background: #e5e7eb; border-color: #d1d5db; }
-	.tb-btn:active { background: #dbeafe; border-color: #93c5fd; }
+	.tb-btn:hover { background: var(--border); border-color: var(--border-md); }
+	.tb-btn:active { background: var(--bg-active); border-color: var(--border-hi); }
 
 	.tb-sep {
 		width: 1px;
 		height: 1rem;
-		background: #e5e7eb;
+		background: var(--border);
 		margin: 0 0.2rem;
 		flex-shrink: 0;
 	}
 
 	.tb-spacer { flex: 1; }
 
-	.save-status { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; }
+	.save-status { font-size: 0.75rem; color: var(--text-4); white-space: nowrap; }
 
 	.link-btn-wrap {
 		position: relative;
@@ -803,10 +804,10 @@
 		position: absolute;
 		top: calc(100% + 4px);
 		left: 0;
-		background: white;
-		border: 1px solid #e5e7eb;
+		background: var(--bg);
+		border: 1px solid var(--border);
 		border-radius: 0.5rem;
-		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+		box-shadow: var(--shadow);
 		padding: 0.4rem;
 		display: flex;
 		gap: 0.25rem;
@@ -816,17 +817,19 @@
 
 	.link-dialog-input {
 		flex: 1;
-		border: 1px solid #d1d5db;
+		border: 1px solid var(--border-md);
 		border-radius: 0.25rem;
 		padding: 0.25rem 0.4rem;
 		font-size: 0.8rem;
 		outline: none;
 		min-width: 0;
+		background: var(--bg);
+		color: var(--text);
 	}
-	.link-dialog-input:focus { border-color: #6366f1; }
+	.link-dialog-input:focus { border-color: var(--accent); }
 
 	.link-dialog-btn {
-		background: #6366f1;
+		background: var(--accent);
 		color: white;
 		border: none;
 		border-radius: 0.25rem;
@@ -836,7 +839,7 @@
 		white-space: nowrap;
 		flex-shrink: 0;
 	}
-	.link-dialog-btn:hover { background: #4f46e5; }
+	.link-dialog-btn:hover { background: var(--accent-dk); }
 
 	.mobile-show-editor { display: none; }
 
@@ -846,7 +849,7 @@
 		/* Right padding reserves a clear gutter for the absolute popover button.
 		   Sized to comfortably fit the button even with a 2-digit count badge. */
 		padding: 0.45rem 5rem 0.45rem 1rem;
-		border-bottom: 1px solid #e5e7eb;
+		border-bottom: 1px solid var(--border);
 		flex-shrink: 0;
 	}
 
@@ -860,7 +863,7 @@
 
 	/* ─── Sidebar filter bar ─────────────────────────────── */
 	.filter-bar {
-		border-bottom: 1px solid #e5e7eb;
+		border-bottom: 1px solid var(--border);
 		flex-shrink: 0;
 	}
 
@@ -893,10 +896,10 @@
 		align-items: center;
 		gap: 0.2rem;
 		padding: 0.15rem 0.55rem;
-		border: 1px solid #e5e7eb;
+		border: 1px solid var(--border);
 		border-radius: 999px;
 		background: var(--tag-bg, transparent);
-		color: var(--tag-text, #6b7280);
+		color: var(--tag-text, var(--text-3));
 		font-size: 0.7rem;
 		font-weight: 500;
 		cursor: pointer;
@@ -904,22 +907,29 @@
 	}
 	.tag-pill:hover { opacity: 0.8; }
 	.tag-pill-active {
-		border-color: var(--tag-text, #6366f1);
-		box-shadow: 0 0 0 1.5px var(--tag-text, #6366f1);
+		border-color: var(--tag-text, var(--accent));
+		box-shadow: 0 0 0 1.5px var(--tag-text, var(--accent));
 	}
-	/* "All" pill — no CSS vars, use indigo */
+	/* "All" pill — no CSS vars, use themed indigo */
 	.tag-pill:not([style]).tag-pill-active {
-		background: #e0e7ff;
-		color: #4338ca;
-		border-color: #6366f1;
-		box-shadow: 0 0 0 1.5px #6366f1;
+		background: var(--bg-select);
+		color: var(--accent-tx);
+		border-color: var(--accent);
+		box-shadow: 0 0 0 1.5px var(--accent);
 	}
 
-	/* Starred pill — amber */
+	/* Starred pill — amber (intentionally not theme-variable; amber looks fine on both) */
 	.tag-pill-star { --tag-bg: #fef9c3; --tag-text: #854d0e; }
 	.tag-pill-star.tag-pill-active {
 		background: #fef9c3;
 		color: #854d0e;
+		border-color: #d97706;
+		box-shadow: 0 0 0 1.5px #d97706;
+	}
+	:global([data-theme="dark"]) .tag-pill-star { --tag-bg: #451a03; --tag-text: #fde68a; }
+	:global([data-theme="dark"]) .tag-pill-star.tag-pill-active {
+		background: #451a03;
+		color: #fde68a;
 		border-color: #d97706;
 		box-shadow: 0 0 0 1.5px #d97706;
 	}
@@ -939,19 +949,19 @@
 		gap: 0.2rem;
 		padding: 0.1rem 0.45rem;
 		background: transparent;
-		color: #9ca3af;
+		color: var(--text-4);
 		border-radius: 999px;
 		font-size: 0.7rem;
 		font-weight: 500;
-		border: 1px dashed #d1d5db;
+		border: 1px dashed var(--border-md);
 		cursor: pointer;
 		transition: all 0.1s;
 	}
-	.tag-chip-btn:hover { background: #f3f4f6; color: #374151; border-color: #9ca3af; }
-	.tag-chip-btn.tag-chip-btn-active { color: #6366f1; border-color: #6366f1; }
+	.tag-chip-btn:hover { background: var(--bg-hover); color: var(--text-2); border-color: var(--text-4); }
+	.tag-chip-btn.tag-chip-btn-active { color: var(--accent); border-color: var(--accent); }
 
 	.tb-tag-count {
-		background: #6366f1;
+		background: var(--accent);
 		color: white;
 		border-radius: 999px;
 		padding: 0 0.3rem;
@@ -962,10 +972,10 @@
 		position: absolute;
 		right: 0;
 		top: calc(100% + 4px);
-		background: white;
-		border: 1px solid #e5e7eb;
+		background: var(--bg);
+		border: 1px solid var(--border);
 		border-radius: 0.5rem;
-		box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+		box-shadow: var(--shadow);
 		padding: 0.5rem;
 		min-width: 11rem;
 		z-index: 30;
@@ -974,7 +984,7 @@
 	.popover-label {
 		font-size: 0.7rem;
 		font-weight: 600;
-		color: #9ca3af;
+		color: var(--text-4);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		margin: 0 0 0.25rem;
@@ -990,7 +1000,7 @@
 		cursor: pointer;
 		font-size: 0.85rem;
 	}
-	.popover-item:hover { background: #f3f4f6; }
+	.popover-item:hover { background: var(--bg-hover); }
 
 	.popover-tag-dot {
 		width: 0.5rem;
@@ -1005,25 +1015,26 @@
 		gap: 0.25rem;
 		margin-top: 0.375rem;
 		padding-top: 0.375rem;
-		border-top: 1px solid #f3f4f6;
+		border-top: 1px solid var(--bg-hover);
 	}
 
 	.popover-new-input {
 		flex: 1;
 		border: none;
-		border-bottom: 1px solid #d1d5db;
+		border-bottom: 1px solid var(--border-md);
 		outline: none;
 		font-size: 0.8rem;
 		padding: 0.15rem 0.1rem;
 		background: transparent;
+		color: var(--text);
 	}
-	.popover-new-input:focus { border-color: #6366f1; }
+	.popover-new-input:focus { border-color: var(--accent); }
 
 	.popover-add-btn {
 		background: none;
 		border: none;
 		cursor: pointer;
-		color: #6366f1;
+		color: var(--accent);
 		padding: 0.1rem;
 		display: flex;
 	}
@@ -1034,8 +1045,8 @@
 		align-items: center;
 		gap: 0.2rem;
 		padding: 0.1rem 0.45rem;
-		background: var(--tag-bg, #e0e7ff);
-		color: var(--tag-text, #4338ca);
+		background: var(--tag-bg, var(--bg-select));
+		color: var(--tag-text, var(--accent-tx));
 		border-radius: 999px;
 		font-size: 0.7rem;
 		font-weight: 500;
@@ -1053,6 +1064,7 @@
 		outline: none;
 		padding: 0;
 		background: transparent;
+		color: var(--text);
 		font-family: system-ui, -apple-system, sans-serif;
 	}
 
@@ -1062,7 +1074,7 @@
 		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		color: #9ca3af;
+		color: var(--text-4);
 		gap: 1rem;
 	}
 	.empty-state button {
@@ -1070,7 +1082,7 @@
 		align-items: center;
 		gap: 0.375rem;
 		padding: 0.5rem 1rem;
-		background: #6366f1;
+		background: var(--accent);
 		color: white;
 		border: none;
 		border-radius: 0.375rem;

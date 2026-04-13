@@ -34,6 +34,7 @@
 	let editorRef = $state<EditorRef | null>(null);
 	let showTagPopover = $state(false);
 	let newTagName = $state('');
+	let visibleTags = $derived(allTags.filter(t => t.note_count > 0));
 
 	// Same palette + hash as the main notes list so tag colours are consistent
 	const PALETTE = [
@@ -230,7 +231,7 @@
 			{#if showTagPopover}
 				<div class="tag-popover">
 					<p class="popover-label">Tags</p>
-					{#each allTags as tag (tag.id)}
+					{#each visibleTags as tag (tag.id)}
 						{@const c = tagColor(tag)}
 						<label class="popover-item">
 							<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
@@ -271,7 +272,7 @@
 		display: flex;
 		flex-direction: column;
 		height: 100dvh;
-		background: #fff;
+		background: var(--bg);
 	}
 
 	.loading {
@@ -279,7 +280,7 @@
 		align-items: center;
 		justify-content: center;
 		height: 100dvh;
-		color: #9ca3af;
+		color: var(--text-4);
 		font-size: 0.875rem;
 	}
 
@@ -289,8 +290,8 @@
 		align-items: center;
 		gap: 0.125rem;
 		padding: 0.375rem 0.75rem;
-		border-bottom: 1px solid #e5e7eb;
-		background: #fafafa;
+		border-bottom: 1px solid var(--border);
+		background: var(--bg-toolbar);
 		flex-shrink: 0;
 		flex-wrap: wrap;
 	}
@@ -301,23 +302,23 @@
 		border: 1px solid transparent;
 		border-radius: 0.25rem;
 		cursor: pointer;
-		color: #374151;
+		color: var(--text-2);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 	}
-	.tb-btn:hover { background: #e5e7eb; border-color: #d1d5db; }
-	.tb-btn:active { background: #dbeafe; border-color: #93c5fd; }
+	.tb-btn:hover { background: var(--border); border-color: var(--border-md); }
+	.tb-btn:active { background: var(--bg-active); border-color: var(--border-hi); }
 
 	.tb-sep {
 		width: 1px;
 		height: 1rem;
-		background: #e5e7eb;
+		background: var(--border);
 		margin: 0 0.2rem;
 		flex-shrink: 0;
 	}
 	.tb-spacer { flex: 1; }
-	.save-status { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; }
+	.save-status { font-size: 0.75rem; color: var(--text-4); white-space: nowrap; }
 
 	.link-btn-wrap {
 		position: relative;
@@ -334,10 +335,10 @@
 		position: absolute;
 		top: calc(100% + 4px);
 		left: 0;
-		background: white;
-		border: 1px solid #e5e7eb;
+		background: var(--bg);
+		border: 1px solid var(--border);
 		border-radius: 0.5rem;
-		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+		box-shadow: var(--shadow);
 		padding: 0.4rem;
 		display: flex;
 		gap: 0.25rem;
@@ -347,17 +348,19 @@
 
 	.link-dialog-input {
 		flex: 1;
-		border: 1px solid #d1d5db;
+		border: 1px solid var(--border-md);
 		border-radius: 0.25rem;
 		padding: 0.25rem 0.4rem;
 		font-size: 0.8rem;
 		outline: none;
 		min-width: 0;
+		background: var(--bg);
+		color: var(--text);
 	}
-	.link-dialog-input:focus { border-color: #6366f1; }
+	.link-dialog-input:focus { border-color: var(--accent); }
 
 	.link-dialog-btn {
-		background: #6366f1;
+		background: var(--accent);
 		color: white;
 		border: none;
 		border-radius: 0.25rem;
@@ -367,13 +370,13 @@
 		white-space: nowrap;
 		flex-shrink: 0;
 	}
-	.link-dialog-btn:hover { background: #4f46e5; }
+	.link-dialog-btn:hover { background: var(--accent-dk); }
 
 	/* ─── Editor header ────────────────────────── */
 	.editor-header {
 		position: relative;
 		padding: 0.45rem 5rem 0.45rem 1rem;
-		border-bottom: 1px solid #e5e7eb;
+		border-bottom: 1px solid var(--border);
 		flex-shrink: 0;
 	}
 
@@ -405,7 +408,7 @@
 		padding: 0;
 		background: transparent;
 		font-family: system-ui, -apple-system, sans-serif;
-		color: #111827;
+		color: var(--text);
 	}
 
 	/* ─── Tag popover ──────────────────────────── */
@@ -421,19 +424,19 @@
 		gap: 0.2rem;
 		padding: 0.1rem 0.45rem;
 		background: transparent;
-		color: #9ca3af;
+		color: var(--text-4);
 		border-radius: 999px;
 		font-size: 0.7rem;
 		font-weight: 500;
-		border: 1px dashed #d1d5db;
+		border: 1px dashed var(--border-md);
 		cursor: pointer;
 		transition: all 0.1s;
 	}
-	.tag-chip-btn:hover { background: #f3f4f6; color: #374151; border-color: #9ca3af; }
-	.tag-chip-btn-active { color: #6366f1; border-color: #6366f1; }
+	.tag-chip-btn:hover { background: var(--bg-hover); color: var(--text-2); border-color: var(--text-4); }
+	.tag-chip-btn-active { color: var(--accent); border-color: var(--accent); }
 
 	.tb-tag-count {
-		background: #6366f1;
+		background: var(--accent);
 		color: white;
 		border-radius: 999px;
 		padding: 0 0.3rem;
@@ -444,10 +447,10 @@
 		position: absolute;
 		right: 0;
 		top: calc(100% + 4px);
-		background: white;
-		border: 1px solid #e5e7eb;
+		background: var(--bg);
+		border: 1px solid var(--border);
 		border-radius: 0.5rem;
-		box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+		box-shadow: var(--shadow);
 		padding: 0.5rem;
 		min-width: 11rem;
 		z-index: 30;
@@ -456,7 +459,7 @@
 	.popover-label {
 		font-size: 0.7rem;
 		font-weight: 600;
-		color: #9ca3af;
+		color: var(--text-4);
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 		margin: 0 0 0.25rem;
@@ -472,7 +475,7 @@
 		cursor: pointer;
 		font-size: 0.85rem;
 	}
-	.popover-item:hover { background: #f3f4f6; }
+	.popover-item:hover { background: var(--bg-hover); }
 
 	.popover-tag-dot {
 		width: 0.5rem;
@@ -487,25 +490,26 @@
 		gap: 0.25rem;
 		margin-top: 0.375rem;
 		padding-top: 0.375rem;
-		border-top: 1px solid #f3f4f6;
+		border-top: 1px solid var(--bg-hover);
 	}
 
 	.popover-new-input {
 		flex: 1;
 		border: none;
-		border-bottom: 1px solid #d1d5db;
+		border-bottom: 1px solid var(--border-md);
 		outline: none;
 		font-size: 0.8rem;
 		padding: 0.15rem 0.1rem;
 		background: transparent;
+		color: var(--text);
 	}
-	.popover-new-input:focus { border-color: #6366f1; }
+	.popover-new-input:focus { border-color: var(--accent); }
 
 	.popover-add-btn {
 		background: none;
 		border: none;
 		cursor: pointer;
-		color: #6366f1;
+		color: var(--accent);
 		padding: 0.1rem;
 		display: flex;
 	}

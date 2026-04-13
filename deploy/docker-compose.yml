@@ -12,8 +12,83 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
       - SESSION_SECRET=${SESSION_SECRET:-dev-secret-change-in-production}
       - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-7}
+      # Set LOG_FORMAT=json for structured JSON logs (ingested by Loki via Alloy).
+      - LOG_FORMAT=${LOG_FORMAT:-json}
+      # Set LOG_LEVEL=debug|info|warn|error (default: info).
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - notes-data:/data
+    # Ship container logs to Loki via the Docker Loki log driver.
+    # Install driver first: docker plugin install grafana/loki-docker-driver --alias loki --grant-all-permissions
+    # Then uncomment the logging block below.
+    #logging:
+    #  driver: loki
+    #  options:
+    #    loki-url: "http://loki:3100/loki/api/v1/push"
+    #    loki-pipeline-stages: |
+    #      - json:
+    #          expressions:
+    #            level: level
+    #            msg: msg
+    #      - labels:
+    #          level:
+    depends_on:
+      - prometheus
+      - loki
+
+  # ── Prometheus ─────────────────────────────────────────────────────────────
+  # Scrapes /metrics from the app every 15 s.
+  prometheus:
+    image: prom/prometheus:v3.3.1
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=30d
+
+  # ── Loki ───────────────────────────────────────────────────────────────────
+  # Receives logs from Alloy and makes them queryable in Grafana.
+  loki:
+    image: grafana/loki:3.4.3
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+
+  # ── Alloy ──────────────────────────────────────────────────────────────────
+  # Grafana Alloy tails Docker container logs and forwards them to Loki.
+  alloy:
+    image: grafana/alloy:v1.8.3
+    volumes:
+      - ./alloy-config.alloy:/etc/alloy/config.alloy:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command:
+      - run
+      - /etc/alloy/config.alloy
+    depends_on:
+      - loki
+
+  # ── Grafana ────────────────────────────────────────────────────────────────
+  # Pre-configured with Prometheus and Loki data sources.
+  grafana:
+    image: grafana/grafana:12.0.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+      - loki
 
   # Optional: run with Postgres instead of SQLite
   # Uncomment and set DATABASE_URL env var in app service to use
@@ -28,4 +103,7 @@ services:
 
 volumes:
   notes-data:
+  prometheus-data:
+  loki-data:
+  grafana-data:
   # pg-data:

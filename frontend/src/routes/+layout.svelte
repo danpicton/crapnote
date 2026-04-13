@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { theme } from '$lib/stores/theme.svelte';
 	import { registerSW } from '$lib/sw-register';
 
 	let { children } = $props();
@@ -11,6 +12,7 @@
 
 	onMount(async () => {
 		registerSW();
+		theme.init(); // Apply stored/system theme before first render
 		await auth.init();
 		const currentPath = $page.url.pathname;
 		if (!auth.user && !PUBLIC_PATHS.includes(currentPath)) {
