@@ -61,7 +61,17 @@ vi.mock('$lib/api', () => ({
 	},
 }));
 
+vi.mock('$lib/offlineDB', () => ({
+	openOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
+	getNote: vi.fn().mockResolvedValue(null),
+	upsertNote: vi.fn().mockResolvedValue(undefined),
+	getAllNotes: vi.fn().mockResolvedValue([]),
+	getDirtyNotes: vi.fn().mockResolvedValue([]),
+	deleteNote: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { api } from '$lib/api';
+import * as offlineDB from '$lib/offlineDB';
 import { goto } from '$app/navigation';
 
 const mockNote = (overrides = {}) => ({
@@ -165,6 +175,59 @@ describe('/notes/[id] page', () => {
 		await waitFor(() =>
 			expect(api.tags.removeFromNote).toHaveBeenCalledWith(42, 1)
 		);
+	});
+});
+
+describe('/notes/[id] offline mode', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(api.tags.listForNote).mockResolvedValue([]);
+		vi.mocked(api.tags.list).mockResolvedValue([]);
+	});
+
+	it('falls back to IndexedDB when the API call throws while offline', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(api.notes.get).mockRejectedValue(new Error('offline'));
+		vi.mocked(offlineDB.getNote).mockResolvedValue({
+			id: 42, title: 'Cached Title', body: 'Cached body',
+			starred: false, pinned: false, tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z',
+			local_updated_at: '2024-01-01T00:00:00Z',
+			is_dirty: false, is_new: false,
+		});
+
+		render(NotePage);
+		await waitFor(() => expect(screen.getByDisplayValue('Cached Title')).toBeInTheDocument());
+	});
+
+	it('saves to IndexedDB when offline and auto-save fires', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.useFakeTimers();
+		vi.mocked(api.notes.get).mockRejectedValue(new Error('offline'));
+		vi.mocked(offlineDB.getNote).mockResolvedValue({
+			id: 42, title: 'My Note', body: 'Hello',
+			starred: false, pinned: false, tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z',
+			local_updated_at: '2024-01-01T00:00:00Z',
+			is_dirty: false, is_new: false,
+		});
+
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.input(screen.getByDisplayValue('My Note'), {
+			target: { value: 'Edited Offline' },
+		});
+
+		vi.advanceTimersByTime(800);
+		await waitFor(() =>
+			expect(offlineDB.upsertNote).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.objectContaining({ title: 'Edited Offline', is_dirty: true })
+			)
+		);
+		expect(api.notes.update).not.toHaveBeenCalled();
+		vi.useRealTimers();
 	});
 });
 

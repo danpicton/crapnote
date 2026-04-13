@@ -16,9 +16,15 @@
 	import { insertImageCommand } from '$lib/milkdown/image';
 	import { toggleLinkCommand } from '@milkdown/kit/preset/commonmark';
 	import type { CmdKey } from '@milkdown/kit/core';
+	import { PUBLIC_OFFLINE_NOTES_COUNT } from '$env/static/public';
 	import { api, type Note, type Tag } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
+	import { openOfflineDB, getAllNotes, getNote, upsertNote, deleteNote as deleteOfflineNote } from '$lib/offlineDB';
+	import type { CachedNote } from '$lib/offlineDB';
+	import { syncOfflineChanges } from '$lib/offlineSync';
+
+	const OFFLINE_NOTES_COUNT = Math.max(1, parseInt(PUBLIC_OFFLINE_NOTES_COUNT ?? '50', 10));
 
 	// Lucide icons
 	import {
@@ -29,6 +35,7 @@
 	} from 'lucide-svelte';
 
 	let notes = $state<Note[]>([]);
+	let isOnline = $state(typeof navigator !== 'undefined' ? navigator.onLine : true);
 
 	let selectedId = $state<number | null>(null);
 	let search = $state('');
@@ -98,32 +105,167 @@
 
 	let selectedNote = $derived(notes.find((n) => n.id === selectedId) ?? null);
 
+	function cachedToNote(c: CachedNote): Note {
+		return {
+			id: c.id,
+			title: c.title,
+			body: c.body,
+			starred: c.starred,
+			pinned: c.pinned,
+			archived: false,
+			created_at: c.server_updated_at,
+			updated_at: c.local_updated_at,
+		};
+	}
+
+	async function loadFromCache(): Promise<Note[]> {
+		const db = await openOfflineDB();
+		const cached = await getAllNotes(db);
+		db.close();
+		// Apply filters using cached metadata
+		let filtered = cached;
+		if (starredOnly) filtered = filtered.filter(n => n.starred);
+		if (activeTagId !== null) filtered = filtered.filter(n => n.tags.some(t => t.id === activeTagId));
+		if (search) {
+			const term = search.toLowerCase();
+			filtered = filtered.filter(n =>
+				n.title.toLowerCase().includes(term) || n.body.toLowerCase().includes(term)
+			);
+		}
+		// Pinned first, then most recently updated
+		return filtered
+			.sort((a, b) => {
+				if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+				return new Date(b.local_updated_at).getTime() - new Date(a.local_updated_at).getTime();
+			})
+			.map(cachedToNote);
+	}
+
+	async function cacheNotesForOffline(serverNotes: Note[]): Promise<void> {
+		const db = await openOfflineDB();
+
+		const toKeep = new Set<number>();
+		let count = 0;
+		// Sort by updated_at DESC then include pinned regardless of rank
+		const byDate = [...serverNotes].sort(
+			(a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+		);
+		for (const note of byDate) {
+			if (count < OFFLINE_NOTES_COUNT) { toKeep.add(note.id); count++; }
+			if (note.pinned) toKeep.add(note.id); // always cache pinned notes
+		}
+
+		for (const note of serverNotes) {
+			if (!toKeep.has(note.id)) continue;
+			const existing = await getNote(db, note.id);
+			if (existing?.is_dirty) continue; // don't overwrite unsync'd local changes
+			// Fetch tags for this note so they're available offline
+			const noteTags = await api.tags.listForNote(note.id).catch(() => existing?.tags ?? []);
+			await upsertNote(db, {
+				id: note.id,
+				title: note.title,
+				body: note.body,
+				starred: note.starred,
+				pinned: note.pinned,
+				tags: noteTags.map(t => ({ id: t.id, name: t.name })),
+				server_updated_at: note.updated_at,
+				local_updated_at: note.updated_at,
+				is_dirty: false,
+				is_new: false,
+			});
+		}
+
+		// Evict notes no longer in the keep-set (unless dirty / new)
+		const allCached = await getAllNotes(db);
+		for (const c of allCached) {
+			if (!toKeep.has(c.id) && !c.is_dirty && !c.is_new) {
+				await deleteOfflineNote(db, c.id);
+			}
+		}
+
+		db.close();
+	}
+
 	async function loadNotes() {
+		if (!navigator.onLine) {
+			notes = await loadFromCache();
+			return;
+		}
 		const params: { search?: string; tag?: number; starred?: boolean } = {};
 		if (search) params.search = search;
 		if (activeTagId !== null) params.tag = activeTagId;
 		if (starredOnly) params.starred = true;
-		notes = await api.notes.list(params);
+		try {
+			const fetched = await api.notes.list(params);
+			notes = fetched;
+			// Cache top-N when no filter is active (we want the canonical recent list)
+			if (!search && activeTagId === null && !starredOnly) {
+				cacheNotesForOffline(fetched); // fire-and-forget
+			}
+		} catch {
+			// Network failed despite onLine — fall back to cache
+			notes = await loadFromCache();
+		}
 	}
 
 	onMount(async () => {
+		isOnline = navigator.onLine;
+
+		const handleOnline = async () => {
+			isOnline = true;
+			await syncOfflineChanges();
+			await loadNotes();
+			allTags = await api.tags.list().catch(() => allTags);
+		};
+		const handleOffline = () => { isOnline = false; };
+		window.addEventListener('online', handleOnline);
+		window.addEventListener('offline', handleOffline);
+
 		await loadNotes();
-		allTags = await api.tags.list();
+		allTags = await api.tags.list().catch(() => []);
 		// On mobile the list is the home screen; we never auto-open the editor.
 		// On desktop, pre-select the first note so the editor pane isn't empty.
 		if (!isMobile() && notes.length > 0 && selectedId === null) {
 			const initId = notes[0].id;
 			selectedId = initId;
-			const tags = await api.tags.listForNote(initId);
+			const tags = await api.tags.listForNote(initId).catch(() => []);
 			// Only apply if no user action (newNote / selectNote) changed the
 			// selection while we were awaiting the listForNote response.
 			if (selectedId === initId) {
 				noteTags = tags;
 			}
 		}
+
+		return () => {
+			window.removeEventListener('online', handleOnline);
+			window.removeEventListener('offline', handleOffline);
+		};
 	});
 
 	async function newNote() {
+		if (!navigator.onLine) {
+			const tempId = -Date.now();
+			const now = new Date().toISOString();
+			const cached: CachedNote = {
+				id: tempId, title: '', body: '',
+				starred: false, pinned: false, tags: [],
+				server_updated_at: now, local_updated_at: now,
+				is_dirty: true, is_new: true,
+			};
+			const db = await openOfflineDB();
+			await upsertNote(db, cached);
+			db.close();
+			const note: Note = {
+				id: tempId, title: '', body: '',
+				starred: false, pinned: false, archived: false,
+				created_at: now, updated_at: now,
+			};
+			notes = [note, ...notes];
+			selectedId = tempId;
+			noteTags = [];
+			if (isMobile()) { goto(`/notes/${tempId}`); return; }
+			return;
+		}
 		const note = await api.notes.create();
 		const firstUnpinned = notes.findIndex((n) => !n.pinned);
 		if (firstUnpinned === -1) {
@@ -214,12 +356,82 @@
 	function scheduleAutoSave(field: 'title' | 'body', value: string) {
 		if (!selectedId) return;
 		if (saveTimer) clearTimeout(saveTimer);
+		const idAtSchedule = selectedId;
 		saveTimer = setTimeout(async () => {
 			if (!selectedId) return;
 			saving = true;
 			try {
-				const updated = await api.notes.update(selectedId, { [field]: value });
-				notes = notes.map((n) => (n.id === updated.id ? updated : n));
+				if (!navigator.onLine) {
+					// Save to IndexedDB and mark dirty
+					const db = await openOfflineDB();
+					const existing = await getNote(db, idAtSchedule);
+					if (existing) {
+						await upsertNote(db, {
+							...existing,
+							[field]: value,
+							local_updated_at: new Date().toISOString(),
+							is_dirty: true,
+						});
+					} else {
+						// Note not yet in cache (was online when it loaded) — create a cache entry
+						const currentNote = notes.find(n => n.id === idAtSchedule);
+						if (currentNote) {
+							await upsertNote(db, {
+								id: currentNote.id,
+								title: field === 'title' ? value : currentNote.title,
+								body: field === 'body' ? value : currentNote.body,
+								starred: currentNote.starred,
+								pinned: currentNote.pinned,
+								tags: noteTags.map(t => ({ id: t.id, name: t.name })),
+								server_updated_at: currentNote.updated_at,
+								local_updated_at: new Date().toISOString(),
+								is_dirty: true,
+								is_new: false,
+							});
+						}
+					}
+					db.close();
+					notes = notes.map(n => n.id === idAtSchedule ? { ...n, [field]: value } : n);
+				} else {
+					try {
+						const updated = await api.notes.update(idAtSchedule, { [field]: value });
+						notes = notes.map((n) => (n.id === updated.id ? updated : n));
+						// Keep cache in sync
+						const db = await openOfflineDB();
+						const existing = await getNote(db, updated.id);
+						if (existing && !existing.is_dirty) {
+							await upsertNote(db, {
+								...existing,
+								title: updated.title,
+								body: updated.body,
+								server_updated_at: updated.updated_at,
+								local_updated_at: updated.updated_at,
+							});
+						}
+						db.close();
+					} catch {
+						// Lost connectivity during save — fall back to offline save
+						const db = await openOfflineDB();
+						const currentNote = notes.find(n => n.id === idAtSchedule);
+						if (currentNote) {
+							const existing = await getNote(db, idAtSchedule);
+							await upsertNote(db, {
+								id: currentNote.id,
+								title: field === 'title' ? value : currentNote.title,
+								body: field === 'body' ? value : currentNote.body,
+								starred: currentNote.starred,
+								pinned: currentNote.pinned,
+								tags: existing?.tags ?? noteTags.map(t => ({ id: t.id, name: t.name })),
+								server_updated_at: currentNote.updated_at,
+								local_updated_at: new Date().toISOString(),
+								is_dirty: true,
+								is_new: existing?.is_new ?? false,
+							});
+						}
+						db.close();
+						notes = notes.map(n => n.id === idAtSchedule ? { ...n, [field]: value } : n);
+					}
+				}
 			} finally {
 				saving = false;
 			}
@@ -306,6 +518,9 @@
 	<aside class="sidebar">
 		<header class="sidebar-header">
 			<span class="app-name">Crapnote</span>
+			{#if !isOnline}
+				<span class="offline-badge" title="You are offline — changes will sync when reconnected">Offline</span>
+			{/if}
 			{#if selectedId}
 				<button class="hdr-btn mobile-show-editor" onclick={() => goto(`/notes/${selectedId}`)} title="View note" aria-label="View note">
 					<ChevronRight size={18} />
@@ -596,6 +811,18 @@
 	}
 
 	.app-name { font-weight: 700; font-size: 1.125rem; }
+
+	.offline-badge {
+		font-size: 0.65rem;
+		font-weight: 600;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		padding: 0.1rem 0.4rem;
+		border-radius: 999px;
+		background: var(--warning-bg, #fef3c7);
+		color: var(--warning-text, #92400e);
+		border: 1px solid var(--warning-border, #fde68a);
+	}
 
 	.hdr-btn {
 		background: none;
