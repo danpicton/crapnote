@@ -439,9 +439,14 @@ describe('Offline mode', () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: true });
 		vi.mocked(api.notes.list).mockResolvedValue([]);
 		vi.mocked(syncOfflineChanges).mockResolvedValue([]);
+		// heartbeatSync only calls syncOfflineChanges if dirty notes exist
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([
+			{ id: 5, title: 'Dirty', body: '', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
+			  is_dirty: true, is_new: false },
+		]);
 
 		render(Page);
-		// Simulate going online
 		window.dispatchEvent(new Event('online'));
 		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalled());
 	});

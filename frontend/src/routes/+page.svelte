@@ -27,6 +27,10 @@
 	const OFFLINE_NOTES_COUNT = Math.max(1, parseInt(
 		(import.meta.env.PUBLIC_OFFLINE_NOTES_COUNT as string | undefined) ?? '50', 10
 	));
+	// Heartbeat interval for pushing dirty notes to the server. Min 5 s.
+	const SYNC_INTERVAL_MS = Math.max(5000, parseInt(
+		(import.meta.env.PUBLIC_SYNC_INTERVAL_MS as string | undefined) ?? '30000', 10
+	));
 
 	// Lucide icons
 	import {
@@ -34,10 +38,12 @@
 		List, ListOrdered, Minus, Undo2, Redo2, Image, Link,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search, Tag as TagIcon,
+		CloudUpload, CheckCircle2, Lock,
 	} from 'lucide-svelte';
 
 	let notes = $state<Note[]>([]);
 	let isOnline = $state(typeof navigator !== 'undefined' ? navigator.onLine : true);
+	let syncStatus = $state<'synced' | 'syncing' | 'unsynced'>('synced');
 
 	let selectedId = $state<number | null>(null);
 	let search = $state('');
@@ -210,42 +216,79 @@
 		}
 	}
 
+	/** Returns true if the note body contains markdown/HTML images. */
+	function noteHasImages(body: string): boolean {
+		return /!\[.*?\]\(.*?\)|<img[\s>]/i.test(body);
+	}
+
+	/**
+	 * Heartbeat: push any dirty cached notes to the server.
+	 * Does NOT reload the notes list — just syncs offline edits.
+	 */
+	async function heartbeatSync() {
+		if (!navigator.onLine) return;
+		const db = await openOfflineDB();
+		const dirty = await getDirtyNotes(db);
+		db.close();
+		if (dirty.length === 0) { syncStatus = 'synced'; return; }
+
+		syncStatus = 'syncing';
+		const mappings = await syncOfflineChanges();
+
+		// Re-check dirty count to update status
+		const db2 = await openOfflineDB();
+		const stillDirty = await getDirtyNotes(db2);
+		db2.close();
+		syncStatus = stillDirty.length > 0 ? 'unsynced' : 'synced';
+
+		// If the note we had open was a temp-ID that just got a real server ID, update selection
+		if (selectedId !== null) {
+			const mapping = mappings.find(m => m.tempId === selectedId);
+			if (mapping) selectedId = mapping.serverId;
+		}
+
+		// Overlay still-dirty notes so local edits stay visible
+		if (stillDirty.length > 0) {
+			const dirtyById = new Map(stillDirty.map(n => [n.id, n]));
+			notes = notes.map(n => {
+				const d = dirtyById.get(n.id);
+				return d ? { ...n, title: d.title, body: d.body } : n;
+			});
+		}
+	}
+
+	/** Read dirty-note count from IndexedDB and update syncStatus (no network call). */
+	async function refreshSyncStatus() {
+		const db = await openOfflineDB();
+		const dirty = await getDirtyNotes(db);
+		db.close();
+		syncStatus = dirty.length > 0 ? 'unsynced' : 'synced';
+	}
+
 	onMount(() => {
 		isOnline = navigator.onLine;
 
 		const handleOnline = async () => {
 			isOnline = true;
-			const mappings = await syncOfflineChanges();
+			// Sync dirty notes first, then reload so the server version is fresh.
+			await heartbeatSync();
 			await loadNotes();
-
-			// If any notes are still dirty after sync (sync failed for some reason),
-			// keep their local content visible instead of showing the stale server version.
-			const db = await openOfflineDB();
-			const stillDirty = await getDirtyNotes(db);
-			db.close();
-			if (stillDirty.length > 0) {
-				const dirtyById = new Map(stillDirty.map(n => [n.id, n]));
-				notes = notes.map(n => {
-					const dirty = dirtyById.get(n.id);
-					return dirty ? { ...n, title: dirty.title, body: dirty.body } : n;
-				});
-			}
-
-			// If we were viewing a newly-created offline note, update selectedId to the real server id.
-			if (selectedId !== null) {
-				const mapping = mappings.find(m => m.tempId === selectedId);
-				if (mapping) selectedId = mapping.serverId;
-			}
-
 			allTags = await api.tags.list().catch(() => allTags);
 		};
-		const handleOffline = () => { isOnline = false; };
+		const handleOffline = () => {
+			isOnline = false;
+			void refreshSyncStatus();
+		};
 		window.addEventListener('online', handleOnline);
 		window.addEventListener('offline', handleOffline);
+
+		// Periodic heartbeat: push dirty notes while the page is open.
+		const heartbeatTimer = setInterval(() => { void heartbeatSync(); }, SYNC_INTERVAL_MS);
 
 		// Fire async init as a void IIFE so the cleanup function can be returned synchronously.
 		void (async () => {
 			await loadNotes();
+			await refreshSyncStatus();
 			allTags = await api.tags.list().catch(() => []);
 			// On mobile the list is the home screen; we never auto-open the editor.
 			// On desktop, pre-select the first note so the editor pane isn't empty.
@@ -264,6 +307,7 @@
 		return () => {
 			window.removeEventListener('online', handleOnline);
 			window.removeEventListener('offline', handleOffline);
+			clearInterval(heartbeatTimer);
 		};
 	});
 
@@ -426,6 +470,7 @@
 					}
 					db.close();
 					notes = notes.map(n => n.id === idAtSchedule ? { ...n, [field]: value } : n);
+					syncStatus = 'unsynced';
 				} else {
 					try {
 						const updated = await api.notes.update(idAtSchedule, { [field]: value });
@@ -620,10 +665,13 @@
 				<li class="note-item" class:selected={note.id === selectedId}>
 					<button class="note-btn" onclick={() => selectNote(note.id)}>
 						<span class="note-title-row">
-							<span class="note-title">{note.title}</span>
+							<span class="note-title" class:untitled={!note.title}>{note.title || 'Untitled'}</span>
 							<span class="note-badges">
 								{#if note.pinned}<span title="Pinned"><Pin size={11} /></span>{/if}
 								{#if note.starred}<span title="Starred"><Star size={11} /></span>{/if}
+								{#if !isOnline && noteHasImages(note.body)}
+									<span title="Images not available offline"><Lock size={11} /></span>
+								{/if}
 							</span>
 						</span>
 						<span class="note-date">{new Date(note.updated_at).toLocaleDateString()}</span>
@@ -659,6 +707,18 @@
 				</a>
 			</div>
 			<div class="bottom-right">
+				<span
+					class="sync-status"
+					class:sync-unsynced={syncStatus === 'unsynced'}
+					class:sync-syncing={syncStatus === 'syncing'}
+					title={syncStatus === 'synced' ? 'All changes synced' : syncStatus === 'syncing' ? 'Syncing…' : 'Unsynced changes'}
+				>
+					{#if syncStatus === 'synced'}
+						<CheckCircle2 size={14} />
+					{:else}
+						<CloudUpload size={14} />
+					{/if}
+				</span>
 				<a href="/settings" class="bottom-btn icon-only" title="Settings">
 					<Settings size={16} />
 				</a>
@@ -806,6 +866,11 @@
 					oninsertlink={openLinkDialog}
 				/>
 			{/key}
+			{#if !isOnline && noteHasImages(selectedNote.body)}
+				<div class="offline-image-notice">
+					<Lock size={13} /> Images aren't available offline
+				</div>
+			{/if}
 		{:else}
 			<div class="empty-state">
 				<p>Select a note or create a new one.</p>
@@ -982,8 +1047,30 @@
 		flex-shrink: 0; /* always visible below note list */
 	}
 
-	.bottom-left { display: flex; gap: 0.25rem; }
-	.bottom-right { display: flex; gap: 0.25rem; }
+	.bottom-left { display: flex; gap: 0.25rem; align-items: center; }
+	.bottom-right { display: flex; gap: 0.25rem; align-items: center; }
+
+	.sync-status {
+		display: flex;
+		align-items: center;
+		color: var(--text-4);
+		padding: 0.25rem;
+		cursor: default;
+	}
+	.sync-status.sync-unsynced { color: var(--warning-text, #92400e); }
+	.sync-status.sync-syncing  { color: var(--text-3); }
+
+	.untitled { color: var(--text-4); font-style: italic; }
+
+	.offline-image-notice {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		font-size: 0.75rem;
+		color: var(--text-4);
+		padding: 0.4rem 1rem;
+		border-top: 1px solid var(--border);
+	}
 
 	.bottom-btn {
 		display: flex;
