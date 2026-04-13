@@ -198,4 +198,17 @@ describe('syncOfflineChanges — resilience', () => {
 
 		expect(mappings).toEqual([{ tempId: -1000, serverId: 99 }]);
 	});
+
+	it('prevents concurrent sync runs — second call returns [] immediately', async () => {
+		const note = fakeCachedNote({ id: 5 });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({ id: 5, updated_at: '2024-01-01T00:00:00Z' }));
+		vi.mocked(api.notes.update).mockResolvedValue(fakeServerNote({ id: 5, updated_at: '2024-01-05T00:00:00Z' }));
+
+		const [, r2] = await Promise.all([syncOfflineChanges(), syncOfflineChanges()]);
+
+		// Second call skipped entirely; note was only synced once
+		expect(api.notes.get).toHaveBeenCalledTimes(1);
+		expect(r2).toEqual([]);
+	});
 });

@@ -7,29 +7,40 @@ export interface IdMapping {
 	serverId: number;
 }
 
+// Module-level mutex: prevents two concurrent sync runs from racing each other.
+// The second caller gets back an empty mapping immediately.
+let syncInProgress = false;
+
 /**
  * Sync all dirty cached notes back to the server.
  * Returns the list of temp-ID → server-ID mappings for notes that were created offline,
  * so callers can update any in-progress navigation.
  */
 export async function syncOfflineChanges(): Promise<IdMapping[]> {
+	if (syncInProgress) return [];
+	syncInProgress = true;
+
 	const db = await openOfflineDB();
 	const dirty = await getDirtyNotes(db);
 	const mappings: IdMapping[] = [];
 
-	for (const note of dirty) {
-		try {
-			if (note.is_new) {
-				await syncNewNote(db, note, mappings);
-			} else {
-				await syncDirtyNote(db, note);
+	try {
+		for (const note of dirty) {
+			try {
+				if (note.is_new) {
+					await syncNewNote(db, note, mappings);
+				} else {
+					await syncDirtyNote(db, note);
+				}
+			} catch {
+				// Network error for this note — skip and continue with others
 			}
-		} catch {
-			// Network error for this note — skip and continue with others
 		}
+	} finally {
+		db.close();
+		syncInProgress = false;
 	}
 
-	db.close();
 	return mappings;
 }
 

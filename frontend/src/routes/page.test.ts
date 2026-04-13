@@ -461,4 +461,41 @@ describe('Offline mode', () => {
 		));
 		expect(api.notes.create).not.toHaveBeenCalled();
 	});
+
+	it('falls back to offline note creation when online but API throws', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(api.notes.list).mockResolvedValue([]);
+		vi.mocked(api.notes.create).mockRejectedValue(new Error('Network error'));
+
+		render(Page);
+		await waitFor(() => screen.getByTitle('New note'));
+		await fireEvent.click(screen.getByTitle('New note'));
+
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ is_new: true, is_dirty: true })
+		));
+	});
+
+	it('keeps dirty note content visible after reconnect when sync failed', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		// Server has the old version
+		vi.mocked(api.notes.list).mockResolvedValue([
+			{ id: 5, title: 'Server Title', body: 'Server body', starred: false, pinned: false,
+			  archived: false, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+		]);
+		// Sync returns no mappings (e.g. sync failed silently)
+		vi.mocked(syncOfflineChanges).mockResolvedValue([]);
+		// After reload, note 5 is still dirty (sync failed)
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([
+			{ id: 5, title: 'Local Edit', body: 'Local body', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
+			  is_dirty: true, is_new: false },
+		]);
+
+		render(Page);
+		window.dispatchEvent(new Event('online'));
+
+		await waitFor(() => expect(screen.getByText('Local Edit')).toBeInTheDocument());
+	});
 });

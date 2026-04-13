@@ -19,7 +19,7 @@
 	import { api, type Note, type Tag } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
-	import { openOfflineDB, getAllNotes, getNote, upsertNote, deleteNote as deleteOfflineNote } from '$lib/offlineDB';
+	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote } from '$lib/offlineDB';
 	import type { CachedNote } from '$lib/offlineDB';
 	import { syncOfflineChanges } from '$lib/offlineSync';
 
@@ -215,8 +215,28 @@
 
 		const handleOnline = async () => {
 			isOnline = true;
-			await syncOfflineChanges();
+			const mappings = await syncOfflineChanges();
 			await loadNotes();
+
+			// If any notes are still dirty after sync (sync failed for some reason),
+			// keep their local content visible instead of showing the stale server version.
+			const db = await openOfflineDB();
+			const stillDirty = await getDirtyNotes(db);
+			db.close();
+			if (stillDirty.length > 0) {
+				const dirtyById = new Map(stillDirty.map(n => [n.id, n]));
+				notes = notes.map(n => {
+					const dirty = dirtyById.get(n.id);
+					return dirty ? { ...n, title: dirty.title, body: dirty.body } : n;
+				});
+			}
+
+			// If we were viewing a newly-created offline note, update selectedId to the real server id.
+			if (selectedId !== null) {
+				const mapping = mappings.find(m => m.tempId === selectedId);
+				if (mapping) selectedId = mapping.serverId;
+			}
+
 			allTags = await api.tags.list().catch(() => allTags);
 		};
 		const handleOffline = () => { isOnline = false; };
@@ -247,40 +267,49 @@
 		};
 	});
 
+	async function createNoteOffline() {
+		const tempId = -Date.now();
+		const now = new Date().toISOString();
+		const cached: CachedNote = {
+			id: tempId, title: '', body: '',
+			starred: false, pinned: false, tags: [],
+			server_updated_at: now, local_updated_at: now,
+			is_dirty: true, is_new: true,
+		};
+		const db = await openOfflineDB();
+		await upsertNote(db, cached);
+		db.close();
+		const offlineNote: Note = {
+			id: tempId, title: '', body: '',
+			starred: false, pinned: false, archived: false,
+			created_at: now, updated_at: now,
+		};
+		notes = [offlineNote, ...notes];
+		selectedId = tempId;
+		noteTags = [];
+		if (isMobile()) goto(`/notes/${tempId}`);
+	}
+
 	async function newNote() {
 		if (!navigator.onLine) {
-			const tempId = -Date.now();
-			const now = new Date().toISOString();
-			const cached: CachedNote = {
-				id: tempId, title: '', body: '',
-				starred: false, pinned: false, tags: [],
-				server_updated_at: now, local_updated_at: now,
-				is_dirty: true, is_new: true,
-			};
-			const db = await openOfflineDB();
-			await upsertNote(db, cached);
-			db.close();
-			const note: Note = {
-				id: tempId, title: '', body: '',
-				starred: false, pinned: false, archived: false,
-				created_at: now, updated_at: now,
-			};
-			notes = [note, ...notes];
-			selectedId = tempId;
-			noteTags = [];
-			if (isMobile()) { goto(`/notes/${tempId}`); return; }
+			await createNoteOffline();
 			return;
 		}
-		const note = await api.notes.create();
-		const firstUnpinned = notes.findIndex((n) => !n.pinned);
-		if (firstUnpinned === -1) {
-			notes = [...notes, note];
-		} else {
-			notes = [...notes.slice(0, firstUnpinned), note, ...notes.slice(firstUnpinned)];
+		try {
+			const note = await api.notes.create();
+			const firstUnpinned = notes.findIndex((n) => !n.pinned);
+			if (firstUnpinned === -1) {
+				notes = [...notes, note];
+			} else {
+				notes = [...notes.slice(0, firstUnpinned), note, ...notes.slice(firstUnpinned)];
+			}
+			selectedId = note.id;
+			noteTags = [];
+			if (isMobile()) { goto(`/notes/${note.id}`); return; }
+		} catch {
+			// API unreachable (navigator.onLine can be true on captive portals etc.)
+			await createNoteOffline();
 		}
-		selectedId = note.id;
-		noteTags = [];
-		if (isMobile()) { goto(`/notes/${note.id}`); return; }
 	}
 
 	async function selectNote(id: number) {
