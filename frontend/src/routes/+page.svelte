@@ -16,7 +16,6 @@
 	import { insertImageCommand } from '$lib/milkdown/image';
 	import { toggleLinkCommand } from '@milkdown/kit/preset/commonmark';
 	import type { CmdKey } from '@milkdown/kit/core';
-	import { PUBLIC_OFFLINE_NOTES_COUNT } from '$env/static/public';
 	import { api, type Note, type Tag } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
@@ -24,7 +23,10 @@
 	import type { CachedNote } from '$lib/offlineDB';
 	import { syncOfflineChanges } from '$lib/offlineSync';
 
-	const OFFLINE_NOTES_COUNT = Math.max(1, parseInt(PUBLIC_OFFLINE_NOTES_COUNT ?? '50', 10));
+	// PUBLIC_OFFLINE_NOTES_COUNT can be set at build time via the PUBLIC_ prefix env var.
+	const OFFLINE_NOTES_COUNT = Math.max(1, parseInt(
+		(import.meta.env.PUBLIC_OFFLINE_NOTES_COUNT as string | undefined) ?? '50', 10
+	));
 
 	// Lucide icons
 	import {
@@ -208,7 +210,7 @@
 		}
 	}
 
-	onMount(async () => {
+	onMount(() => {
 		isOnline = navigator.onLine;
 
 		const handleOnline = async () => {
@@ -221,20 +223,23 @@
 		window.addEventListener('online', handleOnline);
 		window.addEventListener('offline', handleOffline);
 
-		await loadNotes();
-		allTags = await api.tags.list().catch(() => []);
-		// On mobile the list is the home screen; we never auto-open the editor.
-		// On desktop, pre-select the first note so the editor pane isn't empty.
-		if (!isMobile() && notes.length > 0 && selectedId === null) {
-			const initId = notes[0].id;
-			selectedId = initId;
-			const tags = await api.tags.listForNote(initId).catch(() => []);
-			// Only apply if no user action (newNote / selectNote) changed the
-			// selection while we were awaiting the listForNote response.
-			if (selectedId === initId) {
-				noteTags = tags;
+		// Fire async init as a void IIFE so the cleanup function can be returned synchronously.
+		void (async () => {
+			await loadNotes();
+			allTags = await api.tags.list().catch(() => []);
+			// On mobile the list is the home screen; we never auto-open the editor.
+			// On desktop, pre-select the first note so the editor pane isn't empty.
+			if (!isMobile() && notes.length > 0 && selectedId === null) {
+				const initId = notes[0].id;
+				selectedId = initId;
+				const tags = await api.tags.listForNote(initId).catch(() => []);
+				// Only apply if no user action (newNote / selectNote) changed the
+				// selection while we were awaiting the listForNote response.
+				if (selectedId === initId) {
+					noteTags = tags;
+				}
 			}
-		}
+		})();
 
 		return () => {
 			window.removeEventListener('online', handleOnline);

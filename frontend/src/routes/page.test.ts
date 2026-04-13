@@ -66,7 +66,6 @@ vi.mock('$lib/offlineSync', () => ({
 	syncOfflineChanges: vi.fn().mockResolvedValue([]),
 }));
 
-vi.mock('$env/static/public', () => ({ PUBLIC_OFFLINE_NOTES_COUNT: '50' }));
 
 import { api } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';

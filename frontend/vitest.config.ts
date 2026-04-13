@@ -10,7 +10,6 @@ export default defineConfig({
 			$lib: path.resolve('./src/lib'),
 			$app: path.resolve('./src/__mocks__/app'),
 			'lucide-svelte': path.resolve('./src/__mocks__/lucide-svelte.ts'),
-			'$env/static/public': path.resolve('./src/__mocks__/env/static/public.ts'),
 		},
 	},
 	test: {
