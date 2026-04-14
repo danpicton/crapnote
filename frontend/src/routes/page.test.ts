@@ -497,10 +497,82 @@ describe('Offline mode', () => {
 			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
 			  is_dirty: true, is_new: false },
 		]);
+		// getAllNotes also needed for merge: return dirty note so merge sees it
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ id: 5, title: 'Local Edit', body: 'Local body', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
+			  is_dirty: true, is_new: false },
+		]);
 
 		render(Page);
 		window.dispatchEvent(new Event('online'));
 
 		await waitFor(() => expect(screen.getByText('Local Edit')).toBeInTheDocument());
+	});
+
+	it('FINAL state after reconnect shows dirty content, not server content (regression)', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		// Server has the OLD version (sync failed so server never got the local edit)
+		vi.mocked(api.notes.list).mockResolvedValue([
+			{ id: 5, title: 'Server Title', body: 'Server body', starred: false, pinned: false,
+			  archived: false, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+		]);
+		vi.mocked(syncOfflineChanges).mockResolvedValue([]);
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([
+			{ id: 5, title: 'Local Edit', body: 'Local body', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
+			  is_dirty: true, is_new: false },
+		]);
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ id: 5, title: 'Local Edit', body: 'Local body', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
+			  is_dirty: true, is_new: false },
+		]);
+
+		render(Page);
+		// Wait for initial load to settle
+		await waitFor(() => expect(screen.getByText(/Local Edit|Server Title/)).toBeInTheDocument());
+
+		window.dispatchEvent(new Event('online'));
+
+		// Wait for both heartbeat sync AND loadNotes to fire
+		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalled());
+		await waitFor(() => expect(api.notes.list).toHaveBeenCalled());
+		// Let every pending promise settle
+		await new Promise((r) => setTimeout(r, 50));
+
+		// FINAL state: the user should see their unsynced local edit, NOT the server title
+		expect(screen.queryByText('Server Title')).not.toBeInTheDocument();
+		expect(screen.getByText('Local Edit')).toBeInTheDocument();
+	});
+
+	it('offline-created note remains visible after reconnect when sync fails', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		// Server does NOT know about the offline-created note yet (sync failed)
+		vi.mocked(api.notes.list).mockResolvedValue([]);
+		vi.mocked(syncOfflineChanges).mockResolvedValue([]);
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([
+			{ id: -123, title: 'Offline Created', body: 'Only in IDB', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
+			  is_dirty: true, is_new: true },
+		]);
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ id: -123, title: 'Offline Created', body: 'Only in IDB', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
+			  is_dirty: true, is_new: true },
+		]);
+
+		render(Page);
+		await waitFor(() => expect(screen.getByText('Offline Created')).toBeInTheDocument());
+
+		window.dispatchEvent(new Event('online'));
+
+		// Wait for all reconnect work
+		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalled());
+		await waitFor(() => expect(api.notes.list).toHaveBeenCalled());
+		await new Promise((r) => setTimeout(r, 50));
+
+		// The offline-created note should still be visible
+		expect(screen.getByText('Offline Created')).toBeInTheDocument();
 	});
 });

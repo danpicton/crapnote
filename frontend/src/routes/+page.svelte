@@ -194,6 +194,52 @@
 		db.close();
 	}
 
+	/**
+	 * Merge a server-returned note list with the local IDB cache so that
+	 *  - dirty notes (edited offline but not yet synced) keep their local
+	 *    title/body rather than being clobbered by the older server copy, and
+	 *  - offline-created notes (is_new, negative id) that the server does
+	 *    not yet know about stay visible.
+	 *
+	 * Without this, a reload after reconnect would silently drop any unsynced
+	 * local changes whenever the sync itself failed.
+	 */
+	async function mergeServerWithCache(serverNotes: Note[]): Promise<Note[]> {
+		const db = await openOfflineDB();
+		const cached = await getAllNotes(db);
+		db.close();
+
+		// Overlay dirty (but not new) local content onto matching server notes
+		const dirtyById = new Map<number, CachedNote>();
+		for (const c of cached) {
+			if (c.is_dirty && !c.is_new) dirtyById.set(c.id, c);
+		}
+		const merged: Note[] = serverNotes.map((n) => {
+			const d = dirtyById.get(n.id);
+			if (!d) return n;
+			return { ...n, title: d.title, body: d.body, updated_at: d.local_updated_at };
+		});
+
+		// Include offline-created notes (not yet on the server) — apply the
+		// same filters the server query applies so the list stays consistent.
+		for (const c of cached) {
+			if (!c.is_new) continue;
+			if (starredOnly && !c.starred) continue;
+			if (activeTagId !== null && !c.tags.some((t) => t.id === activeTagId)) continue;
+			if (search) {
+				const term = search.toLowerCase();
+				if (!c.title.toLowerCase().includes(term) && !c.body.toLowerCase().includes(term)) continue;
+			}
+			merged.push(cachedToNote(c));
+		}
+
+		// Re-sort: pinned first, then most recently updated.
+		return merged.sort((a, b) => {
+			if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+			return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+		});
+	}
+
 	async function loadNotes() {
 		if (!navigator.onLine) {
 			notes = await loadFromCache();
@@ -205,7 +251,7 @@
 		if (starredOnly) params.starred = true;
 		try {
 			const fetched = await api.notes.list(params);
-			notes = fetched;
+			notes = await mergeServerWithCache(fetched);
 			// Cache top-N when no filter is active (we want the canonical recent list)
 			if (!search && activeTagId === null && !starredOnly) {
 				cacheNotesForOffline(fetched); // fire-and-forget

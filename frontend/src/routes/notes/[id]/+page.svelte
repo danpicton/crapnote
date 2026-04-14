@@ -96,11 +96,28 @@
 			// Fall through to try the API anyway (might be a positive ID with connectivity)
 		}
 		try {
-			[note, noteTags, allTags] = await Promise.all([
+			const [serverNote, fetchedTags, allTagsList] = await Promise.all([
 				api.notes.get(noteId),
 				api.tags.listForNote(noteId),
 				api.tags.list(),
 			]);
+			// If the local cache has unsynced edits for this note, keep them —
+			// otherwise a reconnect would silently discard the user's offline work.
+			const db = await openOfflineDB();
+			const cached = await getOfflineNote(db, noteId);
+			db.close();
+			if (cached && cached.is_dirty && !cached.is_new) {
+				note = {
+					...serverNote,
+					title: cached.title,
+					body: cached.body,
+					updated_at: cached.local_updated_at,
+				};
+			} else {
+				note = serverNote;
+			}
+			noteTags = fetchedTags;
+			allTags = allTagsList;
 		} catch {
 			// API unavailable — try the offline cache
 			const db = await openOfflineDB();
