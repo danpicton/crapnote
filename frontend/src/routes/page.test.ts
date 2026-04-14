@@ -62,8 +62,28 @@ vi.mock('$lib/offlineDB', () => ({
 	deleteNote: vi.fn().mockResolvedValue(undefined),
 }));
 
+const emptySyncResult = {
+	trigger: 'heartbeat' as const,
+	startedAt: '',
+	durationMs: 0,
+	mappings: [] as Array<{ tempId: number; serverId: number }>,
+	pushed: { created: 0, updated: 0 },
+	conflicts: 0,
+	errors: 0,
+	skipped: false,
+};
+
 vi.mock('$lib/offlineSync', () => ({
-	syncOfflineChanges: vi.fn().mockResolvedValue([]),
+	syncOfflineChanges: vi.fn().mockResolvedValue({
+		trigger: 'heartbeat',
+		startedAt: '',
+		durationMs: 0,
+		mappings: [],
+		pushed: { created: 0, updated: 0 },
+		conflicts: 0,
+		errors: 0,
+		skipped: false,
+	}),
 }));
 
 
@@ -438,7 +458,7 @@ describe('Offline mode', () => {
 	it('runs sync then reloads from server when coming online', async () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: true });
 		vi.mocked(api.notes.list).mockResolvedValue([]);
-		vi.mocked(syncOfflineChanges).mockResolvedValue([]);
+		vi.mocked(syncOfflineChanges).mockResolvedValue(emptySyncResult);
 		// heartbeatSync only calls syncOfflineChanges if dirty notes exist
 		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([
 			{ id: 5, title: 'Dirty', body: '', starred: false, pinned: false, tags: [],
@@ -490,7 +510,7 @@ describe('Offline mode', () => {
 			  archived: false, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
 		]);
 		// Sync returns no mappings (e.g. sync failed silently)
-		vi.mocked(syncOfflineChanges).mockResolvedValue([]);
+		vi.mocked(syncOfflineChanges).mockResolvedValue(emptySyncResult);
 		// After reload, note 5 is still dirty (sync failed)
 		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([
 			{ id: 5, title: 'Local Edit', body: 'Local body', starred: false, pinned: false, tags: [],
@@ -517,7 +537,7 @@ describe('Offline mode', () => {
 			{ id: 5, title: 'Server Title', body: 'Server body', starred: false, pinned: false,
 			  archived: false, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
 		]);
-		vi.mocked(syncOfflineChanges).mockResolvedValue([]);
+		vi.mocked(syncOfflineChanges).mockResolvedValue(emptySyncResult);
 		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([
 			{ id: 5, title: 'Local Edit', body: 'Local body', starred: false, pinned: false, tags: [],
 			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
@@ -550,7 +570,7 @@ describe('Offline mode', () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: true });
 		// Server does NOT know about the offline-created note yet (sync failed)
 		vi.mocked(api.notes.list).mockResolvedValue([]);
-		vi.mocked(syncOfflineChanges).mockResolvedValue([]);
+		vi.mocked(syncOfflineChanges).mockResolvedValue(emptySyncResult);
 		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([
 			{ id: -123, title: 'Offline Created', body: 'Only in IDB', starred: false, pinned: false, tags: [],
 			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
@@ -574,5 +594,44 @@ describe('Offline mode', () => {
 
 		// The offline-created note should still be visible
 		expect(screen.getByText('Offline Created')).toBeInTheDocument();
+	});
+
+	it('heartbeat is bidirectional — runs syncOfflineChanges and then api.notes.list', async () => {
+		// Coming online triggers a sync. The sync should call BOTH the sync
+		// function (push) AND api.notes.list (pull) so server-side changes on
+		// OTHER devices appear without a force-refresh.
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(api.notes.list).mockResolvedValue([]);
+		vi.mocked(syncOfflineChanges).mockResolvedValue(emptySyncResult);
+
+		render(Page);
+
+		// Initial mount already loads notes; clear the spy history and trigger online.
+		await waitFor(() => expect(api.notes.list).toHaveBeenCalled());
+		vi.mocked(api.notes.list).mockClear();
+		vi.mocked(syncOfflineChanges).mockClear();
+
+		window.dispatchEvent(new Event('online'));
+
+		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalledWith('online'));
+		await waitFor(() => expect(api.notes.list).toHaveBeenCalled());
+	});
+
+	it('clicking the sync status indicator triggers a manual sync', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(api.notes.list).mockResolvedValue([]);
+		vi.mocked(syncOfflineChanges).mockResolvedValue(emptySyncResult);
+
+		render(Page);
+		await waitFor(() => expect(api.notes.list).toHaveBeenCalled());
+		vi.mocked(syncOfflineChanges).mockClear();
+
+		// The indicator is the only button whose aria-label mentions "sync"
+		const syncBtn = await waitFor(() =>
+			screen.getByRole('button', { name: /sync/i })
+		);
+		await fireEvent.click(syncBtn);
+
+		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalledWith('manual'));
 	});
 });

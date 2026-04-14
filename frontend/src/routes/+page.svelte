@@ -21,7 +21,7 @@
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
 	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote } from '$lib/offlineDB';
 	import type { CachedNote } from '$lib/offlineDB';
-	import { syncOfflineChanges } from '$lib/offlineSync';
+	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
 
 	// PUBLIC_OFFLINE_NOTES_COUNT can be set at build time via the PUBLIC_ prefix env var.
 	const OFFLINE_NOTES_COUNT = Math.max(1, parseInt(
@@ -44,6 +44,8 @@
 	let notes = $state<Note[]>([]);
 	let isOnline = $state(typeof navigator !== 'undefined' ? navigator.onLine : true);
 	let syncStatus = $state<'synced' | 'syncing' | 'unsynced'>('synced');
+	let lastSyncAt = $state<Date | null>(null);
+	let lastSyncSummary = $state<string>('');
 
 	let selectedId = $state<number | null>(null);
 	let search = $state('');
@@ -268,40 +270,65 @@
 	}
 
 	/**
-	 * Heartbeat: push any dirty cached notes to the server.
-	 * Does NOT reload the notes list — just syncs offline edits.
+	 * Bidirectional heartbeat:
+	 *   1. Push any locally-dirty notes to the server (conflicts get preserved
+	 *      as "[sync conflict]" notes).
+	 *   2. Reload the notes list from the server so edits made on OTHER
+	 *      devices become visible without a force-refresh. `loadNotes` then
+	 *      merges the server list with the IDB cache via `mergeServerWithCache`,
+	 *      so any still-dirty local edits survive.
+	 *
+	 * Runs both on a timer (every `SYNC_INTERVAL_MS`) and on demand (manual
+	 * button, `online` event). A `trigger` is passed through to the log so
+	 * the source of each run is traceable in DevTools.
 	 */
-	async function heartbeatSync() {
+	async function heartbeatSync(trigger: SyncTrigger = 'heartbeat') {
 		if (!navigator.onLine) return;
-		const db = await openOfflineDB();
-		const dirty = await getDirtyNotes(db);
-		db.close();
-		if (dirty.length === 0) { syncStatus = 'synced'; return; }
-
 		syncStatus = 'syncing';
-		const mappings = await syncOfflineChanges();
 
-		// Re-check dirty count to update status
-		const db2 = await openOfflineDB();
-		const stillDirty = await getDirtyNotes(db2);
-		db2.close();
-		syncStatus = stillDirty.length > 0 ? 'unsynced' : 'synced';
+		const result = await syncOfflineChanges(trigger);
 
 		// If the note we had open was a temp-ID that just got a real server ID, update selection
 		if (selectedId !== null) {
-			const mapping = mappings.find(m => m.tempId === selectedId);
+			const mapping = result.mappings.find((m) => m.tempId === selectedId);
 			if (mapping) selectedId = mapping.serverId;
 		}
 
-		// Overlay still-dirty notes so local edits stay visible
-		if (stillDirty.length > 0) {
-			const dirtyById = new Map(stillDirty.map(n => [n.id, n]));
-			notes = notes.map(n => {
-				const d = dirtyById.get(n.id);
-				return d ? { ...n, title: d.title, body: d.body } : n;
-			});
+		// Pull: refresh list so server-side changes (from another device, conflict notes,
+		// etc.) show up. loadNotes() merges with IDB so still-dirty local edits survive.
+		try {
+			await loadNotes();
+		} catch {
+			// loadNotes already falls back to cache on network failure — swallow here.
 		}
+
+		// Finalise status from IDB — if anything remained dirty (network errors)
+		// keep the "unsynced" indicator on.
+		const db = await openOfflineDB();
+		const stillDirty = await getDirtyNotes(db);
+		db.close();
+		syncStatus = stillDirty.length > 0 ? 'unsynced' : 'synced';
+
+		lastSyncAt = new Date();
+		lastSyncSummary = `pushed ${result.pushed.created + result.pushed.updated}, conflicts ${result.conflicts}, errors ${result.errors}`;
 	}
+
+	/** Manual sync — wired to the sync-status indicator in the sidebar footer. */
+	async function manualSync() {
+		if (!navigator.onLine) return;
+		await heartbeatSync('manual');
+	}
+
+	/** Human-readable tooltip for the sync indicator. */
+	let syncTooltip = $derived.by(() => {
+		if (syncStatus === 'syncing') return 'Syncing…';
+		if (!lastSyncAt) {
+			return syncStatus === 'unsynced' ? 'Unsynced changes — click to sync' : 'Click to sync now';
+		}
+		const when = lastSyncAt.toLocaleTimeString();
+		const state = syncStatus === 'unsynced' ? 'Unsynced changes' : 'All changes synced';
+		return `${state} · last sync ${when} (${lastSyncSummary}) — click to sync now`;
+	});
 
 	/** Read dirty-note count from IndexedDB and update syncStatus (no network call). */
 	async function refreshSyncStatus() {
@@ -316,9 +343,8 @@
 
 		const handleOnline = async () => {
 			isOnline = true;
-			// Sync dirty notes first, then reload so the server version is fresh.
-			await heartbeatSync();
-			await loadNotes();
+			// Bidirectional sync on reconnect: push dirty, pull fresh list.
+			await heartbeatSync('online');
 			allTags = await api.tags.list().catch(() => allTags);
 		};
 		const handleOffline = () => {
@@ -328,8 +354,8 @@
 		window.addEventListener('online', handleOnline);
 		window.addEventListener('offline', handleOffline);
 
-		// Periodic heartbeat: push dirty notes while the page is open.
-		const heartbeatTimer = setInterval(() => { void heartbeatSync(); }, SYNC_INTERVAL_MS);
+		// Periodic bidirectional sync while the page is open.
+		const heartbeatTimer = setInterval(() => { void heartbeatSync('heartbeat'); }, SYNC_INTERVAL_MS);
 
 		// Fire async init as a void IIFE so the cleanup function can be returned synchronously.
 		void (async () => {
@@ -753,18 +779,22 @@
 				</a>
 			</div>
 			<div class="bottom-right">
-				<span
+				<button
+					type="button"
 					class="sync-status"
 					class:sync-unsynced={syncStatus === 'unsynced'}
 					class:sync-syncing={syncStatus === 'syncing'}
-					title={syncStatus === 'synced' ? 'All changes synced' : syncStatus === 'syncing' ? 'Syncing…' : 'Unsynced changes'}
+					title={syncTooltip}
+					aria-label={syncTooltip}
+					disabled={syncStatus === 'syncing' || !isOnline}
+					onclick={manualSync}
 				>
 					{#if syncStatus === 'synced'}
 						<CheckCircle2 size={14} />
 					{:else}
 						<CloudUpload size={14} />
 					{/if}
-				</span>
+				</button>
 				<a href="/settings" class="bottom-btn icon-only" title="Settings">
 					<Settings size={16} />
 				</a>
@@ -1101,8 +1131,14 @@
 		align-items: center;
 		color: var(--text-4);
 		padding: 0.25rem;
-		cursor: default;
+		background: transparent;
+		border: none;
+		border-radius: 4px;
+		cursor: pointer;
+		font: inherit;
 	}
+	.sync-status:hover:not(:disabled) { background: var(--hover-bg, rgba(0, 0, 0, 0.05)); color: var(--text-2); }
+	.sync-status:disabled { cursor: default; opacity: 0.7; }
 	.sync-status.sync-unsynced { color: var(--warning-text, #92400e); }
 	.sync-status.sync-syncing  { color: var(--text-3); }
 
