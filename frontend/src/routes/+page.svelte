@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import {
 		toggleStrongCommand,
@@ -55,6 +55,8 @@
 	function isMobile() { return window.matchMedia('(max-width: 767px)').matches; }
 	// Editor command ref
 	let editorRef = $state<EditorRef | null>(null);
+	// Title input ref (used to focus + highlight on new-note creation)
+	let titleInput = $state<HTMLInputElement | null>(null);
 
 	// Tags
 	let allTags = $state<Tag[]>([]);
@@ -383,11 +385,33 @@
 		};
 	});
 
+	/**
+	 * Default title for a freshly-created note. Generated client-side using the
+	 * user's *local* time and English weekday name, so it reads naturally no
+	 * matter where the server lives (e.g. "2026-04-14 14:23:30 - Tuesday").
+	 * The same format is used whether the note is created online or offline.
+	 */
+	function defaultNoteTitle(now: Date = new Date()): string {
+		const pad = (n: number) => n.toString().padStart(2, '0');
+		const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} `
+			+ `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+		const weekday = now.toLocaleDateString('en-US', { weekday: 'long' });
+		return `${ts} - ${weekday}`;
+	}
+
+	/** Focus and select the title input so the generated default can be overwritten. */
+	async function focusTitleInput() {
+		await tick();
+		titleInput?.focus();
+		titleInput?.select();
+	}
+
 	async function createNoteOffline() {
 		const tempId = -Date.now();
 		const now = new Date().toISOString();
+		const title = defaultNoteTitle();
 		const cached: CachedNote = {
-			id: tempId, title: '', body: '',
+			id: tempId, title, body: '',
 			starred: false, pinned: false, tags: [],
 			server_updated_at: now, local_updated_at: now,
 			is_dirty: true, is_new: true,
@@ -396,14 +420,15 @@
 		await upsertNote(db, cached);
 		db.close();
 		const offlineNote: Note = {
-			id: tempId, title: '', body: '',
+			id: tempId, title, body: '',
 			starred: false, pinned: false, archived: false,
 			created_at: now, updated_at: now,
 		};
 		notes = [offlineNote, ...notes];
 		selectedId = tempId;
 		noteTags = [];
-		if (isMobile()) goto(`/notes/${tempId}`);
+		if (isMobile()) { goto(`/notes/${tempId}?new=1`); return; }
+		await focusTitleInput();
 	}
 
 	async function newNote() {
@@ -412,7 +437,7 @@
 			return;
 		}
 		try {
-			const note = await api.notes.create();
+			const note = await api.notes.create(defaultNoteTitle());
 			const firstUnpinned = notes.findIndex((n) => !n.pinned);
 			if (firstUnpinned === -1) {
 				notes = [...notes, note];
@@ -421,7 +446,8 @@
 			}
 			selectedId = note.id;
 			noteTags = [];
-			if (isMobile()) { goto(`/notes/${note.id}`); return; }
+			if (isMobile()) { goto(`/notes/${note.id}?new=1`); return; }
+			await focusTitleInput();
 		} catch {
 			// API unreachable (navigator.onLine can be true on captive portals etc.)
 			await createNoteOffline();
@@ -889,6 +915,7 @@
 					</div>
 				{/if}
 				<input
+					bind:this={titleInput}
 					class="title-input"
 					type="text"
 					value={selectedNote.title}

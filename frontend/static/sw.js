@@ -1,7 +1,10 @@
 /// <reference lib="webworker" />
 
 // Bump this version whenever you want to force a cache refresh.
-const CACHE_NAME = 'crapnote-v2';
+// v3: switched navigation requests to network-first so soft-refresh picks up
+// new deploys instead of serving a stale `/` shell that references old
+// content-hashed `/_app/immutable/*` assets the server no longer has.
+const CACHE_NAME = 'crapnote-v3';
 
 // ─── Install: precache the app shell + ALL /_app/ assets ──────────────────────
 self.addEventListener('install', (event) => {
@@ -72,11 +75,43 @@ self.addEventListener('fetch', (event) => {
 		return;
 	}
 
-	// Everything else (app shell, JS bundles, CSS): cache-first
+	// Top-level HTML document loads (soft-refresh, link clicks, address bar)
+	// must be network-first. If we served the cached shell here, a redeploy
+	// would leave users with HTML that references `/_app/immutable/*` asset
+	// hashes the server no longer has, and every soft refresh would 404.
+	// The cached shell is only used as the offline fallback.
+	if (request.mode === 'navigate') {
+		event.respondWith(navigationNetworkFirst(request));
+		return;
+	}
+
+	// Hashed bundles under /_app/immutable/* and other static assets: cache-first.
 	event.respondWith(cacheFirst(request));
 });
 
 // ─── Strategy helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Always hit the network for navigation requests so new deploys load cleanly.
+ * On success, refresh the cached `/` shell so the next offline visit boots.
+ * On failure (offline), fall back to the cached shell if we have one.
+ */
+async function navigationNetworkFirst(request) {
+	try {
+		const response = await fetch(request);
+		if (response.ok) {
+			const cache = await caches.open(CACHE_NAME);
+			// Always key the shell under `/` so offline fallback is predictable
+			// regardless of which path the user navigated to.
+			cache.put('/', response.clone());
+		}
+		return response;
+	} catch {
+		const cached = (await caches.match(request)) ?? (await caches.match('/'));
+		if (cached) return cached;
+		return new Response('Offline', { status: 503 });
+	}
+}
 
 async function networkFirst(request) {
 	try {

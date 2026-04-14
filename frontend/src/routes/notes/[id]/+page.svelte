@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import {
@@ -33,6 +33,7 @@
 	let saving = $state(false);
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
 	let editorRef = $state<EditorRef | null>(null);
+	let titleInput = $state<HTMLInputElement | null>(null);
 	let showTagPopover = $state(false);
 	let newTagName = $state('');
 	let visibleTags = $derived(allTags.filter(t => t.note_count > 0));
@@ -77,6 +78,20 @@
 		return PALETTE[Math.imul(tag.id, 0x9e3779b9) >>> 27];
 	}
 
+	/**
+	 * When the list view navigates here after creating a note, it appends
+	 * `?new=1`. We honour it by focusing and selecting the title input so the
+	 * generated default (e.g. "2026-04-14 14:23:30 - Tuesday") can be typed
+	 * straight over without an extra tap.
+	 */
+	async function maybeFocusTitleForNewNote() {
+		const isNew = $page.url.searchParams.get('new') === '1';
+		if (!isNew) return;
+		await tick();
+		titleInput?.focus();
+		titleInput?.select();
+	}
+
 	onMount(async () => {
 		// Negative IDs are offline-created temp notes — load directly from cache
 		if (noteId < 0 || !navigator.onLine) {
@@ -91,6 +106,7 @@
 				};
 				noteTags = (cached.tags ?? []) as Tag[];
 				allTags = (cached.tags ?? []) as Tag[];
+				await maybeFocusTitleForNewNote();
 				return;
 			}
 			// Fall through to try the API anyway (might be a positive ID with connectivity)
@@ -118,6 +134,7 @@
 			}
 			noteTags = fetchedTags;
 			allTags = allTagsList;
+			await maybeFocusTitleForNewNote();
 		} catch {
 			// API unavailable — try the offline cache
 			const db = await openOfflineDB();
@@ -131,6 +148,7 @@
 				};
 				noteTags = (cached.tags ?? []) as Tag[];
 				allTags = (cached.tags ?? []) as Tag[];
+				await maybeFocusTitleForNewNote();
 			}
 		}
 	});
@@ -308,6 +326,7 @@
 			</div>
 		{/if}
 		<input
+			bind:this={titleInput}
 			class="title-input"
 			type="text"
 			value={note.title}

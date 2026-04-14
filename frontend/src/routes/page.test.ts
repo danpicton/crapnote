@@ -215,7 +215,9 @@ describe('Mobile navigation', () => {
 		const newBtn = screen.getByTitle('New note');
 		await fireEvent.click(newBtn);
 
-		await waitFor(() => expect(goto).toHaveBeenCalledWith('/notes/99'));
+		// The `?new=1` flag tells the single-note page to focus + select the
+		// title input so the user can immediately overwrite the default title.
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/notes/99?new=1'));
 	});
 
 	it('clicking a note on desktop does NOT navigate — shows editor in-pane', async () => {
