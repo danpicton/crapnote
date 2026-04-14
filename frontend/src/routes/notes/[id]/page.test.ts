@@ -200,6 +200,30 @@ describe('/notes/[id] offline mode', () => {
 		await waitFor(() => expect(screen.getByDisplayValue('Cached Title')).toBeInTheDocument());
 	});
 
+	it('prefers dirty IDB content over server response when online (regression)', async () => {
+		// User edited this note offline; now online but sync hasn't succeeded yet.
+		// Loading the note page must NOT overwrite their unsynced edit with the stale server copy.
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(api.notes.get).mockResolvedValue({
+			id: 42, title: 'Stale Server', body: 'Stale body',
+			starred: false, pinned: false, archived: false,
+			created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z',
+		});
+		vi.mocked(offlineDB.getNote).mockResolvedValue({
+			id: 42, title: 'Unsynced Edit', body: 'Unsynced body',
+			starred: false, pinned: false, tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z',
+			local_updated_at: '2024-01-02T00:00:00Z',
+			is_dirty: true, is_new: false,
+		});
+
+		render(NotePage);
+
+		// The user's unsynced edit should win over the stale server copy.
+		await waitFor(() => expect(screen.getByDisplayValue('Unsynced Edit')).toBeInTheDocument());
+		expect(screen.queryByDisplayValue('Stale Server')).not.toBeInTheDocument();
+	});
+
 	it('saves to IndexedDB when offline and auto-save fires', async () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: false });
 		vi.useFakeTimers();

@@ -25,14 +25,25 @@ func TestService_Create_DefaultTitle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	// Default title: "Note - YYYY-MM-DD HH:MM:SS"
-	if !strings.HasPrefix(note.Title, "Note - ") {
-		t.Fatalf("expected default title prefix, got %q", note.Title)
+	// Default title: "YYYY-MM-DD HH:MM:SS - Weekday" (e.g. "2026-04-14 14:23:30 - Tuesday").
+	// No "Note - " prefix.
+	if strings.HasPrefix(note.Title, "Note - ") {
+		t.Fatalf("unexpected legacy 'Note - ' prefix: %q", note.Title)
 	}
-	// Timestamp component should be parseable.
-	ts := strings.TrimPrefix(note.Title, "Note - ")
-	if _, err := time.Parse("2006-01-02 15:04:05", ts); err != nil {
-		t.Fatalf("default title timestamp not parseable: %q", ts)
+	parts := strings.SplitN(note.Title, " - ", 2)
+	if len(parts) != 2 {
+		t.Fatalf("expected '<timestamp> - <weekday>' form, got %q", note.Title)
+	}
+	if _, err := time.Parse("2006-01-02 15:04:05", parts[0]); err != nil {
+		t.Fatalf("default title timestamp not parseable: %q", parts[0])
+	}
+	// Weekday must be a full day name.
+	validDays := map[string]bool{
+		"Monday": true, "Tuesday": true, "Wednesday": true, "Thursday": true,
+		"Friday": true, "Saturday": true, "Sunday": true,
+	}
+	if !validDays[parts[1]] {
+		t.Fatalf("expected a full weekday name, got %q", parts[1])
 	}
 }
 

@@ -172,6 +172,122 @@ describe('syncOfflineChanges — conflict', () => {
 			server_updated_at: '2024-01-02T00:00:00Z',
 		}));
 	});
+
+	it('local wins when local_updated_at is newer than server updated_at — server version becomes the conflict note', async () => {
+		// Both changed since last sync, but local is more recent.
+		const note = fakeCachedNote({
+			id: 7,
+			title: 'Local Newer',
+			body: 'Local body',
+			server_updated_at: '2024-01-01T00:00:00Z',
+			local_updated_at: '2024-01-05T00:00:00Z', // local is newer
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({
+			id: 7, title: 'Server Older', body: 'Server body',
+			updated_at: '2024-01-03T00:00:00Z', // server moved but less recently than local
+		}));
+		vi.mocked(api.notes.update).mockResolvedValue(fakeServerNote({ id: 7, updated_at: '2024-01-05T00:00:00Z' }));
+		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 999 }));
+
+		await syncOfflineChanges();
+
+		// Local wins: local edit is PUT to server
+		expect(api.notes.update).toHaveBeenCalledWith(7, { title: 'Local Newer', body: 'Local body' });
+		// Loser (server version) is preserved as a new conflict note
+		expect(api.notes.create).toHaveBeenCalledWith('[sync conflict] Server Older', 'Server body');
+	});
+
+	it('server wins when server updated_at is newer than local — local version becomes the conflict note', async () => {
+		const note = fakeCachedNote({
+			id: 7,
+			title: 'Local Older',
+			body: 'Local body',
+			server_updated_at: '2024-01-01T00:00:00Z',
+			local_updated_at: '2024-01-02T00:00:00Z',
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({
+			id: 7, title: 'Server Newer', body: 'Server body',
+			updated_at: '2024-01-05T00:00:00Z', // server is more recent
+		}));
+		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 999 }));
+
+		await syncOfflineChanges();
+
+		// Server wins: NO update call (server version stays as-is)
+		expect(api.notes.update).not.toHaveBeenCalled();
+		// Loser (local version) becomes a new conflict note
+		expect(api.notes.create).toHaveBeenCalledWith('[sync conflict] Local Older', 'Local body');
+	});
+});
+
+describe('syncOfflineChanges — result and logging', () => {
+	it('returns a structured SyncResult with counts', async () => {
+		const newNote = fakeCachedNote({ id: -1, is_new: true });
+		const updatedNote = fakeCachedNote({ id: 5, is_dirty: true, is_new: false,
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z' });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([newNote, updatedNote]);
+		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 99, updated_at: '2024-01-03T00:00:00Z' }));
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({ id: 5, updated_at: '2024-01-01T00:00:00Z' }));
+		vi.mocked(api.notes.update).mockResolvedValue(fakeServerNote({ id: 5, updated_at: '2024-01-05T00:00:00Z' }));
+
+		const result = await syncOfflineChanges();
+
+		expect(result.pushed.created).toBe(1);
+		expect(result.pushed.updated).toBe(1);
+		expect(result.conflicts).toBe(0);
+		expect(result.errors).toBe(0);
+		expect(typeof result.durationMs).toBe('number');
+		expect(result.durationMs).toBeGreaterThanOrEqual(0);
+		expect(typeof result.startedAt).toBe('string');
+		expect(result.mappings).toEqual([{ tempId: -1, serverId: 99 }]);
+	});
+
+	it('counts conflicts in the result', async () => {
+		const note = fakeCachedNote({ id: 7, server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z' });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({ id: 7, updated_at: '2024-01-05T00:00:00Z' }));
+		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 999 }));
+
+		const result = await syncOfflineChanges();
+
+		expect(result.conflicts).toBe(1);
+	});
+
+	it('counts errors when a note sync throws', async () => {
+		const note = fakeCachedNote({ id: -1, is_new: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.create).mockRejectedValue(new Error('Network down'));
+
+		const result = await syncOfflineChanges();
+
+		expect(result.errors).toBe(1);
+	});
+
+	it('accepts a trigger parameter and echoes it in the result', async () => {
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([]);
+
+		const result = await syncOfflineChanges('manual');
+
+		expect(result.trigger).toBe('manual');
+	});
+
+	it('logs a summary line to console.info after each run', async () => {
+		const spy = vi.spyOn(console, 'info').mockImplementation(() => {});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([]);
+
+		await syncOfflineChanges('heartbeat');
+
+		// Must be a single structured log call that includes "sync" and the trigger
+		expect(spy).toHaveBeenCalled();
+		const call = spy.mock.calls[0];
+		expect(call.join(' ').toLowerCase()).toMatch(/sync/);
+		// The trigger should be visible in the log payload
+		const serialized = call.map((a) => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+		expect(serialized).toContain('heartbeat');
+		spy.mockRestore();
+	});
 });
 
 describe('syncOfflineChanges — resilience', () => {
@@ -194,12 +310,12 @@ describe('syncOfflineChanges — resilience', () => {
 		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
 		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 99, updated_at: '2024-01-03T00:00:00Z' }));
 
-		const mappings = await syncOfflineChanges();
+		const result = await syncOfflineChanges();
 
-		expect(mappings).toEqual([{ tempId: -1000, serverId: 99 }]);
+		expect(result.mappings).toEqual([{ tempId: -1000, serverId: 99 }]);
 	});
 
-	it('prevents concurrent sync runs — second call returns [] immediately', async () => {
+	it('prevents concurrent sync runs — second call is skipped immediately', async () => {
 		const note = fakeCachedNote({ id: 5 });
 		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
 		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({ id: 5, updated_at: '2024-01-01T00:00:00Z' }));
@@ -209,6 +325,7 @@ describe('syncOfflineChanges — resilience', () => {
 
 		// Second call skipped entirely; note was only synced once
 		expect(api.notes.get).toHaveBeenCalledTimes(1);
-		expect(r2).toEqual([]);
+		expect(r2.skipped).toBe(true);
+		expect(r2.mappings).toEqual([]);
 	});
 });

@@ -19,9 +19,15 @@ func NewService(repo *Repo) *Service {
 // Create creates a new note. If title is empty a default is generated.
 func (s *Service) Create(ctx context.Context, userID int64, title, body string) (*Note, error) {
 	if title == "" {
-		title = fmt.Sprintf("Note - %s", time.Now().UTC().Format("2006-01-02 15:04:05"))
+		title = defaultTitle(time.Now().UTC())
 	}
 	return s.repo.Create(ctx, userID, title, body)
+}
+
+// defaultTitle returns the auto-generated title used when the caller supplies
+// no title: "YYYY-MM-DD HH:MM:SS - Weekday" (e.g. "2026-04-14 14:23:30 - Tuesday").
+func defaultTitle(now time.Time) string {
+	return fmt.Sprintf("%s - %s", now.Format("2006-01-02 15:04:05"), now.Weekday().String())
 }
 
 // Get returns a note for the given user, or ErrNotFound.
@@ -38,7 +44,7 @@ func (s *Service) List(ctx context.Context, userID int64, filter ListFilter) ([]
 // If title is provided as an empty string it is replaced with a timestamp default.
 func (s *Service) Update(ctx context.Context, id, userID int64, title, body *string) (*Note, error) {
 	if title != nil && *title == "" {
-		t := fmt.Sprintf("Note - %s", time.Now().UTC().Format("2006-01-02 15:04:05"))
+		t := defaultTitle(time.Now().UTC())
 		title = &t
 	}
 	return s.repo.Update(ctx, id, userID, title, body)
