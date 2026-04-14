@@ -12,7 +12,7 @@
 
 	onMount(async () => {
 		registerSW();
-		theme.init(); // Apply stored/system theme before first render
+		theme.init();
 		await auth.init();
 		const currentPath = $page.url.pathname;
 		if (!auth.user && !PUBLIC_PATHS.includes(currentPath)) {

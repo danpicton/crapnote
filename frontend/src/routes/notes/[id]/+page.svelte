@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import {
@@ -18,6 +18,7 @@
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, type Note, type Tag } from '$lib/api';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
+	import { openOfflineDB, getNote as getOfflineNote, upsertNote } from '$lib/offlineDB';
 	import {
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, Minus, Undo2, Redo2, Link,
@@ -32,6 +33,7 @@
 	let saving = $state(false);
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
 	let editorRef = $state<EditorRef | null>(null);
+	let titleInput = $state<HTMLInputElement | null>(null);
 	let showTagPopover = $state(false);
 	let newTagName = $state('');
 	let visibleTags = $derived(allTags.filter(t => t.note_count > 0));
@@ -76,12 +78,79 @@
 		return PALETTE[Math.imul(tag.id, 0x9e3779b9) >>> 27];
 	}
 
+	/**
+	 * When the list view navigates here after creating a note, it appends
+	 * `?new=1`. We honour it by focusing and selecting the title input so the
+	 * generated default (e.g. "2026-04-14 14:23:30 - Tuesday") can be typed
+	 * straight over without an extra tap.
+	 */
+	async function maybeFocusTitleForNewNote() {
+		const isNew = $page.url.searchParams.get('new') === '1';
+		if (!isNew) return;
+		await tick();
+		titleInput?.focus();
+		titleInput?.select();
+	}
+
 	onMount(async () => {
-		[note, noteTags, allTags] = await Promise.all([
-			api.notes.get(noteId),
-			api.tags.listForNote(noteId),
-			api.tags.list(),
-		]);
+		// Negative IDs are offline-created temp notes — load directly from cache
+		if (noteId < 0 || !navigator.onLine) {
+			const db = await openOfflineDB();
+			const cached = await getOfflineNote(db, noteId);
+			db.close();
+			if (cached) {
+				note = {
+					id: cached.id, title: cached.title, body: cached.body,
+					starred: cached.starred, pinned: cached.pinned, archived: false,
+					created_at: cached.server_updated_at, updated_at: cached.local_updated_at,
+				};
+				noteTags = (cached.tags ?? []) as Tag[];
+				allTags = (cached.tags ?? []) as Tag[];
+				await maybeFocusTitleForNewNote();
+				return;
+			}
+			// Fall through to try the API anyway (might be a positive ID with connectivity)
+		}
+		try {
+			const [serverNote, fetchedTags, allTagsList] = await Promise.all([
+				api.notes.get(noteId),
+				api.tags.listForNote(noteId),
+				api.tags.list(),
+			]);
+			// If the local cache has unsynced edits for this note, keep them —
+			// otherwise a reconnect would silently discard the user's offline work.
+			const db = await openOfflineDB();
+			const cached = await getOfflineNote(db, noteId);
+			db.close();
+			if (cached && cached.is_dirty && !cached.is_new) {
+				note = {
+					...serverNote,
+					title: cached.title,
+					body: cached.body,
+					updated_at: cached.local_updated_at,
+				};
+			} else {
+				note = serverNote;
+			}
+			noteTags = fetchedTags;
+			allTags = allTagsList;
+			await maybeFocusTitleForNewNote();
+		} catch {
+			// API unavailable — try the offline cache
+			const db = await openOfflineDB();
+			const cached = await getOfflineNote(db, noteId);
+			db.close();
+			if (cached) {
+				note = {
+					id: cached.id, title: cached.title, body: cached.body,
+					starred: cached.starred, pinned: cached.pinned, archived: false,
+					created_at: cached.server_updated_at, updated_at: cached.local_updated_at,
+				};
+				noteTags = (cached.tags ?? []) as Tag[];
+				allTags = (cached.tags ?? []) as Tag[];
+				await maybeFocusTitleForNewNote();
+			}
+		}
 	});
 
 	function scheduleAutoSave(field: 'title' | 'body', value: string) {
@@ -89,8 +158,53 @@
 		saveTimer = setTimeout(async () => {
 			saving = true;
 			try {
-				const updated = await api.notes.update(noteId, { [field]: value });
-				note = updated;
+				if (!navigator.onLine || noteId < 0) {
+					// Save to IndexedDB and mark dirty
+					const db = await openOfflineDB();
+					const existing = await getOfflineNote(db, noteId);
+					if (existing) {
+						await upsertNote(db, {
+							...existing,
+							[field]: value,
+							local_updated_at: new Date().toISOString(),
+							is_dirty: true,
+						});
+					}
+					db.close();
+					if (note) note = { ...note, [field]: value };
+				} else {
+					try {
+						const updated = await api.notes.update(noteId, { [field]: value });
+						note = updated;
+						// Keep cache in sync
+						const db = await openOfflineDB();
+						const existing = await getOfflineNote(db, noteId);
+						if (existing && !existing.is_dirty) {
+							await upsertNote(db, {
+								...existing,
+								title: updated.title,
+								body: updated.body,
+								server_updated_at: updated.updated_at,
+								local_updated_at: updated.updated_at,
+							});
+						}
+						db.close();
+					} catch {
+						// Lost connectivity — save offline
+						const db = await openOfflineDB();
+						const existing = await getOfflineNote(db, noteId);
+						if (existing) {
+							await upsertNote(db, {
+								...existing,
+								[field]: value,
+								local_updated_at: new Date().toISOString(),
+								is_dirty: true,
+							});
+						}
+						db.close();
+						if (note) note = { ...note, [field]: value };
+					}
+				}
 			} finally {
 				saving = false;
 			}
@@ -212,6 +326,7 @@
 			</div>
 		{/if}
 		<input
+			bind:this={titleInput}
 			class="title-input"
 			type="text"
 			value={note.title}

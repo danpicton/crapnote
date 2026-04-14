@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 	import {
 		toggleStrongCommand,
@@ -19,6 +19,18 @@
 	import { api, type Note, type Tag } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
+	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote } from '$lib/offlineDB';
+	import type { CachedNote } from '$lib/offlineDB';
+	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
+
+	// PUBLIC_OFFLINE_NOTES_COUNT can be set at build time via the PUBLIC_ prefix env var.
+	const OFFLINE_NOTES_COUNT = Math.max(1, parseInt(
+		(import.meta.env.PUBLIC_OFFLINE_NOTES_COUNT as string | undefined) ?? '50', 10
+	));
+	// Heartbeat interval for pushing dirty notes to the server. Min 5 s.
+	const SYNC_INTERVAL_MS = Math.max(5000, parseInt(
+		(import.meta.env.PUBLIC_SYNC_INTERVAL_MS as string | undefined) ?? '30000', 10
+	));
 
 	// Lucide icons
 	import {
@@ -26,9 +38,14 @@
 		List, ListOrdered, Minus, Undo2, Redo2, Image, Link,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search, Tag as TagIcon,
+		CloudUpload, CheckCircle2, Lock,
 	} from 'lucide-svelte';
 
 	let notes = $state<Note[]>([]);
+	let isOnline = $state(typeof navigator !== 'undefined' ? navigator.onLine : true);
+	let syncStatus = $state<'synced' | 'syncing' | 'unsynced'>('synced');
+	let lastSyncAt = $state<Date | null>(null);
+	let lastSyncSummary = $state<string>('');
 
 	let selectedId = $state<number | null>(null);
 	let search = $state('');
@@ -38,6 +55,8 @@
 	function isMobile() { return window.matchMedia('(max-width: 767px)').matches; }
 	// Editor command ref
 	let editorRef = $state<EditorRef | null>(null);
+	// Title input ref (used to focus + highlight on new-note creation)
+	let titleInput = $state<HTMLInputElement | null>(null);
 
 	// Tags
 	let allTags = $state<Tag[]>([]);
@@ -98,42 +117,341 @@
 
 	let selectedNote = $derived(notes.find((n) => n.id === selectedId) ?? null);
 
+	function cachedToNote(c: CachedNote): Note {
+		return {
+			id: c.id,
+			title: c.title,
+			body: c.body,
+			starred: c.starred,
+			pinned: c.pinned,
+			archived: false,
+			created_at: c.server_updated_at,
+			updated_at: c.local_updated_at,
+		};
+	}
+
+	async function loadFromCache(): Promise<Note[]> {
+		const db = await openOfflineDB();
+		const cached = await getAllNotes(db);
+		db.close();
+		// Apply filters using cached metadata
+		let filtered = cached;
+		if (starredOnly) filtered = filtered.filter(n => n.starred);
+		if (activeTagId !== null) filtered = filtered.filter(n => n.tags.some(t => t.id === activeTagId));
+		if (search) {
+			const term = search.toLowerCase();
+			filtered = filtered.filter(n =>
+				n.title.toLowerCase().includes(term) || n.body.toLowerCase().includes(term)
+			);
+		}
+		// Pinned first, then most recently updated
+		return filtered
+			.sort((a, b) => {
+				if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+				return new Date(b.local_updated_at).getTime() - new Date(a.local_updated_at).getTime();
+			})
+			.map(cachedToNote);
+	}
+
+	async function cacheNotesForOffline(serverNotes: Note[]): Promise<void> {
+		const db = await openOfflineDB();
+
+		const toKeep = new Set<number>();
+		let count = 0;
+		// Sort by updated_at DESC then include pinned regardless of rank
+		const byDate = [...serverNotes].sort(
+			(a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+		);
+		for (const note of byDate) {
+			if (count < OFFLINE_NOTES_COUNT) { toKeep.add(note.id); count++; }
+			if (note.pinned) toKeep.add(note.id); // always cache pinned notes
+		}
+
+		for (const note of serverNotes) {
+			if (!toKeep.has(note.id)) continue;
+			const existing = await getNote(db, note.id);
+			if (existing?.is_dirty) continue; // don't overwrite unsync'd local changes
+			// Fetch tags for this note so they're available offline
+			const noteTags = await api.tags.listForNote(note.id).catch(() => existing?.tags ?? []);
+			await upsertNote(db, {
+				id: note.id,
+				title: note.title,
+				body: note.body,
+				starred: note.starred,
+				pinned: note.pinned,
+				tags: noteTags.map(t => ({ id: t.id, name: t.name })),
+				server_updated_at: note.updated_at,
+				local_updated_at: note.updated_at,
+				is_dirty: false,
+				is_new: false,
+			});
+		}
+
+		// Evict notes no longer in the keep-set (unless dirty / new)
+		const allCached = await getAllNotes(db);
+		for (const c of allCached) {
+			if (!toKeep.has(c.id) && !c.is_dirty && !c.is_new) {
+				await deleteOfflineNote(db, c.id);
+			}
+		}
+
+		db.close();
+	}
+
+	/**
+	 * Merge a server-returned note list with the local IDB cache so that
+	 *  - dirty notes (edited offline but not yet synced) keep their local
+	 *    title/body rather than being clobbered by the older server copy, and
+	 *  - offline-created notes (is_new, negative id) that the server does
+	 *    not yet know about stay visible.
+	 *
+	 * Without this, a reload after reconnect would silently drop any unsynced
+	 * local changes whenever the sync itself failed.
+	 */
+	async function mergeServerWithCache(serverNotes: Note[]): Promise<Note[]> {
+		const db = await openOfflineDB();
+		const cached = await getAllNotes(db);
+		db.close();
+
+		// Overlay dirty (but not new) local content onto matching server notes
+		const dirtyById = new Map<number, CachedNote>();
+		for (const c of cached) {
+			if (c.is_dirty && !c.is_new) dirtyById.set(c.id, c);
+		}
+		const merged: Note[] = serverNotes.map((n) => {
+			const d = dirtyById.get(n.id);
+			if (!d) return n;
+			return { ...n, title: d.title, body: d.body, updated_at: d.local_updated_at };
+		});
+
+		// Include offline-created notes (not yet on the server) — apply the
+		// same filters the server query applies so the list stays consistent.
+		for (const c of cached) {
+			if (!c.is_new) continue;
+			if (starredOnly && !c.starred) continue;
+			if (activeTagId !== null && !c.tags.some((t) => t.id === activeTagId)) continue;
+			if (search) {
+				const term = search.toLowerCase();
+				if (!c.title.toLowerCase().includes(term) && !c.body.toLowerCase().includes(term)) continue;
+			}
+			merged.push(cachedToNote(c));
+		}
+
+		// Re-sort: pinned first, then most recently updated.
+		return merged.sort((a, b) => {
+			if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+			return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+		});
+	}
+
 	async function loadNotes() {
+		if (!navigator.onLine) {
+			notes = await loadFromCache();
+			return;
+		}
 		const params: { search?: string; tag?: number; starred?: boolean } = {};
 		if (search) params.search = search;
 		if (activeTagId !== null) params.tag = activeTagId;
 		if (starredOnly) params.starred = true;
-		notes = await api.notes.list(params);
+		try {
+			const fetched = await api.notes.list(params);
+			notes = await mergeServerWithCache(fetched);
+			// Cache top-N when no filter is active (we want the canonical recent list)
+			if (!search && activeTagId === null && !starredOnly) {
+				cacheNotesForOffline(fetched); // fire-and-forget
+			}
+		} catch {
+			// Network failed despite onLine — fall back to cache
+			notes = await loadFromCache();
+		}
 	}
 
-	onMount(async () => {
-		await loadNotes();
-		allTags = await api.tags.list();
-		// On mobile the list is the home screen; we never auto-open the editor.
-		// On desktop, pre-select the first note so the editor pane isn't empty.
-		if (!isMobile() && notes.length > 0 && selectedId === null) {
-			const initId = notes[0].id;
-			selectedId = initId;
-			const tags = await api.tags.listForNote(initId);
-			// Only apply if no user action (newNote / selectNote) changed the
-			// selection while we were awaiting the listForNote response.
-			if (selectedId === initId) {
-				noteTags = tags;
-			}
+	/** Returns true if the note body contains markdown/HTML images. */
+	function noteHasImages(body: string): boolean {
+		return /!\[.*?\]\(.*?\)|<img[\s>]/i.test(body);
+	}
+
+	/**
+	 * Bidirectional heartbeat:
+	 *   1. Push any locally-dirty notes to the server (conflicts get preserved
+	 *      as "[sync conflict]" notes).
+	 *   2. Reload the notes list from the server so edits made on OTHER
+	 *      devices become visible without a force-refresh. `loadNotes` then
+	 *      merges the server list with the IDB cache via `mergeServerWithCache`,
+	 *      so any still-dirty local edits survive.
+	 *
+	 * Runs both on a timer (every `SYNC_INTERVAL_MS`) and on demand (manual
+	 * button, `online` event). A `trigger` is passed through to the log so
+	 * the source of each run is traceable in DevTools.
+	 */
+	async function heartbeatSync(trigger: SyncTrigger = 'heartbeat') {
+		if (!navigator.onLine) return;
+		syncStatus = 'syncing';
+
+		const result = await syncOfflineChanges(trigger);
+
+		// If the note we had open was a temp-ID that just got a real server ID, update selection
+		if (selectedId !== null) {
+			const mapping = result.mappings.find((m) => m.tempId === selectedId);
+			if (mapping) selectedId = mapping.serverId;
 		}
+
+		// Pull: refresh list so server-side changes (from another device, conflict notes,
+		// etc.) show up. loadNotes() merges with IDB so still-dirty local edits survive.
+		try {
+			await loadNotes();
+		} catch {
+			// loadNotes already falls back to cache on network failure — swallow here.
+		}
+
+		// Finalise status from IDB — if anything remained dirty (network errors)
+		// keep the "unsynced" indicator on.
+		const db = await openOfflineDB();
+		const stillDirty = await getDirtyNotes(db);
+		db.close();
+		syncStatus = stillDirty.length > 0 ? 'unsynced' : 'synced';
+
+		lastSyncAt = new Date();
+		lastSyncSummary = `pushed ${result.pushed.created + result.pushed.updated}, conflicts ${result.conflicts}, errors ${result.errors}`;
+	}
+
+	/** Manual sync — wired to the sync-status indicator in the sidebar footer. */
+	async function manualSync() {
+		if (!navigator.onLine) return;
+		await heartbeatSync('manual');
+	}
+
+	/** Human-readable tooltip for the sync indicator. */
+	let syncTooltip = $derived.by(() => {
+		if (syncStatus === 'syncing') return 'Syncing…';
+		if (!lastSyncAt) {
+			return syncStatus === 'unsynced' ? 'Unsynced changes — click to sync' : 'Click to sync now';
+		}
+		const when = lastSyncAt.toLocaleTimeString();
+		const state = syncStatus === 'unsynced' ? 'Unsynced changes' : 'All changes synced';
+		return `${state} · last sync ${when} (${lastSyncSummary}) — click to sync now`;
 	});
 
-	async function newNote() {
-		const note = await api.notes.create();
-		const firstUnpinned = notes.findIndex((n) => !n.pinned);
-		if (firstUnpinned === -1) {
-			notes = [...notes, note];
-		} else {
-			notes = [...notes.slice(0, firstUnpinned), note, ...notes.slice(firstUnpinned)];
-		}
-		selectedId = note.id;
+	/** Read dirty-note count from IndexedDB and update syncStatus (no network call). */
+	async function refreshSyncStatus() {
+		const db = await openOfflineDB();
+		const dirty = await getDirtyNotes(db);
+		db.close();
+		syncStatus = dirty.length > 0 ? 'unsynced' : 'synced';
+	}
+
+	onMount(() => {
+		isOnline = navigator.onLine;
+
+		const handleOnline = async () => {
+			isOnline = true;
+			// Bidirectional sync on reconnect: push dirty, pull fresh list.
+			await heartbeatSync('online');
+			allTags = await api.tags.list().catch(() => allTags);
+		};
+		const handleOffline = () => {
+			isOnline = false;
+			void refreshSyncStatus();
+		};
+		window.addEventListener('online', handleOnline);
+		window.addEventListener('offline', handleOffline);
+
+		// Periodic bidirectional sync while the page is open.
+		const heartbeatTimer = setInterval(() => { void heartbeatSync('heartbeat'); }, SYNC_INTERVAL_MS);
+
+		// Fire async init as a void IIFE so the cleanup function can be returned synchronously.
+		void (async () => {
+			await loadNotes();
+			await refreshSyncStatus();
+			allTags = await api.tags.list().catch(() => []);
+			// On mobile the list is the home screen; we never auto-open the editor.
+			// On desktop, pre-select the first note so the editor pane isn't empty.
+			if (!isMobile() && notes.length > 0 && selectedId === null) {
+				const initId = notes[0].id;
+				selectedId = initId;
+				const tags = await api.tags.listForNote(initId).catch(() => []);
+				// Only apply if no user action (newNote / selectNote) changed the
+				// selection while we were awaiting the listForNote response.
+				if (selectedId === initId) {
+					noteTags = tags;
+				}
+			}
+		})();
+
+		return () => {
+			window.removeEventListener('online', handleOnline);
+			window.removeEventListener('offline', handleOffline);
+			clearInterval(heartbeatTimer);
+		};
+	});
+
+	/**
+	 * Default title for a freshly-created note. Generated client-side using the
+	 * user's *local* time and English weekday name, so it reads naturally no
+	 * matter where the server lives (e.g. "2026-04-14 14:23:30 - Tuesday").
+	 * The same format is used whether the note is created online or offline.
+	 */
+	function defaultNoteTitle(now: Date = new Date()): string {
+		const pad = (n: number) => n.toString().padStart(2, '0');
+		const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} `
+			+ `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+		const weekday = now.toLocaleDateString('en-US', { weekday: 'long' });
+		return `${ts} - ${weekday}`;
+	}
+
+	/** Focus and select the title input so the generated default can be overwritten. */
+	async function focusTitleInput() {
+		await tick();
+		titleInput?.focus();
+		titleInput?.select();
+	}
+
+	async function createNoteOffline() {
+		const tempId = -Date.now();
+		const now = new Date().toISOString();
+		const title = defaultNoteTitle();
+		const cached: CachedNote = {
+			id: tempId, title, body: '',
+			starred: false, pinned: false, tags: [],
+			server_updated_at: now, local_updated_at: now,
+			is_dirty: true, is_new: true,
+		};
+		const db = await openOfflineDB();
+		await upsertNote(db, cached);
+		db.close();
+		const offlineNote: Note = {
+			id: tempId, title, body: '',
+			starred: false, pinned: false, archived: false,
+			created_at: now, updated_at: now,
+		};
+		notes = [offlineNote, ...notes];
+		selectedId = tempId;
 		noteTags = [];
-		if (isMobile()) { goto(`/notes/${note.id}`); return; }
+		if (isMobile()) { goto(`/notes/${tempId}?new=1`); return; }
+		await focusTitleInput();
+	}
+
+	async function newNote() {
+		if (!navigator.onLine) {
+			await createNoteOffline();
+			return;
+		}
+		try {
+			const note = await api.notes.create(defaultNoteTitle());
+			const firstUnpinned = notes.findIndex((n) => !n.pinned);
+			if (firstUnpinned === -1) {
+				notes = [...notes, note];
+			} else {
+				notes = [...notes.slice(0, firstUnpinned), note, ...notes.slice(firstUnpinned)];
+			}
+			selectedId = note.id;
+			noteTags = [];
+			if (isMobile()) { goto(`/notes/${note.id}?new=1`); return; }
+			await focusTitleInput();
+		} catch {
+			// API unreachable (navigator.onLine can be true on captive portals etc.)
+			await createNoteOffline();
+		}
 	}
 
 	async function selectNote(id: number) {
@@ -214,12 +532,83 @@
 	function scheduleAutoSave(field: 'title' | 'body', value: string) {
 		if (!selectedId) return;
 		if (saveTimer) clearTimeout(saveTimer);
+		const idAtSchedule = selectedId;
 		saveTimer = setTimeout(async () => {
 			if (!selectedId) return;
 			saving = true;
 			try {
-				const updated = await api.notes.update(selectedId, { [field]: value });
-				notes = notes.map((n) => (n.id === updated.id ? updated : n));
+				if (!navigator.onLine) {
+					// Save to IndexedDB and mark dirty
+					const db = await openOfflineDB();
+					const existing = await getNote(db, idAtSchedule);
+					if (existing) {
+						await upsertNote(db, {
+							...existing,
+							[field]: value,
+							local_updated_at: new Date().toISOString(),
+							is_dirty: true,
+						});
+					} else {
+						// Note not yet in cache (was online when it loaded) — create a cache entry
+						const currentNote = notes.find(n => n.id === idAtSchedule);
+						if (currentNote) {
+							await upsertNote(db, {
+								id: currentNote.id,
+								title: field === 'title' ? value : currentNote.title,
+								body: field === 'body' ? value : currentNote.body,
+								starred: currentNote.starred,
+								pinned: currentNote.pinned,
+								tags: noteTags.map(t => ({ id: t.id, name: t.name })),
+								server_updated_at: currentNote.updated_at,
+								local_updated_at: new Date().toISOString(),
+								is_dirty: true,
+								is_new: false,
+							});
+						}
+					}
+					db.close();
+					notes = notes.map(n => n.id === idAtSchedule ? { ...n, [field]: value } : n);
+					syncStatus = 'unsynced';
+				} else {
+					try {
+						const updated = await api.notes.update(idAtSchedule, { [field]: value });
+						notes = notes.map((n) => (n.id === updated.id ? updated : n));
+						// Keep cache in sync
+						const db = await openOfflineDB();
+						const existing = await getNote(db, updated.id);
+						if (existing && !existing.is_dirty) {
+							await upsertNote(db, {
+								...existing,
+								title: updated.title,
+								body: updated.body,
+								server_updated_at: updated.updated_at,
+								local_updated_at: updated.updated_at,
+							});
+						}
+						db.close();
+					} catch {
+						// Lost connectivity during save — fall back to offline save
+						const db = await openOfflineDB();
+						const currentNote = notes.find(n => n.id === idAtSchedule);
+						if (currentNote) {
+							const existing = await getNote(db, idAtSchedule);
+							await upsertNote(db, {
+								id: currentNote.id,
+								title: field === 'title' ? value : currentNote.title,
+								body: field === 'body' ? value : currentNote.body,
+								starred: currentNote.starred,
+								pinned: currentNote.pinned,
+								tags: existing?.tags ?? noteTags.map(t => ({ id: t.id, name: t.name })),
+								server_updated_at: currentNote.updated_at,
+								local_updated_at: new Date().toISOString(),
+								is_dirty: true,
+								is_new: existing?.is_new ?? false,
+							});
+						}
+						db.close();
+						notes = notes.map(n => n.id === idAtSchedule ? { ...n, [field]: value } : n);
+					}
+				}
 			} finally {
 				saving = false;
 			}
@@ -306,6 +695,9 @@
 	<aside class="sidebar">
 		<header class="sidebar-header">
 			<span class="app-name">Crapnote</span>
+			{#if !isOnline}
+				<span class="offline-badge" title="You are offline — changes will sync when reconnected">Offline</span>
+			{/if}
 			{#if selectedId}
 				<button class="hdr-btn mobile-show-editor" onclick={() => goto(`/notes/${selectedId}`)} title="View note" aria-label="View note">
 					<ChevronRight size={18} />
@@ -371,10 +763,13 @@
 				<li class="note-item" class:selected={note.id === selectedId}>
 					<button class="note-btn" onclick={() => selectNote(note.id)}>
 						<span class="note-title-row">
-							<span class="note-title">{note.title}</span>
+							<span class="note-title" class:untitled={!note.title}>{note.title || 'Untitled'}</span>
 							<span class="note-badges">
 								{#if note.pinned}<span title="Pinned"><Pin size={11} /></span>{/if}
 								{#if note.starred}<span title="Starred"><Star size={11} /></span>{/if}
+								{#if !isOnline && noteHasImages(note.body)}
+									<span title="Images not available offline"><Lock size={11} /></span>
+								{/if}
 							</span>
 						</span>
 						<span class="note-date">{new Date(note.updated_at).toLocaleDateString()}</span>
@@ -410,6 +805,22 @@
 				</a>
 			</div>
 			<div class="bottom-right">
+				<button
+					type="button"
+					class="sync-status"
+					class:sync-unsynced={syncStatus === 'unsynced'}
+					class:sync-syncing={syncStatus === 'syncing'}
+					title={syncTooltip}
+					aria-label={syncTooltip}
+					disabled={syncStatus === 'syncing' || !isOnline}
+					onclick={manualSync}
+				>
+					{#if syncStatus === 'synced'}
+						<CheckCircle2 size={14} />
+					{:else}
+						<CloudUpload size={14} />
+					{/if}
+				</button>
 				<a href="/settings" class="bottom-btn icon-only" title="Settings">
 					<Settings size={16} />
 				</a>
@@ -504,6 +915,7 @@
 					</div>
 				{/if}
 				<input
+					bind:this={titleInput}
 					class="title-input"
 					type="text"
 					value={selectedNote.title}
@@ -557,6 +969,11 @@
 					oninsertlink={openLinkDialog}
 				/>
 			{/key}
+			{#if !isOnline && noteHasImages(selectedNote.body)}
+				<div class="offline-image-notice">
+					<Lock size={13} /> Images aren't available offline
+				</div>
+			{/if}
 		{:else}
 			<div class="empty-state">
 				<p>Select a note or create a new one.</p>
@@ -596,6 +1013,18 @@
 	}
 
 	.app-name { font-weight: 700; font-size: 1.125rem; }
+
+	.offline-badge {
+		font-size: 0.65rem;
+		font-weight: 600;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		padding: 0.1rem 0.4rem;
+		border-radius: 999px;
+		background: var(--warning-bg, #fef3c7);
+		color: var(--warning-text, #92400e);
+		border: 1px solid var(--warning-border, #fde68a);
+	}
 
 	.hdr-btn {
 		background: none;
@@ -721,8 +1150,36 @@
 		flex-shrink: 0; /* always visible below note list */
 	}
 
-	.bottom-left { display: flex; gap: 0.25rem; }
-	.bottom-right { display: flex; gap: 0.25rem; }
+	.bottom-left { display: flex; gap: 0.25rem; align-items: center; }
+	.bottom-right { display: flex; gap: 0.25rem; align-items: center; }
+
+	.sync-status {
+		display: flex;
+		align-items: center;
+		color: var(--text-4);
+		padding: 0.25rem;
+		background: transparent;
+		border: none;
+		border-radius: 4px;
+		cursor: pointer;
+		font: inherit;
+	}
+	.sync-status:hover:not(:disabled) { background: var(--hover-bg, rgba(0, 0, 0, 0.05)); color: var(--text-2); }
+	.sync-status:disabled { cursor: default; opacity: 0.7; }
+	.sync-status.sync-unsynced { color: var(--warning-text, #92400e); }
+	.sync-status.sync-syncing  { color: var(--text-3); }
+
+	.untitled { color: var(--text-4); font-style: italic; }
+
+	.offline-image-notice {
+		display: flex;
+		align-items: center;
+		gap: 0.375rem;
+		font-size: 0.75rem;
+		color: var(--text-4);
+		padding: 0.4rem 1rem;
+		border-top: 1px solid var(--border);
+	}
 
 	.bottom-btn {
 		display: flex;
