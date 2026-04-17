@@ -10,7 +10,6 @@ services:
       - DATABASE_PATH=/data/notes.db
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
-      - SESSION_SECRET=${SESSION_SECRET:-dev-secret-change-in-production}
       - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-7}
       # Set LOG_FORMAT=json for structured JSON logs (ingested by Loki via Alloy).
       - LOG_FORMAT=${LOG_FORMAT:-json}

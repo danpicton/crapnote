@@ -359,3 +359,79 @@ func TestNotesHandler_Unarchive(t *testing.T) {
 		t.Fatalf("expected 200 after unarchive, got %d", w2.Code)
 	}
 }
+
+func TestHandler_Create_TitleTooLong(t *testing.T) {
+	h, user := newHandlerFixture(t)
+	longTitle := fmt.Sprintf(`{"title":"%s","body":"x"}`, string(make([]byte, 501)))
+	req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(longTitle))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.Create(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for long title, got %d", w.Code)
+	}
+}
+
+func TestHandler_Create_BodyTooLong(t *testing.T) {
+	h, user := newHandlerFixture(t)
+	longBody, _ := json.Marshal(map[string]string{"title": "t", "body": string(make([]byte, 500_001))})
+	req := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewReader(longBody))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.Create(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for long body, got %d", w.Code)
+	}
+}
+
+func TestHandler_Update_TitleTooLong(t *testing.T) {
+	h, user := newHandlerFixture(t)
+	ctx := context.Background()
+	note, _ := notes.NewService(notes.NewRepo(func() *db.DB {
+		database, _ := db.Open(db.Config{SQLitePath: ":memory:"})
+		return database
+	}())).Create(ctx, user.ID, "ok", "ok")
+	_ = note
+
+	// Create a note first via the handler so we have an ID in this DB.
+	createReq := httptest.NewRequest(http.MethodPost, "/api/notes",
+		bytes.NewBufferString(`{"title":"ok","body":"ok"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq = withUser(createReq, user)
+	cw := httptest.NewRecorder()
+	h.Create(cw, createReq)
+	var created map[string]any
+	json.NewDecoder(cw.Body).Decode(&created) //nolint:errcheck
+	id := int64(created["id"].(float64))
+
+	longTitle := string(make([]byte, 501))
+	body, _ := json.Marshal(map[string]string{"title": longTitle})
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/notes/%d", id), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", fmt.Sprintf("%d", id))
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.Update(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for long title in update, got %d", w.Code)
+	}
+}
+
+func TestNotesHandler_ResponseOmitsUserID(t *testing.T) {
+	h, user := newHandlerFixture(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/notes",
+		bytes.NewBufferString(`{"title":"secret","body":"content"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.Create(w, req)
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp) //nolint:errcheck
+	if _, ok := resp["user_id"]; ok {
+		t.Fatal("user_id must not be present in note response")
+	}
+}

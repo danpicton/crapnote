@@ -10,6 +10,11 @@ import (
 	"github.com/danpicton/crapnote/internal/auth"
 )
 
+const (
+	maxTitleLen = 500
+	maxBodyLen  = 500_000
+)
+
 // Handler holds HTTP handlers for notes endpoints.
 type Handler struct {
 	svc *Service
@@ -70,6 +75,14 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if len(req.Title) > maxTitleLen {
+		writeError(w, http.StatusBadRequest, "title exceeds maximum length")
+		return
+	}
+	if len(req.Body) > maxBodyLen {
+		writeError(w, http.StatusBadRequest, "body exceeds maximum length")
+		return
+	}
 
 	note, err := h.svc.Create(r.Context(), u.ID, req.Title, req.Body)
 	if err != nil {
@@ -127,6 +140,14 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Title != nil && len(*req.Title) > maxTitleLen {
+		writeError(w, http.StatusBadRequest, "title exceeds maximum length")
+		return
+	}
+	if req.Body != nil && len(*req.Body) > maxBodyLen {
+		writeError(w, http.StatusBadRequest, "body exceeds maximum length")
 		return
 	}
 
@@ -285,7 +306,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 
 type noteResponse struct {
 	ID        int64  `json:"id"`
-	UserID    int64  `json:"user_id"`
 	Title     string `json:"title"`
 	Body      string `json:"body"`
 	Starred   bool   `json:"starred"`
@@ -298,7 +318,6 @@ type noteResponse struct {
 func noteToResponse(n *Note) noteResponse {
 	return noteResponse{
 		ID:        n.ID,
-		UserID:    n.UserID,
 		Title:     n.Title,
 		Body:      n.Body,
 		Starred:   n.Starred,

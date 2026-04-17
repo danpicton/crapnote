@@ -107,8 +107,22 @@ export const api = {
 		empty: () => request<void>('DELETE', '/api/trash'),
 	},
 
-	export: (password?: string) => {
-		const url = '/api/export' + (password ? `?password=${encodeURIComponent(password)}` : '');
-		window.location.href = url;
+	export: async (password?: string) => {
+		const res = await fetch('/api/export', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ password: password ?? null }),
+			credentials: 'include',
+		});
+		if (!res.ok) throw new ApiError(res.status, await res.text());
+		const blob = await res.blob();
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = `crapnote-export-${new Date().toISOString().slice(0, 10)}.zip`;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
 	},
 };

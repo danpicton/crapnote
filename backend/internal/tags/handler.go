@@ -9,6 +9,8 @@ import (
 	"github.com/danpicton/crapnote/internal/auth"
 )
 
+const maxTagNameLen = 100
+
 // Handler holds HTTP handlers for tag endpoints.
 type Handler struct {
 	svc *Service
@@ -55,6 +57,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
+	if len(req.Name) > maxTagNameLen {
+		writeError(w, http.StatusBadRequest, "tag name exceeds maximum length")
+		return
+	}
 
 	tag, err := h.svc.Create(r.Context(), u.ID, req.Name)
 	if err != nil {
@@ -83,6 +89,10 @@ func (h *Handler) Rename(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	if len(req.Name) > maxTagNameLen {
+		writeError(w, http.StatusBadRequest, "tag name exceeds maximum length")
 		return
 	}
 
@@ -225,7 +235,6 @@ func writeError(w http.ResponseWriter, code int, msg string) {
 
 type tagResponse struct {
 	ID        int64  `json:"id"`
-	UserID    int64  `json:"user_id"`
 	Name      string `json:"name"`
 	NoteCount int    `json:"note_count,omitempty"`
 	CreatedAt string `json:"created_at"`
@@ -234,7 +243,6 @@ type tagResponse struct {
 func tagToResponse(t *Tag) tagResponse {
 	return tagResponse{
 		ID:        t.ID,
-		UserID:    t.UserID,
 		Name:      t.Name,
 		CreatedAt: t.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	}
