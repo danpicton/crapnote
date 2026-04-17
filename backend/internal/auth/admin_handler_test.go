@@ -63,7 +63,7 @@ func TestAdminHandler_ListUsers(t *testing.T) {
 func TestAdminHandler_CreateUser(t *testing.T) {
 	h, admin, _ := newAdminFixture(t)
 
-	body := `{"username":"bob","password":"s3cret","is_admin":false}`
+	body := `{"username":"bob","password":"s3cret-l0ng-enough","is_admin":false}`
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = adminRequest(req, admin)
@@ -91,7 +91,7 @@ func TestAdminHandler_DeleteUser(t *testing.T) {
 	// Create a non-admin user to delete.
 	svc.SeedAdmin(ctx, "admin", "pass") //nolint:errcheck (already exists, no-op)
 	// Create another user via CreateUser endpoint.
-	body := `{"username":"carol","password":"pw","is_admin":false}`
+	body := `{"username":"carol","password":"correct-horse-battery","is_admin":false}`
 	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = adminRequest(req, admin)
@@ -110,6 +110,21 @@ func TestAdminHandler_DeleteUser(t *testing.T) {
 
 	if w2.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d: %s", w2.Code, w2.Body.String())
+	}
+}
+
+func TestAdminHandler_CreateUser_ShortPasswordRejected(t *testing.T) {
+	h, admin, _ := newAdminFixture(t)
+
+	body := `{"username":"shortpw","password":"tooshort"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.CreateUser(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for short password, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

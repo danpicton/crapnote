@@ -164,3 +164,59 @@ func TestTagsHandler_NoteAssociations(t *testing.T) {
 		t.Fatalf("RemoveFromNote: expected 204, got %d", w3.Code)
 	}
 }
+
+func TestTagsHandler_Create_NameTooLong(t *testing.T) {
+	h, user, _ := newHandlerFixture(t)
+	longName, _ := json.Marshal(map[string]string{"name": string(make([]byte, 101))})
+	req := httptest.NewRequest(http.MethodPost, "/api/tags", bytes.NewReader(longName))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.Create(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for long tag name, got %d", w.Code)
+	}
+}
+
+func TestTagsHandler_Rename_NameTooLong(t *testing.T) {
+	h, user, _ := newHandlerFixture(t)
+
+	// Create a tag first.
+	createReq := httptest.NewRequest(http.MethodPost, "/api/tags",
+		bytes.NewBufferString(`{"name":"work"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq = withUser(createReq, user)
+	cw := httptest.NewRecorder()
+	h.Create(cw, createReq)
+	var created map[string]any
+	json.NewDecoder(cw.Body).Decode(&created) //nolint:errcheck
+	id := int64(created["id"].(float64))
+
+	longName, _ := json.Marshal(map[string]string{"name": string(make([]byte, 101))})
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/tags/%d", id), bytes.NewReader(longName))
+	req.Header.Set("Content-Type", "application/json")
+	req.SetPathValue("id", fmt.Sprintf("%d", id))
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.Rename(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for long tag name on rename, got %d", w.Code)
+	}
+}
+
+func TestTagsHandler_ResponseOmitsUserID(t *testing.T) {
+	h, user, _ := newHandlerFixture(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/tags",
+		bytes.NewBufferString(`{"name":"work"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.Create(w, req)
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp) //nolint:errcheck
+	if _, ok := resp["user_id"]; ok {
+		t.Fatal("user_id must not be present in tag response")
+	}
+}

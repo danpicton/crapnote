@@ -144,7 +144,7 @@ var protectedRoutes = []struct {
 	{http.MethodPost, "/api/tags"},
 	{http.MethodPut, "/api/tags/1"},
 	{http.MethodDelete, "/api/tags/1"},
-	{http.MethodGet, "/api/export"},
+	{http.MethodPost, "/api/export"},
 	{http.MethodPost, "/api/images"},
 	{http.MethodGet, "/api/images/someid"},
 	{http.MethodGet, "/api/trash"},
@@ -262,10 +262,10 @@ func TestAuthenticatedEndpoints(t *testing.T) {
 		t.Fatalf("GET /api/trash: expected 200, got %d", w.Code)
 	}
 
-	// GET /api/export
-	w = authedReq(http.MethodGet, "/api/export", "")
+	// POST /api/export
+	w = authedReq(http.MethodPost, "/api/export", `{}`)
 	if w.Code != http.StatusOK {
-		t.Fatalf("GET /api/export: expected 200, got %d", w.Code)
+		t.Fatalf("POST /api/export: expected 200, got %d", w.Code)
 	}
 
 	// GET /api/admin/users (admin user is logged in)

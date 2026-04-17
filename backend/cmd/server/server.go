@@ -73,7 +73,7 @@ func newMux(
 	protected("DELETE", "/api/tags/{id}", tagsHandler.Delete)
 
 	// Export
-	protected("GET", "/api/export", exportHandler.Export)
+	protected("POST", "/api/export", exportHandler.Export)
 
 	// Images
 	protected("POST", "/api/images", imagesHandler.Upload)

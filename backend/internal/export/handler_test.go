@@ -46,7 +46,8 @@ func withUser(r *http.Request, u *auth.User) *http.Request {
 func TestExport_NoPassword(t *testing.T) {
 	h, user := setup(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/export", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/export", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUser(req, user)
 	w := httptest.NewRecorder()
 	h.Export(w, req)
@@ -85,7 +86,8 @@ func TestExport_NoPassword(t *testing.T) {
 func TestExport_WithPassword(t *testing.T) {
 	h, user := setup(t)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/export?password=secret", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/export", strings.NewReader(`{"password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUser(req, user)
 	w := httptest.NewRecorder()
 	h.Export(w, req)
@@ -124,7 +126,8 @@ func TestExport_FilenamesSanitised(t *testing.T) {
 	notesSvc.Create(context.Background(), user.ID, "Hello/World & More!", "body") //nolint:errcheck
 
 	h := export.NewHandler(notesSvc, database)
-	req := httptest.NewRequest(http.MethodGet, "/api/export", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/export", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUser(req, user)
 	w := httptest.NewRecorder()
 	h.Export(w, req)
@@ -147,7 +150,8 @@ func TestExport_EmptyNotes(t *testing.T) {
 	user, _ := userRepo.Create(context.Background(), "empty", "$2a$12$x", false)
 	h := export.NewHandler(notes.NewService(notes.NewRepo(database)), database)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/export", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/export", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
 	req = withUser(req, user)
 	w := httptest.NewRecorder()
 	h.Export(w, req)

@@ -93,11 +93,12 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 	}
 
 	if filter.Search != "" {
-		// Quote the term and append * for prefix/character-by-character matching.
-		// e.g. typing "hel" matches "hello", "help", etc.
-		safe := strings.ReplaceAll(filter.Search, `"`, ``)
+		// Wrap the term in double-quotes for a literal phrase prefix match.
+		// Internal double-quotes are escaped by doubling ("" is the FTS5 escape
+		// sequence for a literal quote within a phrase), rather than stripping them.
+		escaped := strings.ReplaceAll(filter.Search, `"`, `""`)
 		query += ` AND n.id IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?)`
-		args = append(args, `"`+safe+`"*`)
+		args = append(args, `"`+escaped+`"*`)
 	}
 
 	query += ` ORDER BY n.pinned DESC, n.updated_at DESC`

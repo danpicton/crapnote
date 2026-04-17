@@ -46,8 +46,13 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	const minPasswordLen = 12
 	if req.Username == "" || req.Password == "" {
 		writeError(w, http.StatusBadRequest, "username and password are required")
+		return
+	}
+	if len(req.Password) < minPasswordLen {
+		writeError(w, http.StatusBadRequest, "password must be at least 12 characters")
 		return
 	}
 

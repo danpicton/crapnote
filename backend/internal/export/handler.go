@@ -2,6 +2,7 @@ package export
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -22,9 +23,10 @@ func NewHandler(notesSvc *notes.Service, db *sql.DB) *Handler {
 	return &Handler{notes: notesSvc, db: db}
 }
 
-// Export handles GET /api/export?password=<optional>
+// Export handles POST /api/export
 // Streams a ZIP file containing all non-trashed notes as .md files,
 // with any referenced images bundled under images/ and src paths rewritten.
+// An optional password in the JSON body encrypts the ZIP.
 func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	u := auth.UserFromContext(r.Context())
 	if u == nil {
@@ -32,7 +34,14 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	password := r.URL.Query().Get("password")
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, `{"error":"invalid request body"}`, http.StatusBadRequest)
+		return
+	}
+	password := body.Password
 
 	noteList, err := h.notes.List(r.Context(), u.ID, notes.ListFilter{})
 	if err != nil {
