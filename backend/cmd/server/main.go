@@ -15,6 +15,7 @@ import (
 	"github.com/danpicton/crapnote/internal/images"
 	"github.com/danpicton/crapnote/internal/middleware"
 	"github.com/danpicton/crapnote/internal/notes"
+	"github.com/danpicton/crapnote/internal/ratelimit"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/trash"
 )
@@ -94,10 +95,22 @@ func main() {
 		}
 	}()
 
-	imagesHandler := images.NewHandler(database)
+	imagesCfg := images.DefaultConfig()
+	if v, err := strconv.Atoi(os.Getenv("IMAGE_UPLOADS_PER_MINUTE")); err == nil && v > 0 {
+		imagesCfg.UploadsPerMinute = v
+	}
+	if v, err := strconv.Atoi(os.Getenv("IMAGE_QUOTA_MB")); err == nil && v > 0 {
+		imagesCfg.QuotaBytes = int64(v) << 20
+	}
+	imagesHandler := images.NewHandlerWith(database, imagesCfg)
+
+	// Login rate limiter: 5 attempts per minute per client IP with a small
+	// burst, reset on window refill. This is defence against credential
+	// brute-forcing. See issue #12.
+	loginLimiter := ratelimit.New(5.0/60.0, 5)
 
 	port := envOrDefault("PORT", "8080")
-	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler)
+	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, loginLimiter)
 
 	// Wrap with observability middleware (metrics outermost, then logging, then security headers).
 	handler := middleware.Metrics()(middleware.Logging(logger)(middleware.SecurityHeaders()(mux)))

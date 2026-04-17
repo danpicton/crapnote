@@ -9,6 +9,7 @@ import (
 	"github.com/danpicton/crapnote/internal/images"
 	"github.com/danpicton/crapnote/internal/middleware"
 	"github.com/danpicton/crapnote/internal/notes"
+	"github.com/danpicton/crapnote/internal/ratelimit"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/trash"
 )
@@ -21,6 +22,7 @@ func newMux(
 	trashHandler   *trash.Handler,
 	exportHandler  *export.Handler,
 	imagesHandler  *images.Handler,
+	loginLimiter   *ratelimit.Limiter,
 ) *http.ServeMux {
 	mux := http.NewServeMux()
 
@@ -29,7 +31,9 @@ func newMux(
 
 	// Public.
 	mux.HandleFunc("GET /api/health", handleHealth)
-	mux.HandleFunc("POST /api/auth/login", authHandler.Login)
+	mux.Handle("POST /api/auth/login",
+		ratelimit.Middleware(loginLimiter, ratelimit.ClientIP)(http.HandlerFunc(authHandler.Login)),
+	)
 
 	// Helpers to reduce repetition.
 	protected := func(method, pattern string, h http.HandlerFunc) {

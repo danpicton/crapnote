@@ -14,9 +14,16 @@ import (
 	"github.com/danpicton/crapnote/internal/export"
 	"github.com/danpicton/crapnote/internal/images"
 	"github.com/danpicton/crapnote/internal/notes"
+	"github.com/danpicton/crapnote/internal/ratelimit"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/trash"
 )
+
+// permissiveLoginLimiter is a login limiter large enough that no test hits it
+// unless the test itself constructs a tighter one.
+func permissiveLoginLimiter() *ratelimit.Limiter {
+	return ratelimit.New(1000, 1000)
+}
 
 // newTestMux builds a fully wired mux backed by an in-memory DB.
 func newTestMux(t *testing.T) *http.ServeMux {
@@ -41,6 +48,7 @@ func newTestMux(t *testing.T) *http.ServeMux {
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
 		export.NewHandler(notesSvc, database),
 		images.NewHandler(database),
+		permissiveLoginLimiter(),
 	)
 }
 
@@ -69,6 +77,7 @@ func newAuthedMux(t *testing.T) (*http.ServeMux, *http.Cookie) {
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
 		export.NewHandler(notesSvc, database),
 		images.NewHandler(database),
+		permissiveLoginLimiter(),
 	)
 
 	// Perform a login to obtain a session cookie.
@@ -178,6 +187,53 @@ func TestAdminRouteRequiresAdmin(t *testing.T) {
 	mux.ServeHTTP(w, req)
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for unauthenticated admin route, got %d", w.Code)
+	}
+}
+
+// The login endpoint must enforce a per-IP rate limit (issue #12).
+// After the burst is exhausted, further requests from the same IP return 429
+// without touching the credential-check path.
+func TestLogin_RateLimited(t *testing.T) {
+	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	authSvc := auth.NewService(
+		auth.NewUserRepo(database),
+		auth.NewSessionRepo(database),
+		7*24*time.Hour,
+	)
+	notesSvc := notes.NewService(notes.NewRepo(database))
+	// Very tight limiter: burst of 2, effectively no refill during this test.
+	tightLimiter := ratelimit.New(0.01, 2)
+	mux := newMux(
+		auth.NewHandler(authSvc),
+		auth.NewAdminHandler(auth.NewUserRepo(database)),
+		notes.NewHandler(notesSvc),
+		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
+		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
+		export.NewHandler(notesSvc, database),
+		images.NewHandler(database),
+		tightLimiter,
+	)
+
+	send := func() int {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+			bytes.NewBufferString(`{"username":"u","password":"p"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "203.0.113.9:4444"
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	// First two attempts consume the burst; the third must be throttled.
+	_ = send()
+	_ = send()
+	if code := send(); code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after burst, got %d", code)
 	}
 }
 

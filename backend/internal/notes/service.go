@@ -77,9 +77,10 @@ func (s *Service) Unarchive(ctx context.Context, id, userID int64) error {
 	return s.repo.Unarchive(ctx, id, userID)
 }
 
-// ListArchived returns all archived notes for a user.
-func (s *Service) ListArchived(ctx context.Context, userID int64) ([]*Note, error) {
-	return s.repo.ListArchived(ctx, userID)
+// ListArchived returns archived notes for a user, optionally paginated.
+// limit <= 0 disables pagination.
+func (s *Service) ListArchived(ctx context.Context, userID int64, limit, offset int) ([]*Note, error) {
+	return s.repo.ListArchived(ctx, userID, limit, offset)
 }
 
 // TogglePin flips the pinned flag and returns the updated note.

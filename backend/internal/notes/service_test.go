@@ -163,7 +163,7 @@ func TestService_Archive(t *testing.T) {
 	}
 
 	// ListArchived must include it.
-	archived, err := svc.ListArchived(ctx, userID)
+	archived, err := svc.ListArchived(ctx, userID, 0, 0)
 	if err != nil {
 		t.Fatalf("ListArchived: %v", err)
 	}

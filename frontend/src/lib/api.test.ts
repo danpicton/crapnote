@@ -51,7 +51,10 @@ describe('api.notes', () => {
 	it('list: GET /api/notes', async () => {
 		mockFetch.mockResolvedValueOnce(ok([note]));
 		const result = await api.notes.list();
-		expect(mockFetch).toHaveBeenCalledWith('/api/notes', expect.objectContaining({ method: 'GET' }));
+		const url = mockFetch.mock.calls[0][0] as string;
+		expect(url).toMatch(/^\/api\/notes\?/);
+		expect(url).toContain('limit=100');
+		expect(mockFetch).toHaveBeenCalledWith(url, expect.objectContaining({ method: 'GET' }));
 		expect(result).toHaveLength(1);
 	});
 

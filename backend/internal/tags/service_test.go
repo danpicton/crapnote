@@ -23,7 +23,7 @@ func TestService_CreateAndList(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	list, err := svc.List(ctx, userID)
+	list, err := svc.List(ctx, userID, 0, 0)
 	if err != nil || len(list) != 1 || list[0].Name != "alpha" {
 		t.Fatalf("List: %v / %+v", err, list)
 	}

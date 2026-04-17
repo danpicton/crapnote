@@ -74,7 +74,10 @@ export const api = {
 
 	notes: {
 		list: (params?: { starred?: boolean; tag_id?: number; search?: string }) =>
-			request<Note[]>('GET', '/api/notes' + (params ? buildQuery(params as Record<string, string>) : '')),
+			request<Note[]>(
+				'GET',
+				'/api/notes' + buildQuery({ limit: 100, ...(params ?? {}) }),
+			),
 		create: (title?: string, body?: string) =>
 			request<Note>('POST', '/api/notes', { title, body }),
 		get: (id: number) => request<Note>('GET', `/api/notes/${id}`),
@@ -85,11 +88,11 @@ export const api = {
 		togglePin: (id: number) => request<Note>('PATCH', `/api/notes/${id}/pin`),
 		archive: (id: number) => request<void>('PATCH', `/api/notes/${id}/archive`),
 		unarchive: (id: number) => request<void>('PATCH', `/api/notes/${id}/unarchive`),
-		listArchived: () => request<Note[]>('GET', '/api/archive'),
+		listArchived: () => request<Note[]>('GET', '/api/archive?limit=100'),
 	},
 
 	tags: {
-		list: () => request<Tag[]>('GET', '/api/tags'),
+		list: () => request<Tag[]>('GET', '/api/tags?limit=100'),
 		create: (name: string) => request<Tag>('POST', '/api/tags', { name }),
 		rename: (id: number, name: string) => request<Tag>('PUT', `/api/tags/${id}`, { name }),
 		delete: (id: number) => request<void>('DELETE', `/api/tags/${id}`),
@@ -101,7 +104,7 @@ export const api = {
 	},
 
 	trash: {
-		list: () => request<TrashEntry[]>('GET', '/api/trash'),
+		list: () => request<TrashEntry[]>('GET', '/api/trash?limit=100'),
 		restore: (id: number) => request<void>('POST', `/api/trash/${id}/restore`),
 		deleteOne: (id: number) => request<void>('DELETE', `/api/trash/${id}`),
 		empty: () => request<void>('DELETE', '/api/trash'),

@@ -56,7 +56,7 @@ func TestTagRepo_CreateAndList(t *testing.T) {
 		t.Fatalf("unexpected tag: %+v", tag)
 	}
 
-	list, err := repo.List(ctx, userID)
+	list, err := repo.List(ctx, userID, 0, 0)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestTagRepo_List_NoteCount(t *testing.T) {
 	repo.AddToNote(ctx, n1, tag.ID, userID) //nolint:errcheck
 	repo.AddToNote(ctx, n2, tag.ID, userID) //nolint:errcheck
 
-	list, _ := repo.List(ctx, userID)
+	list, _ := repo.List(ctx, userID, 0, 0)
 	if list[0].NoteCount != 2 {
 		t.Fatalf("expected NoteCount=2, got %d", list[0].NoteCount)
 	}
