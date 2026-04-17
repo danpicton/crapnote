@@ -40,9 +40,10 @@ func main() {
 		ttlDays = 7
 	}
 
+	sessRepo := auth.NewSessionRepo(database)
 	authSvc := auth.NewService(
 		auth.NewUserRepo(database),
-		auth.NewSessionRepo(database),
+		sessRepo,
 		time.Duration(ttlDays)*24*time.Hour,
 	)
 	authHandler := auth.NewHandler(authSvc)
@@ -67,6 +68,19 @@ func main() {
 		}
 	}
 
+	// Background job: purge expired sessions, runs once per day.
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			if err := sessRepo.DeleteExpired(context.Background()); err != nil {
+				logger.Error("purge expired sessions", "error", err)
+			} else {
+				logger.Info("purged expired sessions")
+			}
+		}
+	}()
+
 	// Background job: purge trash entries older than 7 days, runs once per day.
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
@@ -85,8 +99,8 @@ func main() {
 	port := envOrDefault("PORT", "8080")
 	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler)
 
-	// Wrap with observability middleware (metrics outermost, then logging).
-	handler := middleware.Metrics()(middleware.Logging(logger)(mux))
+	// Wrap with observability middleware (metrics outermost, then logging, then security headers).
+	handler := middleware.Metrics()(middleware.Logging(logger)(middleware.SecurityHeaders()(mux)))
 
 	addr := fmt.Sprintf(":%s", port)
 	logger.Info("server starting", "addr", addr)

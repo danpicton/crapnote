@@ -339,3 +339,31 @@ func TestNoteRepo_List_PrefixSearch(t *testing.T) {
 		t.Fatalf("expected 1 result for prefix 'E', got %d", len(results2))
 	}
 }
+
+func TestNoteRepo_List_SearchSpecialCharactersNoError(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	repo.Create(ctx, userID, "Hello World", "some content") //nolint:errcheck
+
+	// FTS5 metacharacters that previously caused parse errors must not
+	// propagate as errors — they should return empty results safely.
+	inputs := []string{
+		`(unclosed`,
+		`he"llo`,
+		`OR AND NOT`,
+		`*star*`,
+		`"already quoted"`,
+		`""`,
+	}
+	for _, input := range inputs {
+		t.Run(input, func(t *testing.T) {
+			_, err := repo.List(ctx, userID, notes.ListFilter{Search: input})
+			if err != nil {
+				t.Errorf("List with search %q returned unexpected error: %v", input, err)
+			}
+		})
+	}
+}

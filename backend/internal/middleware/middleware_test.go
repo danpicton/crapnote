@@ -137,6 +137,37 @@ func TestMetrics_NormalisesNestedNumericSegments(t *testing.T) {
 	}
 }
 
+// ── Security headers middleware ───────────────────────────────────────────────
+
+func TestSecurityHeaders_SetsRequiredHeaders(t *testing.T) {
+	h := middleware.SecurityHeaders()(http.HandlerFunc(okHandler))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+
+	want := map[string]string{
+		"X-Content-Type-Options": "nosniff",
+		"X-Frame-Options":        "DENY",
+		"Referrer-Policy":        "strict-origin-when-cross-origin",
+	}
+	for header, wantVal := range want {
+		if got := w.Header().Get(header); got != wantVal {
+			t.Errorf("header %s: want %q, got %q", header, wantVal, got)
+		}
+	}
+}
+
+func TestSecurityHeaders_PassesThroughResponse(t *testing.T) {
+	notFound := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	})
+	h := middleware.SecurityHeaders()(notFound)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nope", nil))
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 passthrough, got %d", w.Code)
+	}
+}
+
 func TestMetrics_SkipsMetricsEndpointItself(t *testing.T) {
 	h := middleware.Metrics()(http.HandlerFunc(okHandler))
 	// Route a request to /metrics through the middleware — it must not self-record.
