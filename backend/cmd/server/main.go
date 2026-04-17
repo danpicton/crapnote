@@ -104,10 +104,20 @@ func main() {
 	}
 	imagesHandler := images.NewHandlerWith(database, imagesCfg)
 
-	// Login rate limiter: 5 attempts per minute per client IP with a small
-	// burst, reset on window refill. This is defence against credential
-	// brute-forcing. See issue #12.
-	loginLimiter := ratelimit.New(5.0/60.0, 5)
+	// Login rate limiter: defence against credential brute-forcing (issue #12).
+	// Defaults to 5 attempts/min with burst 5 per client IP. Both knobs are
+	// tunable via env vars so that E2E suites — which legitimately submit
+	// dozens of logins from a single IP within seconds — can loosen the cap
+	// without disabling protection in production.
+	loginRate := 5.0 / 60.0
+	loginBurst := 5
+	if v, err := strconv.Atoi(os.Getenv("LOGIN_RATE_PER_MINUTE")); err == nil && v > 0 {
+		loginRate = float64(v) / 60.0
+	}
+	if v, err := strconv.Atoi(os.Getenv("LOGIN_RATE_BURST")); err == nil && v > 0 {
+		loginBurst = v
+	}
+	loginLimiter := ratelimit.New(loginRate, loginBurst)
 
 	port := envOrDefault("PORT", "8080")
 	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, loginLimiter)
