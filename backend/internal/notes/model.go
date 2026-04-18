@@ -26,4 +26,6 @@ type ListFilter struct {
 	Starred *bool  // nil = no filter
 	TagID   *int64 // nil = no filter
 	Search  string // empty = no FTS filter
+	Limit   int    // <=0 means no bound (used only for admin/exports)
+	Offset  int
 }

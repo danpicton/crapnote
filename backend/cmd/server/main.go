@@ -15,6 +15,7 @@ import (
 	"github.com/danpicton/crapnote/internal/images"
 	"github.com/danpicton/crapnote/internal/middleware"
 	"github.com/danpicton/crapnote/internal/notes"
+	"github.com/danpicton/crapnote/internal/ratelimit"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/trash"
 )
@@ -94,10 +95,32 @@ func main() {
 		}
 	}()
 
-	imagesHandler := images.NewHandler(database)
+	imagesCfg := images.DefaultConfig()
+	if v, err := strconv.Atoi(os.Getenv("IMAGE_UPLOADS_PER_MINUTE")); err == nil && v > 0 {
+		imagesCfg.UploadsPerMinute = v
+	}
+	if v, err := strconv.Atoi(os.Getenv("IMAGE_QUOTA_MB")); err == nil && v > 0 {
+		imagesCfg.QuotaBytes = int64(v) << 20
+	}
+	imagesHandler := images.NewHandlerWith(database, imagesCfg)
+
+	// Login rate limiter: defence against credential brute-forcing (issue #12).
+	// Defaults to 5 attempts/min with burst 5 per client IP. Both knobs are
+	// tunable via env vars so that E2E suites — which legitimately submit
+	// dozens of logins from a single IP within seconds — can loosen the cap
+	// without disabling protection in production.
+	loginRate := 5.0 / 60.0
+	loginBurst := 5
+	if v, err := strconv.Atoi(os.Getenv("LOGIN_RATE_PER_MINUTE")); err == nil && v > 0 {
+		loginRate = float64(v) / 60.0
+	}
+	if v, err := strconv.Atoi(os.Getenv("LOGIN_RATE_BURST")); err == nil && v > 0 {
+		loginBurst = v
+	}
+	loginLimiter := ratelimit.New(loginRate, loginBurst)
 
 	port := envOrDefault("PORT", "8080")
-	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler)
+	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, loginLimiter)
 
 	// Wrap with observability middleware (metrics outermost, then logging, then security headers).
 	handler := middleware.Metrics()(middleware.Logging(logger)(middleware.SecurityHeaders()(mux)))

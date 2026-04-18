@@ -3,7 +3,10 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+
+	"github.com/danpicton/crapnote/internal/httpx"
 )
 
 // Handler holds HTTP handlers for auth endpoints.
@@ -40,13 +43,30 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	sess, err := h.svc.Login(r.Context(), req.Username, req.Password)
 	if errors.Is(err, ErrInvalidCredentials) {
+		slog.Warn("audit: login failed",
+			"event", "login_failed",
+			"username", req.Username,
+			"ip", httpx.ClientIP(r),
+		)
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
 	if err != nil {
+		slog.Error("audit: login error",
+			"event", "login_error",
+			"username", req.Username,
+			"ip", httpx.ClientIP(r),
+			"error", err,
+		)
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+
+	slog.Info("audit: login",
+		"event", "login_succeeded",
+		"user_id", sess.UserID,
+		"ip", httpx.ClientIP(r),
+	)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session",
@@ -69,6 +89,13 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session")
 	if err == nil {
 		h.svc.Logout(r.Context(), cookie.Value) //nolint:errcheck
+		if u := UserFromContext(r.Context()); u != nil {
+			slog.Info("audit: logout",
+				"event", "logout",
+				"user_id", u.ID,
+				"ip", httpx.ClientIP(r),
+			)
+		}
 	}
 
 	// Clear the cookie regardless.

@@ -10,9 +10,42 @@ import (
 	"net/http"
 
 	"github.com/danpicton/crapnote/internal/auth"
+	"github.com/danpicton/crapnote/internal/ratelimit"
 )
 
 const maxImageSize = 10 << 20 // 10 MB
+
+// Config controls per-user upload throttling and storage quota. See issue #15.
+type Config struct {
+	// UploadsPerMinute caps how often a single user may upload.
+	UploadsPerMinute int
+	// QuotaBytes is the maximum cumulative image storage per user. A new
+	// upload is rejected if it would push the user over this limit.
+	QuotaBytes int64
+}
+
+// DefaultConfig returns the production upload throttling settings.
+func DefaultConfig() Config {
+	return Config{
+		UploadsPerMinute: 10,
+		QuotaBytes:       100 << 20, // 100 MB per user
+	}
+}
+
+// allowedImageMIMEs enumerates accepted image MIME types. Anything else is
+// rejected so attackers cannot smuggle arbitrary binaries through the upload
+// endpoint.
+var allowedImageMIMEs = map[string]struct{}{
+	"image/jpeg": {},
+	"image/png":  {},
+	"image/gif":  {},
+	"image/webp": {},
+}
+
+func isAllowedImage(mime string) bool {
+	_, ok := allowedImageMIMEs[mime]
+	return ok
+}
 
 // Data holds the raw bytes and MIME type of a stored image.
 type Data struct {
@@ -47,12 +80,32 @@ func FetchByIDs(ctx context.Context, db *sql.DB, userID int64, ids []string) (ma
 
 // Handler holds HTTP handlers for image upload and serving.
 type Handler struct {
-	db *sql.DB
+	db         *sql.DB
+	limiter    *ratelimit.Limiter
+	quotaBytes int64
 }
 
-// NewHandler creates a new images Handler.
+// NewHandler creates a new images Handler with production defaults.
 func NewHandler(db *sql.DB) *Handler {
-	return &Handler{db: db}
+	return NewHandlerWith(db, DefaultConfig())
+}
+
+// NewHandlerWith creates a new images Handler with custom upload limits.
+func NewHandlerWith(db *sql.DB, cfg Config) *Handler {
+	if cfg.UploadsPerMinute <= 0 {
+		cfg.UploadsPerMinute = DefaultConfig().UploadsPerMinute
+	}
+	if cfg.QuotaBytes <= 0 {
+		cfg.QuotaBytes = DefaultConfig().QuotaBytes
+	}
+	return &Handler{
+		db: db,
+		limiter: ratelimit.New(
+			float64(cfg.UploadsPerMinute)/60.0,
+			cfg.UploadsPerMinute,
+		),
+		quotaBytes: cfg.QuotaBytes,
+	}
 }
 
 // Upload handles POST /api/images (multipart form with field "image").
@@ -63,13 +116,21 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Per-user rate limit — protects against a single account being used to
+	// fill storage by rapid successive uploads.
+	if !h.limiter.Allow(fmt.Sprintf("u:%d", u.ID)) {
+		w.Header().Set("Retry-After", "60")
+		writeError(w, http.StatusTooManyRequests, "upload rate limit exceeded")
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxImageSize+512)
 	if err := r.ParseMultipartForm(maxImageSize); err != nil {
 		writeError(w, http.StatusBadRequest, "image too large or bad request")
 		return
 	}
 
-	file, header, err := r.FormFile("image")
+	file, _, err := r.FormFile("image")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "missing image field")
 		return
@@ -82,9 +143,24 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mimeType := header.Header.Get("Content-Type")
-	if mimeType == "" {
-		mimeType = http.DetectContentType(data)
+	// Reject anything that does not sniff as one of the allowed image types.
+	// Trusting the client-supplied Content-Type would let attackers store
+	// arbitrary payloads in the images table.
+	mimeType := http.DetectContentType(data)
+	if !isAllowedImage(mimeType) {
+		writeError(w, http.StatusUnsupportedMediaType, "not an image")
+		return
+	}
+
+	// Per-user storage quota: reject the upload if it would exceed the cap.
+	used, err := currentImageBytes(r.Context(), h.db, u.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if used+int64(len(data)) > h.quotaBytes {
+		writeError(w, http.StatusInsufficientStorage, "storage quota exceeded")
+		return
 	}
 
 	id := newID()
@@ -101,6 +177,19 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"url": "/api/images/" + id}) //nolint:errcheck
+}
+
+// currentImageBytes returns the total bytes of images currently owned by
+// userID. Used to enforce a per-user storage quota.
+func currentImageBytes(ctx context.Context, db *sql.DB, userID int64) (int64, error) {
+	var total sql.NullInt64
+	err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(SUM(LENGTH(data)), 0) FROM images WHERE user_id = ?`, userID,
+	).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+	return total.Int64, nil
 }
 
 // Serve handles GET /api/images/{id}.

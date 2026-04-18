@@ -103,6 +103,11 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 
 	query += ` ORDER BY n.pinned DESC, n.updated_at DESC`
 
+	if filter.Limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, filter.Limit, filter.Offset)
+	}
+
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list notes: %w", err)
@@ -219,17 +224,24 @@ func (r *Repo) Unarchive(ctx context.Context, id, userID int64) error {
 	return nil
 }
 
-// ListArchived returns archived, non-trashed notes for a user ordered by updated_at DESC.
-func (r *Repo) ListArchived(ctx context.Context, userID int64) ([]*Note, error) {
-	rows, err := r.db.QueryContext(ctx, `
+// ListArchived returns archived, non-trashed notes for a user ordered by
+// updated_at DESC. limit <= 0 disables pagination (only used in trusted
+// contexts such as full exports).
+func (r *Repo) ListArchived(ctx context.Context, userID int64, limit, offset int) ([]*Note, error) {
+	query := `
 		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived,
 		       n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.user_id = ?
 		  AND n.archived = 1
 		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)
-		ORDER BY n.updated_at DESC
-	`, userID)
+		ORDER BY n.updated_at DESC`
+	args := []any{userID}
+	if limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, offset)
+	}
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list archived: %w", err)
 	}

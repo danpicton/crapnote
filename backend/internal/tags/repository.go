@@ -31,17 +31,24 @@ func (r *Repo) Create(ctx context.Context, userID int64, name string) (*Tag, err
 	return r.FindByID(ctx, id, userID)
 }
 
-// List returns all tags for a user with their note counts.
-func (r *Repo) List(ctx context.Context, userID int64) ([]*TagWithCount, error) {
-	rows, err := r.db.QueryContext(ctx, `
+// List returns tags for a user with their note counts. limit <= 0 disables
+// pagination; otherwise LIMIT/OFFSET are applied to keep list responses
+// bounded.
+func (r *Repo) List(ctx context.Context, userID int64, limit, offset int) ([]*TagWithCount, error) {
+	query := `
 		SELECT t.id, t.user_id, t.name, t.created_at,
 		       COUNT(nt.note_id) AS note_count
 		FROM tags t
 		LEFT JOIN note_tags nt ON nt.tag_id = t.id
 		WHERE t.user_id = ?
 		GROUP BY t.id
-		ORDER BY t.name
-	`, userID)
+		ORDER BY t.name`
+	args := []any{userID}
+	if limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, offset)
+	}
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list tags: %w", err)
 	}

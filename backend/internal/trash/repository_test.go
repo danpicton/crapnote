@@ -52,7 +52,7 @@ func TestTrashRepo_List(t *testing.T) {
 	trashNote(t, database, noteID, userID)
 
 	repo := trash.NewRepo(database)
-	entries, err := repo.List(context.Background(), userID)
+	entries, err := repo.List(context.Background(), userID, 0, 0)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestTrashRepo_Restore(t *testing.T) {
 		t.Fatalf("Restore: %v", err)
 	}
 
-	entries, _ := repo.List(ctx, userID)
+	entries, _ := repo.List(ctx, userID, 0, 0)
 	if len(entries) != 0 {
 		t.Fatal("note should no longer be in trash after restore")
 	}
@@ -154,7 +154,7 @@ func TestTrashRepo_Empty(t *testing.T) {
 		t.Fatalf("Empty: %v", err)
 	}
 
-	entries, _ := repo.List(ctx, userID)
+	entries, _ := repo.List(ctx, userID, 0, 0)
 	if len(entries) != 0 {
 		t.Fatalf("expected empty trash, got %d entries", len(entries))
 	}
@@ -192,7 +192,7 @@ func TestTrashRepo_PurgeExpired(t *testing.T) {
 	}
 
 	// New note should still be in trash.
-	entries, _ := repo.List(ctx, userID)
+	entries, _ := repo.List(ctx, userID, 0, 0)
 	if len(entries) != 1 || entries[0].NoteID != newNote {
 		t.Fatalf("recent note should remain in trash, got %v", entries)
 	}

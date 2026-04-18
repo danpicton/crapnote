@@ -20,15 +20,21 @@ func NewRepo(database *db.DB) *Repo {
 	return &Repo{db: database}
 }
 
-// List returns all trashed notes for the given user.
-func (r *Repo) List(ctx context.Context, userID int64) ([]*Entry, error) {
-	rows, err := r.db.QueryContext(ctx, `
+// List returns trashed notes for the given user. limit <= 0 disables
+// pagination.
+func (r *Repo) List(ctx context.Context, userID int64, limit, offset int) ([]*Entry, error) {
+	query := `
 		SELECT t.note_id, t.user_id, n.title, t.deleted_at
 		FROM trash t
 		JOIN notes n ON n.id = t.note_id
 		WHERE t.user_id = ?
-		ORDER BY t.deleted_at DESC
-	`, userID)
+		ORDER BY t.deleted_at DESC`
+	args := []any{userID}
+	if limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, offset)
+	}
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list trash: %w", err)
 	}

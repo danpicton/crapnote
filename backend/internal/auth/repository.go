@@ -98,11 +98,15 @@ func (r *UserRepo) Delete(ctx context.Context, id int64) error {
 	return err
 }
 
-// List returns all users ordered by created_at.
-func (r *UserRepo) List(ctx context.Context) ([]*User, error) {
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT id, username, password_hash, is_admin, created_at FROM users ORDER BY created_at`,
-	)
+// List returns users ordered by created_at. limit <= 0 returns all users.
+func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]*User, error) {
+	query := `SELECT id, username, password_hash, is_admin, created_at FROM users ORDER BY created_at`
+	var args []any
+	if limit > 0 {
+		query += ` LIMIT ? OFFSET ?`
+		args = append(args, limit, offset)
+	}
+	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}

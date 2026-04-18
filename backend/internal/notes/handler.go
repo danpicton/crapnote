@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/danpicton/crapnote/internal/auth"
+	"github.com/danpicton/crapnote/internal/httpx"
 )
 
 const (
@@ -49,6 +50,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	filter.Search = r.URL.Query().Get("search")
+
+	page := httpx.ParsePage(r)
+	filter.Limit = page.Limit
+	filter.Offset = page.Offset
 
 	notes, err := h.svc.List(r.Context(), u.ID, filter)
 	if err != nil {
@@ -250,7 +255,8 @@ func (h *Handler) ListArchived(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
-	notes, err := h.svc.ListArchived(r.Context(), u.ID)
+	page := httpx.ParsePage(r)
+	notes, err := h.svc.ListArchived(r.Context(), u.ID, page.Limit, page.Offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return

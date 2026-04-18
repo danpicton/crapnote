@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/danpicton/crapnote/internal/auth"
+	"github.com/danpicton/crapnote/internal/httpx"
 )
 
 const maxTagNameLen = 100
@@ -29,7 +30,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list, err := h.svc.List(r.Context(), u.ID)
+	page := httpx.ParsePage(r)
+	list, err := h.svc.List(r.Context(), u.ID, page.Limit, page.Offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return

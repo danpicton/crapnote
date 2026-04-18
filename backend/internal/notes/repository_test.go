@@ -253,7 +253,7 @@ func TestNoteRepo_Archive(t *testing.T) {
 	}
 
 	// But it must appear in ListArchived.
-	archived, err := repo.ListArchived(ctx, userID)
+	archived, err := repo.ListArchived(ctx, userID, 0, 0)
 	if err != nil {
 		t.Fatalf("ListArchived: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestNoteRepo_ListArchived_ExcludesTrashed(t *testing.T) {
 	repo.Archive(ctx, note.ID, userID)  //nolint:errcheck
 	repo.SoftDelete(ctx, note.ID, userID) //nolint:errcheck
 
-	archived, _ := repo.ListArchived(ctx, userID)
+	archived, _ := repo.ListArchived(ctx, userID, 0, 0)
 	for _, n := range archived {
 		if n.ID == note.ID {
 			t.Fatal("trashed+archived note should not appear in ListArchived")

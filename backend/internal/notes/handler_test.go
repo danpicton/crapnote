@@ -435,3 +435,54 @@ func TestNotesHandler_ResponseOmitsUserID(t *testing.T) {
 		t.Fatal("user_id must not be present in note response")
 	}
 }
+
+// List honours the ?limit= query parameter. Issue #18.
+func TestNotesHandler_List_RespectsLimit(t *testing.T) {
+	h, user := newHandlerFixture(t)
+
+	// Create three notes.
+	for i := 0; i < 3; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/notes",
+			bytes.NewBufferString(fmt.Sprintf(`{"title":"n%d"}`, i)))
+		req.Header.Set("Content-Type", "application/json")
+		req = withUser(req, user)
+		h.Create(httptest.NewRecorder(), req)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/notes?limit=2", nil)
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.List(w, req)
+
+	var resp []map[string]any
+	json.NewDecoder(w.Body).Decode(&resp) //nolint:errcheck
+	if len(resp) != 2 {
+		t.Fatalf("expected 2 notes with limit=2, got %d", len(resp))
+	}
+}
+
+// Limits beyond the server maximum are clamped so an attacker cannot override
+// the safety default by passing a huge limit.
+func TestNotesHandler_List_ClampsExcessiveLimit(t *testing.T) {
+	h, user := newHandlerFixture(t)
+
+	// Create 150 notes (over the MaxPageSize of 100).
+	for i := 0; i < 150; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/notes",
+			bytes.NewBufferString(fmt.Sprintf(`{"title":"n%d"}`, i)))
+		req.Header.Set("Content-Type", "application/json")
+		req = withUser(req, user)
+		h.Create(httptest.NewRecorder(), req)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/notes?limit=9999", nil)
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.List(w, req)
+
+	var resp []map[string]any
+	json.NewDecoder(w.Body).Decode(&resp) //nolint:errcheck
+	if len(resp) != 100 { // MaxPageSize from httpx
+		t.Fatalf("expected response clamped to 100, got %d", len(resp))
+	}
+}

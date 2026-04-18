@@ -16,8 +16,8 @@ func (s *Service) Create(ctx context.Context, userID int64, name string) (*Tag, 
 	return s.repo.Create(ctx, userID, name)
 }
 
-func (s *Service) List(ctx context.Context, userID int64) ([]*TagWithCount, error) {
-	return s.repo.List(ctx, userID)
+func (s *Service) List(ctx context.Context, userID int64, limit, offset int) ([]*TagWithCount, error) {
+	return s.repo.List(ctx, userID, limit, offset)
 }
 
 func (s *Service) FindByID(ctx context.Context, id, userID int64) (*Tag, error) {

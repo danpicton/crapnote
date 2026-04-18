@@ -19,6 +19,11 @@ export async function startServer() {
       PORT: '4173',
       ADMIN_USERNAME: 'admin',
       ADMIN_PASSWORD: 'admin123',
+      // The production login rate limit (5/min/IP) is far too tight for an
+      // E2E suite that logs in once per test from a single loopback address.
+      // Loosen it here without touching production defaults.
+      LOGIN_RATE_PER_MINUTE: '1000',
+      LOGIN_RATE_BURST: '1000',
     },
     stdio: 'pipe',
   });

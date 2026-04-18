@@ -3,9 +3,11 @@ package auth
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
+	"github.com/danpicton/crapnote/internal/httpx"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -21,7 +23,8 @@ func NewAdminHandler(users *UserRepo) *AdminHandler {
 
 // ListUsers handles GET /api/admin/users
 func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := h.users.List(r.Context())
+	page := httpx.ParsePage(r)
+	users, err := h.users.List(r.Context(), page.Limit, page.Offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -68,6 +71,20 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	actor := UserFromContext(r.Context())
+	var actorID int64
+	if actor != nil {
+		actorID = actor.ID
+	}
+	slog.Info("audit: user created",
+		"event", "user_created",
+		"admin_id", actorID,
+		"new_user_id", u.ID,
+		"new_username", u.Username,
+		"is_admin", u.IsAdmin,
+		"ip", httpx.ClientIP(r),
+	)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(toUserResponse(u)) //nolint:errcheck
@@ -100,6 +117,13 @@ func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+
+	slog.Info("audit: user deleted",
+		"event", "user_deleted",
+		"admin_id", caller.ID,
+		"target_user_id", id,
+		"ip", httpx.ClientIP(r),
+	)
 
 	w.WriteHeader(http.StatusNoContent)
 }
