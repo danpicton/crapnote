@@ -98,6 +98,10 @@ npm run lint      # eslint
 | `ADMIN_USERNAME` | — | Seeded on first run if no users exist |
 | `ADMIN_PASSWORD` | — | Seeded on first run if no users exist |
 | `SESSION_TTL_DAYS` | `7` | Session lifetime in days; refreshed on activity |
+| `LOGIN_RATE_PER_MINUTE` | `5` | Per-IP rate limit on `POST /api/auth/login` |
+| `LOGIN_RATE_BURST` | `5` | Burst allowance for the login limiter |
+| `BEARER_RATE_PER_MINUTE` | `600` | Per-IP rate limit applied only to requests carrying an `Authorization` header |
+| `BEARER_RATE_BURST` | `300` | Burst allowance for the bearer-auth limiter |
 
 ---
 
@@ -118,7 +122,8 @@ Migrations live in `backend/internal/db/migrations/` as versioned SQL files (`00
 
 | Table | Purpose |
 |---|---|
-| `users` | User accounts — username, bcrypt password hash, salt, admin flag |
+| `users` | User accounts — username, bcrypt password hash, salt, admin flag, `api_tokens_enabled` flag |
+| `api_tokens` | Bearer API tokens — SHA-256 hash, `cnp_`-prefixed display prefix, scope, expiry, `last_used_at`, `revoked_at` |
 | `sessions` | Login sessions — token ID, user reference, expiry timestamp |
 | `notes` | The notes themselves — title, body (markdown), starred/pinned/archived flags, per-user |
 | `tags` | Tag definitions — name, per-user, unique per user |
@@ -161,6 +166,71 @@ Packages on non-GitHub hosts (e.g. `go.uber.org`, `golang.org/x/...`) must eithe
 POST  /api/auth/login    { username, password } → sets session cookie
 POST  /api/auth/logout   clears cookie + deletes session row
 GET   /api/auth/me       returns current user (requires auth)
+```
+
+---
+
+## API tokens
+
+For external clients (CLIs, scripts) that can't carry a session cookie. Every
+`/api/*` route accepts either a session cookie **or** an `Authorization: Bearer`
+header — bearer auth is checked first.
+
+### Getting a token
+
+1. Log in to the web UI and open **Settings → Developer**.
+2. Admins can create tokens for themselves at any time. Non-admins must be
+   enabled first — an admin toggles **API tokens** on for that user under
+   **Settings → User management**.
+3. Pick a name, a scope (`read` or `read_write`), and an expiry (default 90
+   days; `-1` = never). The raw token is shown **exactly once** on creation
+   with a `cnp_` prefix. Copy it immediately; it is stored only as a SHA-256
+   hash and cannot be recovered.
+
+### Using a token
+
+```bash
+CNP_TOKEN=cnp_xxx curl -H "Authorization: Bearer $CNP_TOKEN" \
+  http://localhost:8080/api/notes
+```
+
+### Scopes and restrictions
+
+| Scope | Reads | Writes | Admin routes | Creating more tokens |
+|---|---|---|---|---|
+| `read` | ✅ | ❌ (403) | ❌ (403) | ❌ (403) |
+| `read_write` | ✅ | ✅ | ❌ (403) | ❌ (403) |
+
+A few rules are enforced regardless of scope, to limit the blast radius of a
+leaked token:
+
+- **Admin routes (`/api/admin/*`) are never reachable via bearer auth**, even
+  when the token belongs to an admin. Admin actions require a cookie session.
+- **Creating new tokens requires a cookie session** — a leaked token cannot
+  mint more tokens and extend its own foothold.
+- Revoking an admin's `api_tokens_enabled` flag for a non-admin user
+  invalidates their outstanding tokens on the next verify.
+
+### Lifecycle
+
+- **Expiry**: configurable per-token; default 90 days.
+- **Revocation**: per-token or revoke-all, either from the UI or via
+  `DELETE /api/tokens/{id}` / `POST /api/tokens/revoke-all`.
+- **Last-used tracking**: updated asynchronously via a buffered channel so
+  verification stays off the hot path; drops on overflow rather than blocking.
+- **Rate limiting**: a dedicated per-IP limiter (see `BEARER_RATE_*` env vars
+  above) applies to any request carrying an `Authorization` header, whether or
+  not the token ends up valid.
+
+### Token endpoints
+
+```
+GET     /api/tokens              list your own tokens (no raw secrets)
+POST    /api/tokens              create a token — cookie session only
+DELETE  /api/tokens/{id}         revoke one of your tokens
+POST    /api/tokens/revoke-all   revoke all of your tokens
+
+PATCH   /api/admin/users/{id}/api-tokens    admin toggle {"enabled": bool}
 ```
 
 ---
