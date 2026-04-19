@@ -8,6 +8,7 @@
 		id: number;
 		username: string;
 		is_admin: boolean;
+		api_tokens_enabled: boolean;
 		created_at: string;
 	}
 
@@ -59,6 +60,21 @@
 		await fetch(`/api/admin/users/${id}`, { method: 'DELETE', credentials: 'include' });
 		users = users.filter((u) => u.id !== id);
 	}
+
+	async function toggleApiTokens(user: AdminUser, enabled: boolean) {
+		const res = await fetch(`/api/admin/users/${user.id}/api-tokens`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			credentials: 'include',
+			body: JSON.stringify({ enabled }),
+		});
+		if (res.ok) {
+			const updated = (await res.json()) as AdminUser;
+			users = users.map((u) => (u.id === updated.id ? updated : u));
+		} else {
+			alert('Failed to update API token permission.');
+		}
+	}
 </script>
 
 <svelte:head>
@@ -101,6 +117,7 @@
 					<tr>
 						<th>Username</th>
 						<th>Role</th>
+						<th>API tokens</th>
 						<th>Created</th>
 						<th></th>
 					</tr>
@@ -110,6 +127,20 @@
 						<tr>
 							<td>{user.username}</td>
 							<td>{user.is_admin ? 'Admin' : 'User'}</td>
+							<td>
+								{#if user.is_admin}
+									<span class="hint">Always</span>
+								{:else}
+									<label class="toggle">
+										<input
+											type="checkbox"
+											checked={user.api_tokens_enabled}
+											onchange={(e) => toggleApiTokens(user, (e.currentTarget as HTMLInputElement).checked)}
+										/>
+										{user.api_tokens_enabled ? 'Enabled' : 'Disabled'}
+									</label>
+								{/if}
+							</td>
 							<td>{new Date(user.created_at).toLocaleDateString()}</td>
 							<td>
 								{#if user.id !== auth.user?.id}
@@ -223,4 +254,15 @@
 	}
 
 	.users-table th { font-weight: 600; color: var(--text-3); }
+
+	.toggle {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		font-size: 0.8125rem;
+		color: var(--text-2);
+		cursor: pointer;
+	}
+
+	.hint { font-size: 0.8125rem; color: var(--text-3); }
 </style>

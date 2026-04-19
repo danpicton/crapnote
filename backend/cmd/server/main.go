@@ -17,6 +17,7 @@ import (
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/ratelimit"
 	"github.com/danpicton/crapnote/internal/tags"
+	"github.com/danpicton/crapnote/internal/tokens"
 	"github.com/danpicton/crapnote/internal/trash"
 )
 
@@ -41,14 +42,22 @@ func main() {
 		ttlDays = 7
 	}
 
+	userRepo := auth.NewUserRepo(database)
 	sessRepo := auth.NewSessionRepo(database)
 	authSvc := auth.NewService(
-		auth.NewUserRepo(database),
+		userRepo,
 		sessRepo,
 		time.Duration(ttlDays)*24*time.Hour,
 	)
 	authHandler := auth.NewHandler(authSvc)
-	adminHandler := auth.NewAdminHandler(auth.NewUserRepo(database))
+	adminHandler := auth.NewAdminHandler(userRepo)
+
+	// API tokens — bearer auth for external clients (CLIs, scripts).
+	tokensSvc := tokens.NewService(tokens.NewRepo(database), userRepo)
+	tokensHandler := tokens.NewHandler(tokensSvc)
+	usageRecorder := tokens.NewUsageRecorder(tokensSvc, 256)
+	usageRecorder.Start(context.Background())
+	authHandler.SetBearerAuthenticator(tokens.NewBearerAuth(tokensSvc, usageRecorder))
 
 	notesSvc := notes.NewService(notes.NewRepo(database))
 	notesHandler := notes.NewHandler(notesSvc)
@@ -119,8 +128,22 @@ func main() {
 	}
 	loginLimiter := ratelimit.New(loginRate, loginBurst)
 
+	// Bearer-auth rate limiter: caps per-IP throughput on requests that
+	// present an Authorization header. Defaults to 600 req/min with burst
+	// 300 — generous enough for CLI bursts while blunting credential-
+	// stuffing attempts and DoS against the verification path.
+	bearerRate := 10.0
+	bearerBurst := 300
+	if v, err := strconv.Atoi(os.Getenv("BEARER_RATE_PER_MINUTE")); err == nil && v > 0 {
+		bearerRate = float64(v) / 60.0
+	}
+	if v, err := strconv.Atoi(os.Getenv("BEARER_RATE_BURST")); err == nil && v > 0 {
+		bearerBurst = v
+	}
+	bearerLimiter := ratelimit.New(bearerRate, bearerBurst)
+
 	port := envOrDefault("PORT", "8080")
-	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, loginLimiter)
+	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, tokensHandler, loginLimiter, bearerLimiter)
 
 	// Wrap with observability middleware (metrics outermost, then logging, then security headers).
 	handler := middleware.Metrics()(middleware.Logging(logger)(middleware.SecurityHeaders()(mux)))

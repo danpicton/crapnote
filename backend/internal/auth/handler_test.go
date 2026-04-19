@@ -165,6 +165,9 @@ func TestHandler_Me(t *testing.T) {
 	if resp["username"] != "admin" {
 		t.Fatalf("expected username admin, got %v", resp["username"])
 	}
+	if _, ok := resp["api_tokens_enabled"]; !ok {
+		t.Fatalf("expected api_tokens_enabled in response, got %v", resp)
+	}
 }
 
 func TestHandler_Logout(t *testing.T) {
