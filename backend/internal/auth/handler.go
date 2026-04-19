@@ -124,10 +124,11 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
-		"id":         u.ID,
-		"username":   u.Username,
-		"is_admin":   u.IsAdmin,
-		"created_at": u.CreatedAt,
+		"id":                 u.ID,
+		"username":           u.Username,
+		"is_admin":           u.IsAdmin,
+		"api_tokens_enabled": u.APITokensEnabled,
+		"created_at":         u.CreatedAt,
 	})
 }
 
