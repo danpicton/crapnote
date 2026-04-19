@@ -103,6 +103,19 @@ npm run lint      # eslint
 | `BEARER_RATE_PER_MINUTE` | `600` | Per-IP rate limit applied only to requests carrying an `Authorization` header |
 | `BEARER_RATE_BURST` | `300` | Burst allowance for the bearer-auth limiter |
 
+### Frontend build-time variables
+
+Read by Vite at build time via `import.meta.env`. They must be prefixed
+`PUBLIC_` to be exposed to the client bundle, and must be set **when the
+frontend is built** (not at server runtime) — in dev that means exporting them
+before `npm run dev`; in production, before the `npm run build` step of the
+Docker image.
+
+| Variable | Default | Description |
+|---|---|---|
+| `PUBLIC_SYNC_INTERVAL_MS` | `30000` | Heartbeat interval (ms) for the offline sync loop that flushes dirty notes and pulls server changes. Clamped to a minimum of 5000. |
+| `PUBLIC_OFFLINE_NOTES_COUNT` | `50` | How many most-recent notes to mirror into IndexedDB for offline use. Clamped to a minimum of 1. |
+
 ---
 
 ## Database
