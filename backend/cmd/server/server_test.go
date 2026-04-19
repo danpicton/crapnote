@@ -16,12 +16,19 @@ import (
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/ratelimit"
 	"github.com/danpicton/crapnote/internal/tags"
+	"github.com/danpicton/crapnote/internal/tokens"
 	"github.com/danpicton/crapnote/internal/trash"
 )
 
 // permissiveLoginLimiter is a login limiter large enough that no test hits it
 // unless the test itself constructs a tighter one.
 func permissiveLoginLimiter() *ratelimit.Limiter {
+	return ratelimit.New(1000, 1000)
+}
+
+// permissiveBearerLimiter is a bearer-auth limiter that never rate-limits
+// during tests.
+func permissiveBearerLimiter() *ratelimit.Limiter {
 	return ratelimit.New(1000, 1000)
 }
 
@@ -34,21 +41,27 @@ func newTestMux(t *testing.T) *http.ServeMux {
 	}
 	t.Cleanup(func() { database.Close() })
 
+	userRepo := auth.NewUserRepo(database)
 	authSvc := auth.NewService(
-		auth.NewUserRepo(database),
+		userRepo,
 		auth.NewSessionRepo(database),
 		7*24*time.Hour,
 	)
 	notesSvc := notes.NewService(notes.NewRepo(database))
+	authH := auth.NewHandler(authSvc)
+	tokensSvc := tokens.NewService(tokens.NewRepo(database), userRepo)
+	authH.SetBearerAuthenticator(tokens.NewBearerAuth(tokensSvc, nil))
 	return newMux(
-		auth.NewHandler(authSvc),
-		auth.NewAdminHandler(auth.NewUserRepo(database)),
+		authH,
+		auth.NewAdminHandler(userRepo),
 		notes.NewHandler(notesSvc),
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
 		export.NewHandler(notesSvc, database),
 		images.NewHandler(database),
+		tokens.NewHandler(tokensSvc),
 		permissiveLoginLimiter(),
+		permissiveBearerLimiter(),
 	)
 }
 
@@ -69,15 +82,20 @@ func newAuthedMux(t *testing.T) (*http.ServeMux, *http.Cookie) {
 		t.Fatalf("seed admin: %v", err)
 	}
 	notesSvc := notes.NewService(notes.NewRepo(database))
+	authH := auth.NewHandler(authSvc)
+	tokensSvc := tokens.NewService(tokens.NewRepo(database), userRepo)
+	authH.SetBearerAuthenticator(tokens.NewBearerAuth(tokensSvc, nil))
 	mux := newMux(
-		auth.NewHandler(authSvc),
+		authH,
 		auth.NewAdminHandler(userRepo),
 		notes.NewHandler(notesSvc),
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
 		export.NewHandler(notesSvc, database),
 		images.NewHandler(database),
+		tokens.NewHandler(tokensSvc),
 		permissiveLoginLimiter(),
+		permissiveBearerLimiter(),
 	)
 
 	// Perform a login to obtain a session cookie.
@@ -162,6 +180,10 @@ var protectedRoutes = []struct {
 	{http.MethodDelete, "/api/trash"},
 	{http.MethodPost, "/api/auth/logout"},
 	{http.MethodGet, "/api/auth/me"},
+	{http.MethodGet, "/api/tokens"},
+	{http.MethodPost, "/api/tokens"},
+	{http.MethodDelete, "/api/tokens/1"},
+	{http.MethodPost, "/api/tokens/revoke-all"},
 }
 
 func TestAllProtectedRoutesRequireAuth(t *testing.T) {
@@ -200,23 +222,29 @@ func TestLogin_RateLimited(t *testing.T) {
 	}
 	t.Cleanup(func() { database.Close() })
 
+	userRepo := auth.NewUserRepo(database)
 	authSvc := auth.NewService(
-		auth.NewUserRepo(database),
+		userRepo,
 		auth.NewSessionRepo(database),
 		7*24*time.Hour,
 	)
 	notesSvc := notes.NewService(notes.NewRepo(database))
 	// Very tight limiter: burst of 2, effectively no refill during this test.
 	tightLimiter := ratelimit.New(0.01, 2)
+	authH := auth.NewHandler(authSvc)
+	tokensSvc := tokens.NewService(tokens.NewRepo(database), userRepo)
+	authH.SetBearerAuthenticator(tokens.NewBearerAuth(tokensSvc, nil))
 	mux := newMux(
-		auth.NewHandler(authSvc),
-		auth.NewAdminHandler(auth.NewUserRepo(database)),
+		authH,
+		auth.NewAdminHandler(userRepo),
 		notes.NewHandler(notesSvc),
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
 		export.NewHandler(notesSvc, database),
 		images.NewHandler(database),
+		tokens.NewHandler(tokensSvc),
 		tightLimiter,
+		permissiveBearerLimiter(),
 	)
 
 	send := func() int {

@@ -1,0 +1,337 @@
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { Trash2, Copy, Check } from 'lucide-svelte';
+	import { api, ApiError, type ApiToken, type CreatedApiToken } from '$lib/api';
+
+	interface Props {
+		/** Whether the caller may create tokens. If false we still show the
+		 * list (so the user can see/revoke existing ones), but the create form
+		 * is hidden with an explanatory note. */
+		canCreate: boolean;
+	}
+
+	let { canCreate }: Props = $props();
+
+	let tokens = $state<ApiToken[]>([]);
+	let loading = $state(true);
+	let loadError = $state('');
+
+	let newName = $state('');
+	let newScope = $state<'read' | 'read_write'>('read_write');
+	let newTtlDays = $state(90);
+	let createError = $state('');
+	let creating = $state(false);
+	let justCreated = $state<CreatedApiToken | null>(null);
+	let copied = $state(false);
+
+	onMount(loadTokens);
+
+	async function loadTokens() {
+		loading = true;
+		loadError = '';
+		try {
+			tokens = (await api.tokens.list()) ?? [];
+		} catch (err) {
+			loadError = err instanceof Error ? err.message : 'Failed to load tokens.';
+		} finally {
+			loading = false;
+		}
+	}
+
+	async function createToken(e: Event) {
+		e.preventDefault();
+		createError = '';
+		creating = true;
+		try {
+			const created = await api.tokens.create(newName.trim(), newScope, newTtlDays);
+			justCreated = created;
+			newName = '';
+			// Reload list so the new (hashed) record appears immediately.
+			await loadTokens();
+		} catch (err) {
+			if (err instanceof ApiError) createError = prettyError(err);
+			else createError = err instanceof Error ? err.message : 'Failed to create token.';
+		} finally {
+			creating = false;
+		}
+	}
+
+	function prettyError(err: ApiError): string {
+		try {
+			const parsed = JSON.parse(err.message) as { error?: string };
+			return parsed.error ?? err.message;
+		} catch {
+			return err.message;
+		}
+	}
+
+	async function copyToken() {
+		if (!justCreated) return;
+		try {
+			await navigator.clipboard.writeText(justCreated.token);
+			copied = true;
+			setTimeout(() => (copied = false), 2000);
+		} catch {
+			// Fallback: select the textarea so the user can copy manually.
+		}
+	}
+
+	function dismissCreated() {
+		justCreated = null;
+		copied = false;
+	}
+
+	async function revokeToken(id: number) {
+		if (!confirm('Revoke this token? External clients using it will stop working immediately.')) return;
+		try {
+			await api.tokens.revoke(id);
+			await loadTokens();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Failed to revoke token.');
+		}
+	}
+
+	async function revokeAll() {
+		if (tokens.length === 0) return;
+		if (!confirm(`Revoke all ${tokens.length} token(s)? This does not sign you out on other devices.`)) return;
+		try {
+			await api.tokens.revokeAll();
+			await loadTokens();
+		} catch (err) {
+			alert(err instanceof Error ? err.message : 'Failed to revoke tokens.');
+		}
+	}
+
+	function fmtDate(iso?: string) {
+		if (!iso) return '—';
+		return new Date(iso).toLocaleString();
+	}
+
+	function status(t: ApiToken): string {
+		if (t.revoked_at) return 'Revoked';
+		if (t.expires_at && new Date(t.expires_at) < new Date()) return 'Expired';
+		return 'Active';
+	}
+</script>
+
+<div class="tokens">
+	{#if !canCreate}
+		<p class="hint">
+			API token creation is disabled for your account. Ask an administrator to enable it if
+			you need external API access.
+		</p>
+	{/if}
+
+	{#if justCreated}
+		<div class="new-token" role="alert">
+			<strong>Your new token (shown once — copy it now):</strong>
+			<div class="token-row">
+				<code class="token-value">{justCreated.token}</code>
+				<button type="button" class="copy-btn" onclick={copyToken} aria-label="Copy token">
+					{#if copied}
+						<Check size={14} /> Copied
+					{:else}
+						<Copy size={14} /> Copy
+					{/if}
+				</button>
+			</div>
+			<p class="hint">
+				Store this somewhere safe. You won't be able to see it again.
+			</p>
+			<button type="button" class="secondary" onclick={dismissCreated}>Dismiss</button>
+		</div>
+	{/if}
+
+	{#if canCreate}
+		<form class="create-form" onsubmit={createToken}>
+			{#if createError}
+				<p role="alert" class="error">{createError}</p>
+			{/if}
+			<input
+				type="text"
+				placeholder="Token name (e.g. cli-laptop)"
+				bind:value={newName}
+				maxlength={80}
+				required
+			/>
+			<select bind:value={newScope}>
+				<option value="read">Read only</option>
+				<option value="read_write">Read and write</option>
+			</select>
+			<label class="ttl">
+				Expires in
+				<input type="number" min="-1" max="3650" bind:value={newTtlDays} />
+				days
+				<span class="hint inline">(-1 = never)</span>
+			</label>
+			<button type="submit" class="primary" disabled={creating}>
+				{creating ? 'Creating…' : 'Create token'}
+			</button>
+		</form>
+	{/if}
+
+	{#if loading}
+		<p>Loading tokens…</p>
+	{:else if loadError}
+		<p role="alert" class="error">{loadError}</p>
+	{:else if tokens.length === 0}
+		<p class="hint">No API tokens yet.</p>
+	{:else}
+		<div class="list-header">
+			<button type="button" class="secondary danger" onclick={revokeAll}>Revoke all</button>
+		</div>
+		<table class="tokens-table">
+			<thead>
+				<tr>
+					<th>Name</th>
+					<th>Prefix</th>
+					<th>Scope</th>
+					<th>Status</th>
+					<th>Last used</th>
+					<th>Expires</th>
+					<th></th>
+				</tr>
+			</thead>
+			<tbody>
+				{#each tokens as t (t.id)}
+					<tr class:revoked={!!t.revoked_at}>
+						<td>{t.name}</td>
+						<td><code>{t.prefix}…</code></td>
+						<td>{t.scope === 'read_write' ? 'Read+Write' : 'Read'}</td>
+						<td>{status(t)}</td>
+						<td>{fmtDate(t.last_used_at)}</td>
+						<td>{fmtDate(t.expires_at)}</td>
+						<td>
+							{#if !t.revoked_at}
+								<button class="icon-btn" onclick={() => revokeToken(t.id)} aria-label="Revoke token" title="Revoke token">
+									<Trash2 size={14} />
+								</button>
+							{/if}
+						</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	{/if}
+</div>
+
+<style>
+	.tokens { display: flex; flex-direction: column; gap: 0.75rem; }
+	.hint { font-size: 0.8125rem; color: var(--text-3); margin: 0; }
+	.hint.inline { display: inline; }
+
+	.new-token {
+		padding: 0.75rem;
+		border: 1px solid var(--accent);
+		background: var(--accent-lt);
+		border-radius: 0.375rem;
+		display: flex;
+		flex-direction: column;
+		gap: 0.5rem;
+	}
+	.token-row { display: flex; gap: 0.5rem; align-items: center; }
+	.token-value {
+		flex: 1;
+		padding: 0.375rem 0.5rem;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 0.25rem;
+		font-family: monospace;
+		font-size: 0.8125rem;
+		overflow-x: auto;
+		white-space: nowrap;
+	}
+	.copy-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.375rem 0.625rem;
+		border: 1px solid var(--border-md);
+		border-radius: 0.25rem;
+		background: var(--bg);
+		cursor: pointer;
+		font-size: 0.8125rem;
+	}
+
+	.create-form {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		align-items: center;
+	}
+	.create-form input[type='text'],
+	.create-form select,
+	.create-form input[type='number'] {
+		padding: 0.375rem 0.625rem;
+		border: 1px solid var(--border-md);
+		border-radius: 0.375rem;
+		font-size: 0.875rem;
+		background: var(--bg);
+		color: var(--text);
+	}
+	.create-form input[type='number'] { width: 5rem; }
+	.ttl { display: flex; align-items: center; gap: 0.375rem; font-size: 0.875rem; color: var(--text-2); }
+
+	.primary {
+		padding: 0.375rem 0.875rem;
+		background: var(--accent);
+		color: white;
+		border: none;
+		border-radius: 0.375rem;
+		cursor: pointer;
+		font-size: 0.875rem;
+	}
+	.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+	.primary:hover:not(:disabled) { background: var(--accent-dk); }
+
+	.secondary {
+		padding: 0.375rem 0.625rem;
+		background: transparent;
+		border: 1px solid var(--border-md);
+		border-radius: 0.375rem;
+		cursor: pointer;
+		color: var(--text-2);
+		font-size: 0.875rem;
+	}
+	.secondary.danger { color: var(--danger); border-color: var(--danger); }
+	.secondary:hover { background: var(--bg-hover); }
+
+	.list-header { display: flex; justify-content: flex-end; }
+
+	.tokens-table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.875rem;
+	}
+	.tokens-table th,
+	.tokens-table td {
+		text-align: left;
+		padding: 0.375rem 0.5rem;
+		border-bottom: 1px solid var(--border);
+	}
+	.tokens-table th { font-weight: 600; color: var(--text-3); }
+	.tokens-table tr.revoked { opacity: 0.6; }
+
+	.icon-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 1.75rem;
+		height: 1.75rem;
+		border: none;
+		border-radius: 0.25rem;
+		cursor: pointer;
+		background: transparent;
+		color: var(--danger);
+	}
+	.icon-btn:hover { background: var(--danger-bg); }
+
+	.error {
+		color: var(--danger);
+		font-size: 0.875rem;
+		padding: 0.375rem 0.625rem;
+		background: var(--danger-bg);
+		border-radius: 0.375rem;
+		margin: 0;
+	}
+</style>

@@ -128,6 +128,69 @@ func TestAdminHandler_CreateUser_ShortPasswordRejected(t *testing.T) {
 	}
 }
 
+func TestAdminHandler_SetAPITokensEnabled_TogglesFlag(t *testing.T) {
+	h, admin, _ := newAdminFixture(t)
+	// Create a non-admin user whose flag we'll toggle.
+	body := `{"username":"dave","password":"correct-horse-battery","is_admin":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.CreateUser(w, req)
+	var created map[string]any
+	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
+	daveID := int64(created["id"].(float64))
+
+	// Enable.
+	req2 := httptest.NewRequest(http.MethodPatch,
+		fmt.Sprintf("/api/admin/users/%d/api-tokens", daveID),
+		bytes.NewBufferString(`{"enabled":true}`))
+	req2.SetPathValue("id", fmt.Sprintf("%d", daveID))
+	req2 = adminRequest(req2, admin)
+	w2 := httptest.NewRecorder()
+	h.SetAPITokensEnabled(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w2.Body).Decode(&resp) //nolint:errcheck
+	if resp["api_tokens_enabled"] != true {
+		t.Fatalf("expected api_tokens_enabled true, got %v", resp["api_tokens_enabled"])
+	}
+
+	// Disable.
+	req3 := httptest.NewRequest(http.MethodPatch,
+		fmt.Sprintf("/api/admin/users/%d/api-tokens", daveID),
+		bytes.NewBufferString(`{"enabled":false}`))
+	req3.SetPathValue("id", fmt.Sprintf("%d", daveID))
+	req3 = adminRequest(req3, admin)
+	w3 := httptest.NewRecorder()
+	h.SetAPITokensEnabled(w3, req3)
+
+	if w3.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w3.Code)
+	}
+	var resp2 map[string]any
+	json.NewDecoder(w3.Body).Decode(&resp2) //nolint:errcheck
+	if resp2["api_tokens_enabled"] != false {
+		t.Fatalf("expected api_tokens_enabled false, got %v", resp2["api_tokens_enabled"])
+	}
+}
+
+func TestAdminHandler_SetAPITokensEnabled_UnknownUser_404(t *testing.T) {
+	h, admin, _ := newAdminFixture(t)
+	req := httptest.NewRequest(http.MethodPatch, "/api/admin/users/99999/api-tokens",
+		bytes.NewBufferString(`{"enabled":true}`))
+	req.SetPathValue("id", "99999")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.SetAPITokensEnabled(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
 func TestAdminHandler_DeleteUser_CannotDeleteSelf(t *testing.T) {
 	h, admin, _ := newAdminFixture(t)
 

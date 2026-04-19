@@ -90,6 +90,59 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(toUserResponse(u)) //nolint:errcheck
 }
 
+// SetAPITokensEnabled handles PATCH /api/admin/users/{id}/api-tokens
+// Body: { "enabled": bool }
+//
+// Toggles a user's ability to create API tokens. Disabling the flag does not
+// automatically revoke a user's existing tokens in storage, but the auth
+// middleware rejects them at request time, so access stops immediately.
+// The caller may additionally invoke the user's own revoke-all flow if they
+// want the tokens marked as revoked in the database.
+func (h *AdminHandler) SetAPITokensEnabled(w http.ResponseWriter, r *http.Request) {
+	caller := UserFromContext(r.Context())
+	if caller == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	var req struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := h.users.SetAPITokensEnabled(r.Context(), id, req.Enabled); errors.Is(err, ErrNotFound) {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	slog.Info("audit: api tokens permission changed",
+		"event", "user_api_tokens_toggled",
+		"admin_id", caller.ID,
+		"target_user_id", id,
+		"enabled", req.Enabled,
+		"ip", httpx.ClientIP(r),
+	)
+
+	u, err := h.users.FindByID(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(toUserResponse(u))
+}
+
 // DeleteUser handles DELETE /api/admin/users/{id}
 // An admin cannot delete themselves.
 func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
@@ -129,17 +182,19 @@ func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {
 }
 
 type userResponse struct {
-	ID        int64  `json:"id"`
-	Username  string `json:"username"`
-	IsAdmin   bool   `json:"is_admin"`
-	CreatedAt string `json:"created_at"`
+	ID               int64  `json:"id"`
+	Username         string `json:"username"`
+	IsAdmin          bool   `json:"is_admin"`
+	APITokensEnabled bool   `json:"api_tokens_enabled"`
+	CreatedAt        string `json:"created_at"`
 }
 
 func toUserResponse(u *User) userResponse {
 	return userResponse{
-		ID:        u.ID,
-		Username:  u.Username,
-		IsAdmin:   u.IsAdmin,
-		CreatedAt: u.CreatedAt.Format("2006-01-02T15:04:05Z"),
+		ID:               u.ID,
+		Username:         u.Username,
+		IsAdmin:          u.IsAdmin,
+		APITokensEnabled: u.APITokensEnabled,
+		CreatedAt:        u.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	}
 }

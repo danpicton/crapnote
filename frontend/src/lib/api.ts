@@ -2,7 +2,23 @@ export interface User {
 	id: number;
 	username: string;
 	is_admin: boolean;
+	api_tokens_enabled?: boolean;
 	created_at: string;
+}
+
+export interface ApiToken {
+	id: number;
+	name: string;
+	prefix: string;
+	scope: 'read' | 'read_write';
+	last_used_at?: string;
+	expires_at?: string;
+	revoked_at?: string;
+	created_at: string;
+}
+
+export interface CreatedApiToken extends ApiToken {
+	token: string;
 }
 
 export interface Note {
@@ -101,6 +117,19 @@ export const api = {
 			request<void>('POST', `/api/notes/${noteId}/tags`, { tag_id: tagId }),
 		removeFromNote: (noteId: number, tagId: number) =>
 			request<void>('DELETE', `/api/notes/${noteId}/tags/${tagId}`),
+	},
+
+	tokens: {
+		list: () => request<ApiToken[]>('GET', '/api/tokens'),
+		create: (name: string, scope: 'read' | 'read_write', ttlDays: number) =>
+			request<CreatedApiToken>('POST', '/api/tokens', { name, scope, ttl_days: ttlDays }),
+		revoke: (id: number) => request<void>('DELETE', `/api/tokens/${id}`),
+		revokeAll: () => request<void>('POST', '/api/tokens/revoke-all'),
+	},
+
+	admin: {
+		setApiTokensEnabled: (userId: number, enabled: boolean) =>
+			request<User>('PATCH', `/api/admin/users/${userId}/api-tokens`, { enabled }),
 	},
 
 	trash: {

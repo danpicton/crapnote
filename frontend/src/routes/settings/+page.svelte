@@ -2,8 +2,13 @@
 	import { ChevronLeft, Moon, Sun, Users } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
+	import ApiTokens from '$lib/components/ApiTokens.svelte';
 
 	let exportPassword = $state('');
+
+	const canCreateTokens = $derived(
+		!!auth.user && (auth.user.is_admin || !!auth.user.api_tokens_enabled),
+	);
 
 	function doExport() {
 		const url = exportPassword
@@ -66,6 +71,16 @@
 				<Sun size={15} /> Enable light mode
 			{/if}
 		</button>
+	</section>
+
+	<section class="section">
+		<h2>Developer</h2>
+		<p class="hint">
+			API tokens let external clients (CLIs, scripts) call the CrapNote API with a
+			<code>Authorization: Bearer cnp_…</code> header. Each token is shown once on
+			creation and can be revoked at any time.
+		</p>
+		<ApiTokens canCreate={canCreateTokens} />
 	</section>
 
 	<section class="section">

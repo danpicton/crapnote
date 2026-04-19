@@ -11,7 +11,8 @@ import (
 
 // Handler holds HTTP handlers for auth endpoints.
 type Handler struct {
-	svc *Service
+	svc    *Service
+	bearer BearerAuthenticator
 }
 
 // NewHandler creates a new auth Handler.
