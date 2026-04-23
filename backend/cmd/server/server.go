@@ -75,6 +75,9 @@ func newMux(
 	admin("POST", "/api/admin/users", adminHandler.CreateUser)
 	admin("DELETE", "/api/admin/users/{id}", adminHandler.DeleteUser)
 	admin("PATCH", "/api/admin/users/{id}/api-tokens", adminHandler.SetAPITokensEnabled)
+	admin("PUT", "/api/admin/users/{id}/password", adminHandler.SetUserPassword)
+	admin("POST", "/api/admin/users/{id}/lock", adminHandler.LockUser)
+	admin("POST", "/api/admin/users/{id}/unlock", adminHandler.UnlockUser)
 
 	// Auth
 	protected("POST", "/api/auth/logout", authHandler.Logout)

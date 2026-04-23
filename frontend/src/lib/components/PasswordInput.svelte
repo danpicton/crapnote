@@ -1,10 +1,16 @@
 <script lang="ts">
 	import { Eye, EyeOff } from 'lucide-svelte';
 
+	type Autocomplete =
+		| 'current-password'
+		| 'new-password'
+		| 'off'
+		| 'on';
+
 	interface Props {
 		id: string;
 		value: string;
-		autocomplete?: string;
+		autocomplete?: Autocomplete;
 		placeholder?: string;
 		required?: boolean;
 		disabled?: boolean;

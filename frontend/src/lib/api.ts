@@ -130,6 +130,12 @@ export const api = {
 	admin: {
 		setApiTokensEnabled: (userId: number, enabled: boolean) =>
 			request<User>('PATCH', `/api/admin/users/${userId}/api-tokens`, { enabled }),
+		setPassword: (userId: number, password: string) =>
+			request<void>('PUT', `/api/admin/users/${userId}/password`, { password }),
+		lockUser: (userId: number) =>
+			request<User>('POST', `/api/admin/users/${userId}/lock`),
+		unlockUser: (userId: number) =>
+			request<User>('POST', `/api/admin/users/${userId}/unlock`),
 	},
 
 	trash: {

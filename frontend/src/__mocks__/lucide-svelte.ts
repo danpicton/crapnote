@@ -29,6 +29,7 @@ export {
 	noop as List,
 	noop as ListOrdered,
 	noop as Lock,
+	noop as LockOpen,
 	noop as LogIn,
 	noop as LogOut,
 	noop as Minus,

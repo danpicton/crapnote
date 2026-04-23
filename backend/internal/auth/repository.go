@@ -154,6 +154,21 @@ func (r *UserRepo) Unlock(ctx context.Context, id int64) error {
 	return nil
 }
 
+// SetPassword updates a user's stored password hash.
+// Returns ErrNotFound if the user does not exist.
+func (r *UserRepo) SetPassword(ctx context.Context, id int64, passwordHash string) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE users SET password_hash=? WHERE id=?`, passwordHash, id)
+	if err != nil {
+		return fmt.Errorf("set password: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // SetAPITokensEnabled toggles whether a (non-admin) user may create API
 // tokens. Returns ErrNotFound if the user does not exist.
 func (r *UserRepo) SetAPITokensEnabled(ctx context.Context, id int64, enabled bool) error {

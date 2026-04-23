@@ -49,12 +49,11 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	const minPasswordLen = 12
 	if req.Username == "" || req.Password == "" {
 		writeError(w, http.StatusBadRequest, "username and password are required")
 		return
 	}
-	if len(req.Password) < minPasswordLen {
+	if len(req.Password) < MinPasswordLen {
 		writeError(w, http.StatusBadRequest, "password must be at least 12 characters")
 		return
 	}
@@ -131,6 +130,148 @@ func (h *AdminHandler) SetAPITokensEnabled(w http.ResponseWriter, r *http.Reques
 		"admin_id", caller.ID,
 		"target_user_id", id,
 		"enabled", req.Enabled,
+		"ip", httpx.ClientIP(r),
+	)
+
+	u, err := h.users.FindByID(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(toUserResponse(u))
+}
+
+// MinPasswordLen is the minimum length enforced for passwords set via admin
+// or self-service flows.
+const MinPasswordLen = 12
+
+// SetUserPassword handles PUT /api/admin/users/{id}/password
+// Body: { "password": "..." }
+//
+// Replaces the user's stored hash with a bcrypt hash of the new password and
+// clears any outstanding lock on the account (otherwise an admin resetting a
+// locked user's password would leave them still locked, which is almost never
+// what the admin wants).
+func (h *AdminHandler) SetUserPassword(w http.ResponseWriter, r *http.Request) {
+	caller := UserFromContext(r.Context())
+	if caller == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.Password) < MinPasswordLen {
+		writeError(w, http.StatusBadRequest, "password must be at least 12 characters")
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	if err := h.users.SetPassword(r.Context(), id, string(hash)); errors.Is(err, ErrNotFound) {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	// Clear any lock — a password reset implies the admin wants the user to
+	// regain access immediately. Ignore ErrNotFound (user just deleted).
+	h.users.Unlock(r.Context(), id) //nolint:errcheck
+
+	slog.Info("audit: admin password reset",
+		"event", "admin_password_reset",
+		"admin_id", caller.ID,
+		"target_user_id", id,
+		"ip", httpx.ClientIP(r),
+	)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// LockUser handles POST /api/admin/users/{id}/lock
+// An admin cannot lock themselves.
+func (h *AdminHandler) LockUser(w http.ResponseWriter, r *http.Request) {
+	caller := UserFromContext(r.Context())
+	if caller == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+	if id == caller.ID {
+		writeError(w, http.StatusBadRequest, "cannot lock yourself")
+		return
+	}
+
+	if err := h.users.Lock(r.Context(), id); errors.Is(err, ErrNotFound) {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	slog.Info("audit: admin lock",
+		"event", "admin_lock",
+		"admin_id", caller.ID,
+		"target_user_id", id,
+		"ip", httpx.ClientIP(r),
+	)
+
+	u, err := h.users.FindByID(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(toUserResponse(u))
+}
+
+// UnlockUser handles POST /api/admin/users/{id}/unlock
+// Clears the account lock and zeroes the failed-attempt counter.
+func (h *AdminHandler) UnlockUser(w http.ResponseWriter, r *http.Request) {
+	caller := UserFromContext(r.Context())
+	if caller == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	if err := h.users.Unlock(r.Context(), id); errors.Is(err, ErrNotFound) {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	slog.Info("audit: admin unlock",
+		"event", "admin_unlock",
+		"admin_id", caller.ID,
+		"target_user_id", id,
 		"ip", httpx.ClientIP(r),
 	)
 

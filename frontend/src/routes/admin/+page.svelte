@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { ChevronLeft, UserPlus, Trash2 } from 'lucide-svelte';
+	import { ChevronLeft, UserPlus, Trash2, Lock, LockOpen, Key } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 
@@ -10,6 +10,8 @@
 		username: string;
 		is_admin: boolean;
 		api_tokens_enabled: boolean;
+		locked: boolean;
+		locked_at?: string;
 		created_at: string;
 	}
 
@@ -76,6 +78,42 @@
 			alert('Failed to update API token permission.');
 		}
 	}
+
+	async function toggleLock(user: AdminUser) {
+		const action = user.locked ? 'unlock' : 'lock';
+		const res = await fetch(`/api/admin/users/${user.id}/${action}`, {
+			method: 'POST',
+			credentials: 'include',
+		});
+		if (res.ok) {
+			const updated = (await res.json()) as AdminUser;
+			users = users.map((u) => (u.id === updated.id ? updated : u));
+		} else {
+			alert(`Failed to ${action} user.`);
+		}
+	}
+
+	async function setUserPassword(user: AdminUser) {
+		const pw = prompt(`Enter new password for ${user.username} (min 12 chars):`);
+		if (pw == null) return;
+		if (pw.length < 12) {
+			alert('Password must be at least 12 characters.');
+			return;
+		}
+		const res = await fetch(`/api/admin/users/${user.id}/password`, {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			credentials: 'include',
+			body: JSON.stringify({ password: pw }),
+		});
+		if (!res.ok) {
+			const text = await res.text();
+			alert(text || 'Failed to set password.');
+			return;
+		}
+		// Server also clears the lock on a password reset; refresh the list.
+		await loadUsers();
+	}
 </script>
 
 <svelte:head>
@@ -126,6 +164,7 @@
 					<tr>
 						<th>Username</th>
 						<th>Role</th>
+						<th>Status</th>
 						<th>API tokens</th>
 						<th>Created</th>
 						<th></th>
@@ -133,9 +172,16 @@
 				</thead>
 				<tbody>
 					{#each users as user (user.id)}
-						<tr>
+						<tr class:locked-row={user.locked}>
 							<td>{user.username}</td>
 							<td>{user.is_admin ? 'Admin' : 'User'}</td>
+							<td>
+								{#if user.locked}
+									<span class="status locked-pill">Locked</span>
+								{:else}
+									<span class="status active-pill">Active</span>
+								{/if}
+							</td>
 							<td>
 								{#if user.is_admin}
 									<span class="hint">Always</span>
@@ -151,8 +197,28 @@
 								{/if}
 							</td>
 							<td>{new Date(user.created_at).toLocaleDateString()}</td>
-							<td>
+							<td class="actions">
+								<button
+									class="icon-btn key"
+									onclick={() => setUserPassword(user)}
+									title="Set password for {user.username}"
+									aria-label="Set password for {user.username}"
+								>
+									<Key size={14} />
+								</button>
 								{#if user.id !== auth.user?.id}
+									<button
+										class="icon-btn lock"
+										onclick={() => toggleLock(user)}
+										title={user.locked ? `Unlock ${user.username}` : `Lock ${user.username}`}
+										aria-label={user.locked ? `Unlock ${user.username}` : `Lock ${user.username}`}
+									>
+										{#if user.locked}
+											<LockOpen size={14} />
+										{:else}
+											<Lock size={14} />
+										{/if}
+									</button>
 									<button class="icon-btn delete" onclick={() => deleteUser(user.id)} title="Delete user" aria-label="Delete user">
 										<Trash2 size={14} />
 									</button>
@@ -244,6 +310,29 @@
 
 	.icon-btn.delete { color: var(--danger); }
 	.icon-btn.delete:hover { background: var(--danger-bg); }
+
+	.icon-btn.lock { color: var(--text-2); }
+	.icon-btn.lock:hover { background: var(--bg-hover); color: var(--text); }
+
+	.icon-btn.key { color: var(--accent); }
+	.icon-btn.key:hover { background: var(--accent-lt); }
+
+	.actions {
+		display: flex;
+		gap: 0.25rem;
+		align-items: center;
+	}
+
+	.status {
+		display: inline-block;
+		padding: 0.125rem 0.5rem;
+		border-radius: 999px;
+		font-size: 0.75rem;
+		font-weight: 500;
+	}
+	.locked-pill { background: var(--danger-bg); color: var(--danger); }
+	.active-pill { background: var(--bg-hover); color: var(--text-2); }
+	.locked-row td { opacity: 0.8; }
 
 	.error {
 		color: var(--danger);

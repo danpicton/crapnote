@@ -28,8 +28,8 @@ function ok(data: unknown) {
 }
 
 const mockUsers = [
-	{ id: 1, username: 'admin', is_admin: true, created_at: '2024-01-01T00:00:00Z' },
-	{ id: 2, username: 'alice', is_admin: false, created_at: '2024-01-01T00:00:00Z' },
+	{ id: 1, username: 'admin', is_admin: true, locked: false, created_at: '2024-01-01T00:00:00Z' },
+	{ id: 2, username: 'alice', is_admin: false, locked: false, created_at: '2024-01-01T00:00:00Z' },
 ];
 
 beforeEach(() => {
@@ -56,6 +56,53 @@ describe('Admin page', () => {
 		render(AdminPage);
 		await waitFor(() => {
 			expect(screen.getByPlaceholderText(/username/i)).toBeInTheDocument();
+		});
+	});
+
+	it('shows locked state for a locked user', async () => {
+		mockFetch.mockResolvedValue(
+			ok([
+				{ id: 1, username: 'admin', is_admin: true, locked: false, created_at: '' },
+				{ id: 2, username: 'alice', is_admin: false, locked: true, created_at: '' },
+			])
+		);
+		render(AdminPage);
+		await waitFor(() => {
+			expect(screen.getByText('alice')).toBeInTheDocument();
+		});
+		expect(screen.getByRole('button', { name: /unlock/i })).toBeInTheDocument();
+	});
+
+	it('calls POST /lock when locking a user', async () => {
+		mockFetch
+			.mockResolvedValueOnce(ok(mockUsers))
+			.mockResolvedValueOnce(ok({ id: 2, username: 'alice', is_admin: false, locked: true, created_at: '' }))
+			.mockResolvedValueOnce(ok([mockUsers[0], { id: 2, username: 'alice', is_admin: false, locked: true, created_at: '' }]));
+
+		render(AdminPage);
+		await waitFor(() => screen.getByText('alice'));
+		await fireEvent.click(screen.getByRole('button', { name: /lock alice/i }));
+
+		await waitFor(() => {
+			const call = mockFetch.mock.calls.find((c) => typeof c[0] === 'string' && c[0].endsWith('/lock'));
+			expect(call).toBeTruthy();
+		});
+	});
+
+	it('calls PUT /password when setting a new password for a user', async () => {
+		window.prompt = vi.fn().mockReturnValue('new-strong-pass-1234');
+		mockFetch
+			.mockResolvedValueOnce(ok(mockUsers))
+			.mockResolvedValueOnce({ ok: true, status: 204, json: () => Promise.resolve(null), text: () => Promise.resolve('') });
+
+		render(AdminPage);
+		await waitFor(() => screen.getByText('alice'));
+		await fireEvent.click(screen.getByRole('button', { name: /set password for alice/i }));
+
+		await waitFor(() => {
+			const call = mockFetch.mock.calls.find((c) => typeof c[0] === 'string' && c[0].endsWith('/password'));
+			expect(call).toBeTruthy();
+			expect(call?.[1]?.method).toBe('PUT');
 		});
 	});
 

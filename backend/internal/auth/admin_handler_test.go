@@ -191,6 +191,167 @@ func TestAdminHandler_SetAPITokensEnabled_UnknownUser_404(t *testing.T) {
 	}
 }
 
+// ── SetUserPassword ────────────────────────────────────────────────────────
+
+func TestAdminHandler_SetUserPassword_UpdatesHashAndUnlocks(t *testing.T) {
+	h, admin, svc := newAdminFixture(t)
+	ctx := context.Background()
+
+	// Create a non-admin, lock them.
+	body := `{"username":"erin","password":"correct-horse-battery","is_admin":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.CreateUser(w, req)
+	var created map[string]any
+	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
+	erinID := int64(created["id"].(float64))
+
+	// Set a new password via the admin endpoint.
+	req2 := httptest.NewRequest(http.MethodPut,
+		fmt.Sprintf("/api/admin/users/%d/password", erinID),
+		bytes.NewBufferString(`{"password":"new-strong-pass-1234"}`))
+	req2.SetPathValue("id", fmt.Sprintf("%d", erinID))
+	req2 = adminRequest(req2, admin)
+	w2 := httptest.NewRecorder()
+	h.SetUserPassword(w2, req2)
+
+	if w2.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	// The new password must work.
+	if _, err := svc.Login(ctx, "erin", "new-strong-pass-1234"); err != nil {
+		t.Fatalf("expected login with new password to succeed, got %v", err)
+	}
+}
+
+func TestAdminHandler_SetUserPassword_RejectsShortPassword(t *testing.T) {
+	h, admin, _ := newAdminFixture(t)
+	req := httptest.NewRequest(http.MethodPut,
+		fmt.Sprintf("/api/admin/users/%d/password", admin.ID),
+		bytes.NewBufferString(`{"password":"short"}`))
+	req.SetPathValue("id", fmt.Sprintf("%d", admin.ID))
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.SetUserPassword(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for short password, got %d", w.Code)
+	}
+}
+
+func TestAdminHandler_SetUserPassword_UnknownUser_404(t *testing.T) {
+	h, admin, _ := newAdminFixture(t)
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/users/99999/password",
+		bytes.NewBufferString(`{"password":"new-strong-pass-1234"}`))
+	req.SetPathValue("id", "99999")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.SetUserPassword(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+// ── Lock / Unlock ───────────────────────────────────────────────────────────
+
+func TestAdminHandler_LockUser_SetsLockedFlag(t *testing.T) {
+	h, admin, _ := newAdminFixture(t)
+	body := `{"username":"frank","password":"correct-horse-battery","is_admin":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.CreateUser(w, req)
+	var created map[string]any
+	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
+	frankID := int64(created["id"].(float64))
+
+	req2 := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/api/admin/users/%d/lock", frankID), nil)
+	req2.SetPathValue("id", fmt.Sprintf("%d", frankID))
+	req2 = adminRequest(req2, admin)
+	w2 := httptest.NewRecorder()
+	h.LockUser(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w2.Body).Decode(&resp) //nolint:errcheck
+	if resp["locked"] != true {
+		t.Fatalf("expected locked=true, got %v", resp["locked"])
+	}
+}
+
+func TestAdminHandler_LockUser_CannotLockSelf(t *testing.T) {
+	h, admin, _ := newAdminFixture(t)
+	req := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/api/admin/users/%d/lock", admin.ID), nil)
+	req.SetPathValue("id", fmt.Sprintf("%d", admin.ID))
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.LockUser(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for self-lock, got %d", w.Code)
+	}
+}
+
+func TestAdminHandler_UnlockUser_ClearsLockAndAttempts(t *testing.T) {
+	h, admin, svc := newAdminFixture(t)
+	ctx := context.Background()
+
+	// Create a non-admin, drive 3 failed logins to lock.
+	body := `{"username":"grace","password":"correct-horse-battery","is_admin":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.CreateUser(w, req)
+	var created map[string]any
+	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
+	graceID := int64(created["id"].(float64))
+
+	for i := 0; i < 3; i++ {
+		svc.Login(ctx, "grace", "wrong") //nolint:errcheck
+	}
+
+	// Unlock via admin endpoint.
+	req2 := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/api/admin/users/%d/unlock", graceID), nil)
+	req2.SetPathValue("id", fmt.Sprintf("%d", graceID))
+	req2 = adminRequest(req2, admin)
+	w2 := httptest.NewRecorder()
+	h.UnlockUser(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w2.Body).Decode(&resp) //nolint:errcheck
+	if resp["locked"] != false {
+		t.Fatalf("expected locked=false after unlock, got %v", resp["locked"])
+	}
+
+	// Correct login must now succeed.
+	if _, err := svc.Login(ctx, "grace", "correct-horse-battery"); err != nil {
+		t.Fatalf("expected login to succeed after unlock, got %v", err)
+	}
+}
+
+func TestAdminHandler_LockUser_UnknownUser_404(t *testing.T) {
+	h, admin, _ := newAdminFixture(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users/99999/lock", nil)
+	req.SetPathValue("id", "99999")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.LockUser(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
 func TestAdminHandler_DeleteUser_CannotDeleteSelf(t *testing.T) {
 	h, admin, _ := newAdminFixture(t)
 
