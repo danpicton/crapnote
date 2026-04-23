@@ -4,12 +4,14 @@ import "time"
 
 // User represents an application user.
 type User struct {
-	ID               int64
-	Username         string
-	PasswordHash     string
-	IsAdmin          bool
-	APITokensEnabled bool
-	CreatedAt        time.Time
+	ID                  int64
+	Username            string
+	PasswordHash        string
+	IsAdmin             bool
+	APITokensEnabled    bool
+	FailedLoginAttempts int
+	LockedAt            *time.Time
+	CreatedAt           time.Time
 }
 
 // Session represents an authenticated session stored in the database.

@@ -11,8 +11,15 @@ import (
 
 const bcryptCost = 12
 
+// MaxFailedLoginAttempts is the number of consecutive failed password attempts
+// after which a non-admin account is locked.
+const MaxFailedLoginAttempts = 3
+
 // ErrInvalidCredentials is returned when username/password don't match.
 var ErrInvalidCredentials = errors.New("invalid credentials")
+
+// ErrAccountLocked is returned when a locked user attempts to authenticate.
+var ErrAccountLocked = errors.New("account locked")
 
 // Service implements authentication business logic.
 type Service struct {
@@ -49,7 +56,9 @@ func (s *Service) SeedAdmin(ctx context.Context, username, password string) erro
 }
 
 // Login verifies credentials and returns a new Session on success.
-// Returns ErrInvalidCredentials for unknown users or wrong passwords.
+// Returns ErrInvalidCredentials for unknown users or wrong passwords, and
+// ErrAccountLocked for users whose accounts have been locked (either by an
+// admin or by exceeding MaxFailedLoginAttempts).
 func (s *Service) Login(ctx context.Context, username, password string) (*Session, error) {
 	u, err := s.users.FindByUsername(ctx, username)
 	if errors.Is(err, ErrNotFound) {
@@ -61,9 +70,27 @@ func (s *Service) Login(ctx context.Context, username, password string) (*Sessio
 		return nil, fmt.Errorf("login: %w", err)
 	}
 
+	if u.LockedAt != nil {
+		// Still perform a dummy comparison to keep timing uniform.
+		bcrypt.CompareHashAndPassword([]byte("$2a$12$dummy"), []byte(password)) //nolint:errcheck
+		return nil, ErrAccountLocked
+	}
+
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
+		// Only non-admin accounts are subject to automatic lockout. Admins are
+		// exempt so a brute-force attempt cannot strand the system with no one
+		// able to unlock anyone.
+		if !u.IsAdmin {
+			n, incErr := s.users.IncrementFailedAttempts(ctx, u.ID)
+			if incErr == nil && n >= MaxFailedLoginAttempts {
+				s.users.Lock(ctx, u.ID) //nolint:errcheck
+			}
+		}
 		return nil, ErrInvalidCredentials
 	}
+
+	// Successful login — clear the failed-attempt counter.
+	s.users.ResetFailedAttempts(ctx, u.ID) //nolint:errcheck
 
 	exp := time.Now().Add(s.ttl).UTC()
 	sess, err := s.sessions.Create(ctx, u.ID, exp)

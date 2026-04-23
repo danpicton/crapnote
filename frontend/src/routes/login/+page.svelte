@@ -18,7 +18,11 @@
 			goto('/');
 		} catch (err) {
 			if (err instanceof ApiError) {
-				error = 'Invalid username or password.';
+				if (err.status === 403) {
+					error = 'This account has been locked. Contact an administrator.';
+				} else {
+					error = 'Invalid username or password.';
+				}
 			} else {
 				error = 'An unexpected error occurred.';
 			}

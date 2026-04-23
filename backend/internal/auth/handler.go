@@ -52,6 +52,15 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
+	if errors.Is(err, ErrAccountLocked) {
+		slog.Warn("audit: login blocked — account locked",
+			"event", "login_locked",
+			"username", req.Username,
+			"ip", httpx.ClientIP(r),
+		)
+		writeError(w, http.StatusForbidden, "account locked")
+		return
+	}
 	if err != nil {
 		slog.Error("audit: login error",
 			"event", "login_error",

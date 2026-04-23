@@ -82,6 +82,23 @@ describe('Login page', () => {
 		});
 	});
 
+	it('shows a locked-account message on 403', async () => {
+		const { ApiError } = await import('$lib/api');
+		vi.mocked(api.auth.login).mockRejectedValueOnce(
+			new ApiError(403, '{"error":"account locked"}')
+		);
+
+		render(LoginPage);
+
+		await fireEvent.input(screen.getByLabelText(/username/i), { target: { value: 'alice' } });
+		await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'right' } });
+		await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
+
+		await waitFor(() => {
+			expect(screen.getByRole('alert').textContent).toMatch(/locked/i);
+		});
+	});
+
 	it('shows error message on login failure', async () => {
 		const { ApiError } = await import('$lib/api');
 		vi.mocked(api.auth.login).mockRejectedValueOnce(

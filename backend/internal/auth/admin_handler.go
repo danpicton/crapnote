@@ -186,15 +186,22 @@ type userResponse struct {
 	Username         string `json:"username"`
 	IsAdmin          bool   `json:"is_admin"`
 	APITokensEnabled bool   `json:"api_tokens_enabled"`
+	Locked           bool   `json:"locked"`
+	LockedAt         string `json:"locked_at,omitempty"`
 	CreatedAt        string `json:"created_at"`
 }
 
 func toUserResponse(u *User) userResponse {
-	return userResponse{
+	resp := userResponse{
 		ID:               u.ID,
 		Username:         u.Username,
 		IsAdmin:          u.IsAdmin,
 		APITokensEnabled: u.APITokensEnabled,
+		Locked:           u.LockedAt != nil,
 		CreatedAt:        u.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	}
+	if u.LockedAt != nil {
+		resp.LockedAt = u.LockedAt.Format("2006-01-02T15:04:05Z")
+	}
+	return resp
 }

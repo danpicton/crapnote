@@ -28,6 +28,19 @@ func newTestHandler(t *testing.T) (*auth.Handler, *auth.Service) {
 	return auth.NewHandler(svc), svc
 }
 
+func newTestHandlerWithRepo(t *testing.T) (*auth.Handler, *auth.Service, *auth.UserRepo) {
+	t.Helper()
+	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	users := auth.NewUserRepo(database)
+	svc := auth.NewService(users, auth.NewSessionRepo(database), 7*24*time.Hour)
+	return auth.NewHandler(svc), svc, users
+}
+
 func TestHandler_Login_Success(t *testing.T) {
 	h, svc := newTestHandler(t)
 	svc.SeedAdmin(t.Context(), "admin", "pass") //nolint:errcheck
@@ -135,6 +148,26 @@ func TestHandler_Login_BadCredentials(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d", w.Code)
+	}
+}
+
+func TestHandler_Login_LockedAccount_Returns403(t *testing.T) {
+	h, svc, users := newTestHandlerWithRepo(t)
+	createUser(t, users, "alice", "correctpass", false)
+
+	// Three failed attempts → locked.
+	for i := 0; i < 3; i++ {
+		svc.Login(t.Context(), "alice", "wrong") //nolint:errcheck
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+		bytes.NewBufferString(`{"username":"alice","password":"correctpass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.Login(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for locked account, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
