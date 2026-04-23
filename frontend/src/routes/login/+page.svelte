@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { ApiError } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
+	import PasswordInput from '$lib/components/PasswordInput.svelte';
 
 	let username = $state('');
 	let password = $state('');
@@ -52,9 +53,8 @@
 
 		<div class="field">
 			<label for="password">Password</label>
-			<input
+			<PasswordInput
 				id="password"
-				type="password"
 				autocomplete="current-password"
 				bind:value={password}
 				disabled={submitting}

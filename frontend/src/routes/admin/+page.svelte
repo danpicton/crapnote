@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { ChevronLeft, UserPlus, Trash2 } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
+	import PasswordInput from '$lib/components/PasswordInput.svelte';
 
 	interface AdminUser {
 		id: number;
@@ -96,7 +97,15 @@
 		{/if}
 		<form onsubmit={createUser} class="create-form">
 			<input type="text" placeholder="Username" bind:value={newUsername} required />
-			<input type="password" placeholder="Password" bind:value={newPassword} required />
+			<div class="pw-field">
+				<PasswordInput
+					id="new-user-password"
+					placeholder="Password"
+					autocomplete="new-password"
+					bind:value={newPassword}
+					required
+				/>
+			</div>
 			<label class="checkbox-label">
 				<input type="checkbox" bind:checked={newIsAdmin} />
 				Admin
@@ -196,14 +205,19 @@
 		align-items: center;
 	}
 
-	.create-form input[type='text'],
-	.create-form input[type='password'] {
+	.create-form input[type='text'] {
 		padding: 0.375rem 0.625rem;
 		border: 1px solid var(--border-md);
 		border-radius: 0.375rem;
 		font-size: 0.875rem;
 		background: var(--bg);
 		color: var(--text);
+	}
+
+	.pw-field {
+		display: inline-flex;
+		min-width: 10rem;
+		font-size: 0.875rem;
 	}
 
 	.checkbox-label {
