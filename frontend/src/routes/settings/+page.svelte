@@ -4,6 +4,7 @@
 	import { theme } from '$lib/stores/theme.svelte';
 	import ApiTokens from '$lib/components/ApiTokens.svelte';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
+	import ShortcutEditor from '$lib/components/ShortcutEditor.svelte';
 	import { api, ApiError } from '$lib/api';
 
 	let exportPassword = $state('');
@@ -130,6 +131,15 @@
 	</section>
 
 	<section class="section">
+		<h2>Keyboard shortcuts</h2>
+		<p class="hint">
+			Shortcuts are stored in this browser and apply only to your account.
+			Press <kbd>?</kbd> anywhere to view the cheat sheet.
+		</p>
+		<ShortcutEditor />
+	</section>
+
+	<section class="section">
 		<h2>Appearance</h2>
 		<button
 			class="theme-btn"
@@ -192,6 +202,15 @@
 	.section:last-child { border-bottom: none; }
 
 	.hint { font-size: 0.875rem; color: var(--text-3); margin: 0 0 0.75rem; }
+	.hint kbd {
+		padding: 0 0.35rem;
+		border: 1px solid var(--border-md);
+		border-radius: 0.25rem;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 0.8rem;
+		background: var(--bg-hover);
+		color: var(--text);
+	}
 
 	.export-row {
 		display: flex;
