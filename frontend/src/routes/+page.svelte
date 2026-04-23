@@ -18,6 +18,8 @@
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, type Note, type Tag } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { shortcuts, matchShortcut, type ShortcutId } from '$lib/stores/shortcuts.svelte';
+	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
 	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote } from '$lib/offlineDB';
 	import type { CachedNote } from '$lib/offlineDB';
@@ -57,6 +59,8 @@
 	let editorRef = $state<EditorRef | null>(null);
 	// Title input ref (used to focus + highlight on new-note creation)
 	let titleInput = $state<HTMLInputElement | null>(null);
+	let searchInput = $state<HTMLInputElement | null>(null);
+	let showShortcutHelp = $state(false);
 
 	// Tags
 	let allTags = $state<Tag[]>([]);
@@ -343,6 +347,9 @@
 	onMount(() => {
 		isOnline = navigator.onLine;
 
+		// Load per-user keyboard shortcut overrides from localStorage.
+		if (auth.user?.id != null) shortcuts.load(auth.user.id);
+
 		const handleOnline = async () => {
 			isOnline = true;
 			// Bidirectional sync on reconnect: push dirty, pull fresh list.
@@ -353,8 +360,14 @@
 			isOnline = false;
 			void refreshSyncStatus();
 		};
+		const handleKeydown = (e: KeyboardEvent) => {
+			const id = matchShortcut(e, { skipInInputs: true });
+			if (!id) return;
+			runShortcut(id, e);
+		};
 		window.addEventListener('online', handleOnline);
 		window.addEventListener('offline', handleOffline);
+		window.addEventListener('keydown', handleKeydown);
 
 		// Periodic bidirectional sync while the page is open.
 		const heartbeatTimer = setInterval(() => { void heartbeatSync('heartbeat'); }, SYNC_INTERVAL_MS);
@@ -381,9 +394,46 @@
 		return () => {
 			window.removeEventListener('online', handleOnline);
 			window.removeEventListener('offline', handleOffline);
+			window.removeEventListener('keydown', handleKeydown);
 			clearInterval(heartbeatTimer);
 		};
 	});
+
+	function runShortcut(id: ShortcutId, e: KeyboardEvent) {
+		switch (id) {
+			case 'new-note':
+				e.preventDefault();
+				void newNote();
+				break;
+			case 'search-focus':
+				e.preventDefault();
+				searchInput?.focus();
+				searchInput?.select();
+				break;
+			case 'help-modal':
+				e.preventDefault();
+				showShortcutHelp = true;
+				break;
+			case 'bold':
+				cmd(toggleStrongCommand.key as CmdKey<unknown>);
+				break;
+			case 'italic':
+				cmd(toggleEmphasisCommand.key as CmdKey<unknown>);
+				break;
+			case 'underline':
+				cmd(toggleUnderlineCommand.key as CmdKey<unknown>);
+				break;
+			case 'insert-link':
+				e.preventDefault();
+				openLinkDialog();
+				break;
+			case 'save':
+				// The editor auto-saves on blur; pressing Ctrl+Enter blurs the
+				// currently-focused field so the save fires immediately.
+				(document.activeElement as HTMLElement | null)?.blur();
+				break;
+		}
+	}
 
 	/**
 	 * Default title for a freshly-created note. Generated client-side using the
@@ -713,6 +763,7 @@
 			<input
 				type="search"
 				placeholder="Search…"
+				bind:this={searchInput}
 				bind:value={search}
 				oninput={handleSearch}
 			/>
@@ -982,6 +1033,8 @@
 		{/if}
 	</main>
 </div>
+
+<ShortcutHelp open={showShortcutHelp} onclose={() => (showShortcutHelp = false)} />
 
 <style>
 	/* ─── Layout ─────────────────────────────────────────── */
