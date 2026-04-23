@@ -105,6 +105,26 @@ func (s *Service) Logout(ctx context.Context, sessionID string) error {
 	return s.sessions.Delete(ctx, sessionID)
 }
 
+// ChangePassword updates a user's password after verifying the current one.
+// Returns ErrInvalidCredentials if the current password is wrong.
+func (s *Service) ChangePassword(ctx context.Context, userID int64, currentPassword, newPassword string) error {
+	u, err := s.users.FindByID(ctx, userID)
+	if errors.Is(err, ErrNotFound) {
+		return ErrInvalidCredentials
+	}
+	if err != nil {
+		return fmt.Errorf("change password: lookup: %w", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(currentPassword)); err != nil {
+		return ErrInvalidCredentials
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcryptCost)
+	if err != nil {
+		return fmt.Errorf("change password: hash: %w", err)
+	}
+	return s.users.SetPassword(ctx, userID, string(hash))
+}
+
 // ValidateSession returns the User associated with the session if it exists
 // and has not expired. Returns ErrNotFound if missing or expired.
 func (s *Service) ValidateSession(ctx context.Context, sessionID string) (*User, error) {

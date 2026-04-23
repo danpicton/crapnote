@@ -82,6 +82,12 @@ func newMux(
 	// Auth
 	protected("POST", "/api/auth/logout", authHandler.Logout)
 	protected("GET", "/api/auth/me", authHandler.Me)
+	// Changing your own password is gated behind cookie auth: a leaked read-write
+	// bearer token must not be able to hijack the account by changing the
+	// password.
+	mux.Handle("POST /api/auth/password",
+		bearerRateLimit(authHandler.RequireAuth(cookieOnly(authHandler.ChangePassword))),
+	)
 
 	// API tokens (user-facing). List/Revoke are safe over read scope; Create
 	// requires cookie auth — you can't bootstrap new tokens from a token.
