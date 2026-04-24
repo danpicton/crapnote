@@ -187,6 +187,110 @@ func TestUserRepo_Unlock_ClearsLockAndAttempts(t *testing.T) {
 	}
 }
 
+// ── Invite repository ────────────────────────────────────────────────────────
+
+func TestInviteRepo_CreateAndFind(t *testing.T) {
+	database := openTestDB(t)
+	users := auth.NewUserRepo(database)
+	invites := auth.NewInviteRepo(database)
+	ctx := context.Background()
+
+	u, _ := users.Create(ctx, "alice", "hash", false)
+	exp := time.Now().Add(7 * 24 * time.Hour).UTC().Truncate(time.Second)
+
+	inv, err := invites.Create(ctx, u.ID, "hash-of-token", exp)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if inv.ID == 0 {
+		t.Fatal("expected non-zero id")
+	}
+	if inv.UserID != u.ID {
+		t.Fatalf("user_id mismatch: %d", inv.UserID)
+	}
+
+	got, err := invites.FindByTokenHash(ctx, "hash-of-token")
+	if err != nil {
+		t.Fatalf("FindByTokenHash: %v", err)
+	}
+	if got.ID != inv.ID {
+		t.Fatalf("id mismatch")
+	}
+}
+
+func TestInviteRepo_FindByTokenHash_NotFound(t *testing.T) {
+	invites := auth.NewInviteRepo(openTestDB(t))
+	if _, err := invites.FindByTokenHash(context.Background(), "nope"); err != auth.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestInviteRepo_Delete(t *testing.T) {
+	database := openTestDB(t)
+	users := auth.NewUserRepo(database)
+	invites := auth.NewInviteRepo(database)
+	ctx := context.Background()
+
+	u, _ := users.Create(ctx, "alice", "hash", false)
+	inv, _ := invites.Create(ctx, u.ID, "h", time.Now().Add(time.Hour).UTC())
+
+	if err := invites.Delete(ctx, inv.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := invites.FindByTokenHash(ctx, "h"); err != auth.ErrNotFound {
+		t.Fatalf("expected invite to be gone, got %v", err)
+	}
+}
+
+func TestInviteRepo_DeleteForUser(t *testing.T) {
+	database := openTestDB(t)
+	users := auth.NewUserRepo(database)
+	invites := auth.NewInviteRepo(database)
+	ctx := context.Background()
+
+	u, _ := users.Create(ctx, "alice", "hash", false)
+	invites.Create(ctx, u.ID, "a", time.Now().Add(time.Hour).UTC()) //nolint:errcheck
+	invites.Create(ctx, u.ID, "b", time.Now().Add(time.Hour).UTC()) //nolint:errcheck
+
+	if err := invites.DeleteForUser(ctx, u.ID); err != nil {
+		t.Fatalf("DeleteForUser: %v", err)
+	}
+	if _, err := invites.FindByTokenHash(ctx, "a"); err != auth.ErrNotFound {
+		t.Fatal("a not deleted")
+	}
+	if _, err := invites.FindByTokenHash(ctx, "b"); err != auth.ErrNotFound {
+		t.Fatal("b not deleted")
+	}
+}
+
+func TestInviteRepo_HasActiveForUser(t *testing.T) {
+	database := openTestDB(t)
+	users := auth.NewUserRepo(database)
+	invites := auth.NewInviteRepo(database)
+	ctx := context.Background()
+
+	u, _ := users.Create(ctx, "alice", "hash", false)
+
+	has, _ := invites.HasActiveForUser(ctx, u.ID)
+	if has {
+		t.Fatal("expected no active invite")
+	}
+
+	// Expired invite shouldn't count.
+	invites.Create(ctx, u.ID, "expired", time.Now().Add(-time.Hour).UTC()) //nolint:errcheck
+	has, _ = invites.HasActiveForUser(ctx, u.ID)
+	if has {
+		t.Fatal("expired invite should not count as active")
+	}
+
+	// Future invite should.
+	invites.Create(ctx, u.ID, "fresh", time.Now().Add(time.Hour).UTC()) //nolint:errcheck
+	has, _ = invites.HasActiveForUser(ctx, u.ID)
+	if !has {
+		t.Fatal("expected active invite")
+	}
+}
+
 // ── Session repository ───────────────────────────────────────────────────────
 
 func TestSessionRepo_CreateAndFind(t *testing.T) {

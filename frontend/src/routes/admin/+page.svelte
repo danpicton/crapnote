@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { ChevronLeft, UserPlus, Trash2, Lock, LockOpen, Key } from 'lucide-svelte';
+	import { ChevronLeft, UserPlus, Trash2, Lock, LockOpen, Key, Mail, Copy, Check } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 	import PasswordPromptModal from '$lib/components/PasswordPromptModal.svelte';
+	import { api, ApiError, type InviteResult } from '$lib/api';
 
 	interface AdminUser {
 		id: number;
@@ -13,8 +14,11 @@
 		api_tokens_enabled: boolean;
 		locked: boolean;
 		locked_at?: string;
+		pending_setup?: boolean;
 		created_at: string;
 	}
+
+	type CreateMode = 'password' | 'invite';
 
 	let users = $state<AdminUser[]>([]);
 	let loading = $state(true);
@@ -22,11 +26,16 @@
 	let newPassword = $state('');
 	let newPasswordConfirm = $state('');
 	let newIsAdmin = $state(false);
+	let createMode = $state<CreateMode>('password');
 	let createError = $state('');
 
 	let passwordModalUser = $state<AdminUser | null>(null);
 	let passwordModalSubmitting = $state(false);
 	let passwordModalError = $state('');
+
+	// Result of the most recent invite issuance, so the admin can copy the URL.
+	let lastInvite = $state<InviteResult | null>(null);
+	let copied = $state(false);
 
 	onMount(async () => {
 		if (!auth.user?.is_admin) {
@@ -47,25 +56,73 @@
 	async function createUser(e: Event) {
 		e.preventDefault();
 		createError = '';
-		if (newPassword !== newPasswordConfirm) {
-			createError = 'Passwords do not match.';
+
+		if (createMode === 'password') {
+			if (newPassword.length < 12) {
+				createError = 'Password must be at least 12 characters.';
+				return;
+			}
+			if (newPassword !== newPasswordConfirm) {
+				createError = 'Passwords do not match.';
+				return;
+			}
+			const res = await fetch('/api/admin/users', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify({ username: newUsername, password: newPassword, is_admin: newIsAdmin }),
+			});
+			if (res.ok) {
+				resetCreateForm();
+				await loadUsers();
+			} else {
+				const text = await res.text();
+				createError = text || 'Failed to create user.';
+			}
 			return;
 		}
-		const res = await fetch('/api/admin/users', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			credentials: 'include',
-			body: JSON.stringify({ username: newUsername, password: newPassword, is_admin: newIsAdmin }),
-		});
-		if (res.ok) {
-			newUsername = '';
-			newPassword = '';
-			newPasswordConfirm = '';
-			newIsAdmin = false;
+
+		// Invite mode — admin shares a setup link with the new user.
+		try {
+			const result = await api.admin.inviteUser(newUsername, newIsAdmin);
+			lastInvite = result;
+			copied = false;
+			resetCreateForm();
 			await loadUsers();
-		} else {
-			const text = await res.text();
-			createError = text || 'Failed to create user.';
+		} catch (err) {
+			createError =
+				err instanceof ApiError
+					? err.message || 'Failed to create invite.'
+					: 'Failed to create invite.';
+		}
+	}
+
+	function resetCreateForm() {
+		newUsername = '';
+		newPassword = '';
+		newPasswordConfirm = '';
+		newIsAdmin = false;
+	}
+
+	async function copySetupURL() {
+		if (!lastInvite) return;
+		try {
+			await navigator.clipboard.writeText(lastInvite.setup_url);
+			copied = true;
+			setTimeout(() => (copied = false), 2000);
+		} catch {
+			// Clipboard API unavailable — leave the URL visible for manual copy.
+		}
+	}
+
+	async function resendInvite(user: AdminUser) {
+		try {
+			const result = await api.admin.regenerateInvite(user.id);
+			lastInvite = result;
+			copied = false;
+			await loadUsers();
+		} catch {
+			alert('Failed to generate setup link.');
 		}
 	}
 
@@ -156,34 +213,79 @@
 		{#if createError}
 			<p role="alert" class="error">{createError}</p>
 		{/if}
+
+		<fieldset class="mode-toggle" aria-label="How to create this user">
+			<label>
+				<input type="radio" name="create-mode" value="password" bind:group={createMode} />
+				Set password now
+			</label>
+			<label>
+				<input type="radio" name="create-mode" value="invite" bind:group={createMode} />
+				Send setup link
+			</label>
+		</fieldset>
+
 		<form onsubmit={createUser} class="create-form">
 			<input type="text" placeholder="Username" bind:value={newUsername} required />
-			<div class="pw-field">
-				<PasswordInput
-					id="new-user-password"
-					placeholder="Password"
-					autocomplete="new-password"
-					bind:value={newPassword}
-					required
-				/>
-			</div>
-			<div class="pw-field">
-				<PasswordInput
-					id="new-user-password-confirm"
-					placeholder="Confirm password"
-					autocomplete="new-password"
-					bind:value={newPasswordConfirm}
-					required
-				/>
-			</div>
+			{#if createMode === 'password'}
+				<div class="pw-field">
+					<PasswordInput
+						id="new-user-password"
+						placeholder="Password"
+						autocomplete="new-password"
+						bind:value={newPassword}
+						required
+					/>
+				</div>
+				<div class="pw-field">
+					<PasswordInput
+						id="new-user-password-confirm"
+						placeholder="Confirm password"
+						autocomplete="new-password"
+						bind:value={newPasswordConfirm}
+						required
+					/>
+				</div>
+			{/if}
 			<label class="checkbox-label">
 				<input type="checkbox" bind:checked={newIsAdmin} />
 				Admin
 			</label>
-			<button type="submit" class="create-btn" title="Create user" aria-label="Create user">
-				<UserPlus size={16} /> Create user
+			<button
+				type="submit"
+				class="create-btn"
+				title={createMode === 'invite' ? 'Send setup link' : 'Create user'}
+				aria-label={createMode === 'invite' ? 'Send setup link' : 'Create user'}
+			>
+				{#if createMode === 'invite'}
+					<Mail size={16} /> Send setup link
+				{:else}
+					<UserPlus size={16} /> Create user
+				{/if}
 			</button>
 		</form>
+
+		{#if lastInvite}
+			<div class="invite-result" role="status">
+				<p>
+					Setup link for <strong>{lastInvite.user.username}</strong> — share this with them.
+					It expires on {new Date(lastInvite.expires_at).toLocaleString()}.
+				</p>
+				<div class="invite-url">
+					<code>{lastInvite.setup_url}</code>
+					<button type="button" class="copy-btn" onclick={copySetupURL} aria-label="Copy setup link">
+						{#if copied}
+							<Check size={14} /> Copied
+						{:else}
+							<Copy size={14} /> Copy
+						{/if}
+					</button>
+				</div>
+				<button type="button" class="dismiss-btn" onclick={() => (lastInvite = null)}>
+					Dismiss
+				</button>
+			</div>
+		{/if}
 	</section>
 
 	<section class="users-section">
@@ -210,6 +312,8 @@
 							<td>
 								{#if user.locked}
 									<span class="status locked-pill">Locked</span>
+								{:else if user.pending_setup}
+									<span class="status pending-pill">Pending setup</span>
 								{:else}
 									<span class="status active-pill">Active</span>
 								{/if}
@@ -237,6 +341,14 @@
 									aria-label="Set password for {user.username}"
 								>
 									<Key size={14} />
+								</button>
+								<button
+									class="icon-btn mail"
+									onclick={() => resendInvite(user)}
+									title="Send {user.pending_setup ? 'a new' : 'a'} setup link to {user.username}"
+									aria-label="Send setup link to {user.username}"
+								>
+									<Mail size={14} />
 								</button>
 								{#if user.id !== auth.user?.id}
 									<button
@@ -384,6 +496,69 @@
 	}
 	.locked-pill { background: var(--danger-bg); color: var(--danger); }
 	.active-pill { background: var(--bg-hover); color: var(--text-2); }
+	.pending-pill { background: var(--accent-lt); color: var(--accent); }
+
+	.icon-btn.mail { color: var(--text-2); }
+	.icon-btn.mail:hover { background: var(--bg-hover); color: var(--text); }
+
+	.mode-toggle {
+		display: flex;
+		gap: 1rem;
+		padding: 0.25rem 0;
+		margin: 0 0 0.5rem;
+		border: none;
+		font-size: 0.875rem;
+		color: var(--text-2);
+	}
+	.mode-toggle label {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		cursor: pointer;
+	}
+
+	.invite-result {
+		margin-top: 1rem;
+		padding: 0.75rem 0.875rem;
+		border: 1px solid var(--accent);
+		border-radius: 0.375rem;
+		background: var(--accent-lt);
+		font-size: 0.875rem;
+	}
+	.invite-result p { margin: 0 0 0.5rem; }
+
+	.invite-url {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.375rem 0.5rem;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		border-radius: 0.25rem;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		overflow: auto;
+	}
+	.invite-url code {
+		flex: 1;
+		word-break: break-all;
+		font-size: 0.8125rem;
+	}
+
+	.copy-btn, .dismiss-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		padding: 0.25rem 0.5rem;
+		border: 1px solid var(--border-md);
+		border-radius: 0.25rem;
+		background: var(--bg);
+		color: var(--text-2);
+		font-size: 0.75rem;
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.copy-btn:hover, .dismiss-btn:hover { background: var(--bg-hover); color: var(--text); }
+	.dismiss-btn { margin-top: 0.5rem; }
 	.locked-row td { opacity: 0.8; }
 
 	.error {

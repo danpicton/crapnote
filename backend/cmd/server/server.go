@@ -18,6 +18,7 @@ import (
 func newMux(
 	authHandler    *auth.Handler,
 	adminHandler   *auth.AdminHandler,
+	setupHandler   *auth.SetupHandler,
 	notesHandler   *notes.Handler,
 	tagsHandler    *tags.Handler,
 	trashHandler   *trash.Handler,
@@ -78,6 +79,16 @@ func newMux(
 	admin("PUT", "/api/admin/users/{id}/password", adminHandler.SetUserPassword)
 	admin("POST", "/api/admin/users/{id}/lock", adminHandler.LockUser)
 	admin("POST", "/api/admin/users/{id}/unlock", adminHandler.UnlockUser)
+	admin("POST", "/api/admin/users/invite", adminHandler.InviteUser)
+	admin("POST", "/api/admin/users/{id}/invite", adminHandler.RegenerateInvite)
+
+	// Public — setup-token flow. Rate-limited by IP so the token's 256 bits
+	// of entropy plus the limiter make brute force infeasible.
+	setupLimited := func(h http.HandlerFunc) http.Handler {
+		return ratelimit.Middleware(loginLimiter, ratelimit.ClientIP)(h)
+	}
+	mux.Handle("GET /api/setup/{token}", setupLimited(setupHandler.Get))
+	mux.Handle("POST /api/setup/{token}", setupLimited(setupHandler.Complete))
 
 	// Auth
 	protected("POST", "/api/auth/logout", authHandler.Logout)

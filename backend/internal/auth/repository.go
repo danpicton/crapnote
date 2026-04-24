@@ -237,6 +237,93 @@ func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]*User, error)
 	return users, rows.Err()
 }
 
+// ── Invite repository ────────────────────────────────────────────────────────
+
+// InviteRepo provides access to the user_invites table, which stores
+// single-use setup tokens issued by admins.
+type InviteRepo struct {
+	db *db.DB
+}
+
+// NewInviteRepo creates a new InviteRepo.
+func NewInviteRepo(database *db.DB) *InviteRepo {
+	return &InviteRepo{db: database}
+}
+
+// Create inserts a new invite and returns the populated row.
+func (r *InviteRepo) Create(ctx context.Context, userID int64, tokenHash string, expiresAt time.Time) (*Invite, error) {
+	res, err := r.db.ExecContext(ctx,
+		`INSERT INTO user_invites(user_id, token_hash, expires_at) VALUES(?, ?, ?)`,
+		userID, tokenHash, expiresAt.UTC(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create invite: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("last insert id: %w", err)
+	}
+	return r.findByID(ctx, id)
+}
+
+func (r *InviteRepo) findByID(ctx context.Context, id int64) (*Invite, error) {
+	inv := &Invite{}
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, user_id, token_hash, expires_at, created_at FROM user_invites WHERE id=?`, id,
+	).Scan(&inv.ID, &inv.UserID, &inv.TokenHash, &inv.ExpiresAt, &inv.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find invite: %w", err)
+	}
+	return inv, nil
+}
+
+// FindByTokenHash returns the invite with the given token hash, or ErrNotFound.
+// Expiry is not enforced here — the caller decides what to do with an expired
+// invite (typically delete it and return a "setup link has expired" error).
+func (r *InviteRepo) FindByTokenHash(ctx context.Context, tokenHash string) (*Invite, error) {
+	inv := &Invite{}
+	err := r.db.QueryRowContext(ctx,
+		`SELECT id, user_id, token_hash, expires_at, created_at FROM user_invites WHERE token_hash=?`,
+		tokenHash,
+	).Scan(&inv.ID, &inv.UserID, &inv.TokenHash, &inv.ExpiresAt, &inv.CreatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("find invite by token: %w", err)
+	}
+	return inv, nil
+}
+
+// Delete removes a single invite by id.
+func (r *InviteRepo) Delete(ctx context.Context, id int64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM user_invites WHERE id=?`, id)
+	return err
+}
+
+// DeleteForUser removes every invite belonging to a user.
+func (r *InviteRepo) DeleteForUser(ctx context.Context, userID int64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM user_invites WHERE user_id=?`, userID)
+	return err
+}
+
+// HasActiveForUser reports whether the user has at least one invite that has
+// not yet expired.
+func (r *InviteRepo) HasActiveForUser(ctx context.Context, userID int64) (bool, error) {
+	var n int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM user_invites WHERE user_id=? AND expires_at > CURRENT_TIMESTAMP`,
+		userID,
+	).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("has active invite: %w", err)
+	}
+	return n > 0, nil
+}
+
 // ── Session repository ───────────────────────────────────────────────────────
 
 // SessionRepo provides access to the sessions table.

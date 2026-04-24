@@ -21,3 +21,13 @@ type Session struct {
 	ExpiresAt time.Time
 	CreatedAt time.Time
 }
+
+// Invite represents a one-time password-setup token issued to a new user by
+// an admin. The raw token is never stored — only its SHA-256 hash.
+type Invite struct {
+	ID        int64
+	UserID    int64
+	TokenHash string
+	ExpiresAt time.Time
+	CreatedAt time.Time
+}

@@ -2,11 +2,19 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import AdminPage from './+page.svelte';
 
+const mockApi = vi.hoisted(() => ({
+	auth: { logout: vi.fn() },
+	admin: {
+		inviteUser: vi.fn(),
+		regenerateInvite: vi.fn(),
+	},
+}));
 vi.mock('$lib/api', () => ({
-	api: {
-		auth: {
-			logout: vi.fn(),
-		},
+	api: mockApi,
+	ApiError: class ApiError extends Error {
+		constructor(public status: number, message: string) {
+			super(message);
+		}
 	},
 }));
 
@@ -164,6 +172,35 @@ describe('Admin page', () => {
 			);
 			expect(createCall).toBeTruthy();
 		});
+	});
+
+	it('switches to invite mode, hides password fields, and calls api.admin.inviteUser', async () => {
+		mockApi.admin.inviteUser.mockResolvedValueOnce({
+			user: { id: 5, username: 'mallory', is_admin: false, pending_setup: true, created_at: '' },
+			setup_url: 'http://localhost/setup/abc123',
+			expires_at: '2030-01-01T00:00:00Z',
+		});
+		mockFetch
+			.mockResolvedValueOnce(ok(mockUsers)) // initial list
+			.mockResolvedValueOnce(ok([...mockUsers, { id: 5, username: 'mallory', is_admin: false, locked: false, pending_setup: true, created_at: '' }])); // refresh
+
+		render(AdminPage);
+		await waitFor(() => screen.getByPlaceholderText(/^username$/i));
+
+		// Switch mode.
+		await fireEvent.click(screen.getByLabelText(/send setup link/i));
+
+		// Password fields should now be gone.
+		expect(screen.queryByPlaceholderText(/^password$/i)).not.toBeInTheDocument();
+
+		await fireEvent.input(screen.getByPlaceholderText(/^username$/i), { target: { value: 'mallory' } });
+		await fireEvent.click(screen.getByRole('button', { name: /^send setup link$/i }));
+
+		await waitFor(() => {
+			expect(mockApi.admin.inviteUser).toHaveBeenCalledWith('mallory', false);
+		});
+		// The resulting setup URL is displayed to the admin.
+		expect(screen.getByText('http://localhost/setup/abc123')).toBeInTheDocument();
 	});
 
 	it('shows a mismatch error and skips create when the two password fields differ', async () => {

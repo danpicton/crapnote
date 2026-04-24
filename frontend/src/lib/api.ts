@@ -6,6 +6,12 @@ export interface User {
 	created_at: string;
 }
 
+export interface InviteResult {
+	user: User & { pending_setup: boolean };
+	setup_url: string;
+	expires_at: string;
+}
+
 export interface ApiToken {
 	id: number;
 	name: string;
@@ -141,6 +147,20 @@ export const api = {
 			request<User>('POST', `/api/admin/users/${userId}/lock`),
 		unlockUser: (userId: number) =>
 			request<User>('POST', `/api/admin/users/${userId}/unlock`),
+		inviteUser: (username: string, isAdmin: boolean) =>
+			request<InviteResult>('POST', '/api/admin/users/invite', {
+				username,
+				is_admin: isAdmin,
+			}),
+		regenerateInvite: (userId: number) =>
+			request<InviteResult>('POST', `/api/admin/users/${userId}/invite`),
+	},
+
+	setup: {
+		get: (token: string) =>
+			request<{ username: string; expires_at: string }>('GET', `/api/setup/${encodeURIComponent(token)}`),
+		complete: (token: string, password: string) =>
+			request<void>('POST', `/api/setup/${encodeURIComponent(token)}`, { password }),
 	},
 
 	trash: {

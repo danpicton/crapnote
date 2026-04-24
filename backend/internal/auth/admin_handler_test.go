@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,29 @@ func newAdminFixture(t *testing.T) (*auth.AdminHandler, *auth.User, *auth.Servic
 
 func adminRequest(r *http.Request, u *auth.User) *http.Request {
 	return r.WithContext(auth.WithUser(r.Context(), u))
+}
+
+func newAdminInviteFixture(t *testing.T) (*auth.AdminHandler, *auth.User, *auth.Service) {
+	t.Helper()
+	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	userRepo := auth.NewUserRepo(database)
+	sessRepo := auth.NewSessionRepo(database)
+	inviteRepo := auth.NewInviteRepo(database)
+	svc := auth.NewServiceWithInvites(userRepo, sessRepo, inviteRepo, 7*24*time.Hour)
+
+	if err := svc.SeedAdmin(context.Background(), "admin", "pass"); err != nil {
+		t.Fatalf("seed admin: %v", err)
+	}
+	admin, err := userRepo.FindByUsername(context.Background(), "admin")
+	if err != nil {
+		t.Fatalf("find admin: %v", err)
+	}
+	return auth.NewAdminHandlerWithInvites(userRepo, svc), admin, svc
 }
 
 func TestAdminHandler_ListUsers(t *testing.T) {
@@ -349,6 +373,66 @@ func TestAdminHandler_LockUser_UnknownUser_404(t *testing.T) {
 	h.LockUser(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+// ── Invite (create user without password) ───────────────────────────────────
+
+func TestAdminHandler_InviteUser_CreatesUserAndReturnsSetupURL(t *testing.T) {
+	h, admin, _ := newAdminInviteFixture(t)
+
+	body := `{"username":"mallory","is_admin":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users/invite",
+		bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Host", "crapnote.example.com")
+	req.Host = "crapnote.example.com"
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.InviteUser(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp) //nolint:errcheck
+
+	userNode, ok := resp["user"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing user in response: %v", resp)
+	}
+	if userNode["username"] != "mallory" {
+		t.Fatalf("unexpected username: %v", userNode["username"])
+	}
+	if userNode["pending_setup"] != true {
+		t.Fatalf("expected pending_setup=true, got %v", userNode["pending_setup"])
+	}
+
+	setupURL, ok := resp["setup_url"].(string)
+	if !ok || setupURL == "" {
+		t.Fatalf("missing setup_url: %v", resp)
+	}
+	if !strings.Contains(setupURL, "/setup/") {
+		t.Fatalf("setup_url malformed: %q", setupURL)
+	}
+	// Raw token should not also be returned under another key.
+	if _, leaked := resp["token"]; leaked {
+		t.Fatal("raw token should be embedded only in setup_url")
+	}
+}
+
+func TestAdminHandler_InviteUser_RequiresUsername(t *testing.T) {
+	h, admin, _ := newAdminInviteFixture(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users/invite",
+		bytes.NewBufferString(`{"username":""}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.InviteUser(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
 	}
 }
 
