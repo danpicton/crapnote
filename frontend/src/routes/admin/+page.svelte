@@ -494,7 +494,7 @@
 		margin: 0;
 	}
 
-	.section-body { min-width: 0; }
+	.section-body { min-width: 0; overflow-x: auto; }
 
 	.msg-error {
 		color: var(--danger);
@@ -629,27 +629,29 @@
 
 	.users-table th {
 		text-align: left;
-		padding: 0.375rem 0.625rem;
+		padding: 0.3rem 0.5rem;
 		font-size: 0.6875rem;
 		font-weight: 600;
 		color: var(--text-3);
 		text-transform: uppercase;
 		letter-spacing: 0.07em;
 		border-bottom: 1px solid var(--border-md);
+		white-space: nowrap;
 	}
 	.users-table td {
-		padding: 0.625rem 0.625rem;
+		padding: 0.5rem 0.5rem;
 		border-bottom: 1px solid var(--border);
 		color: var(--text);
 		vertical-align: middle;
+		white-space: nowrap;
 	}
 
 	.locked-row td { opacity: 0.65; }
 
-	.col-username { font-family: var(--serif); font-size: 0.9375rem; font-weight: 500; }
+	.col-username { font-family: var(--serif); font-size: 0.9375rem; font-weight: 500; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
 	.col-role { color: var(--text-3); }
-	.col-date { color: var(--text-3); }
-	.col-actions { width: 1px; white-space: nowrap; }
+	.col-date { color: var(--text-3); font-size: 0.8125rem; }
+	.col-actions { white-space: nowrap; }
 
 	.status-pill {
 		display: inline-block;

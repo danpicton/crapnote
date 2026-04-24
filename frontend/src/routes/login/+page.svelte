@@ -195,6 +195,36 @@
 	input:focus { border-bottom-color: var(--accent); }
 	input:disabled { opacity: 0.6; }
 
+	/* Match PasswordInput to the underline-only style */
+	:global(.login-form .pw-wrap) { display: block; position: relative; }
+	:global(.login-form .pw-wrap input) {
+		width: 100%;
+		box-sizing: border-box;
+		font-family: var(--serif);
+		font-size: 1.125rem;
+		color: var(--text);
+		background: transparent;
+		border: none;
+		border-radius: 0;
+		border-bottom: 1.5px solid var(--border);
+		outline: none;
+		padding: 0.375rem 1.75rem 0.625rem 0;
+		box-shadow: none;
+		transition: border-color 0.15s;
+	}
+	:global(.login-form .pw-wrap input:focus) {
+		border-bottom-color: var(--accent);
+		box-shadow: none;
+	}
+	:global(.login-form .pw-wrap .toggle) {
+		position: absolute;
+		right: 0;
+		bottom: 0.25rem;
+		top: auto;
+		transform: none;
+		background: transparent;
+	}
+
 	.login-btn {
 		width: 100%;
 		margin-top: 0.5rem;

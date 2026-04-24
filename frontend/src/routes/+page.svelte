@@ -1198,12 +1198,18 @@
 	.note-list {
 		flex: 1;
 		min-height: 0;
-		overflow-y: auto;
+		overflow-y: scroll;
 		overflow-x: hidden;
 		list-style: none;
 		margin: 0;
 		padding: 0.375rem 0.625rem;
+		scrollbar-width: none;
 	}
+	.note-list::-webkit-scrollbar { width: 0; }
+	.note-list:hover { scrollbar-width: thin; scrollbar-color: var(--border-md) transparent; }
+	.note-list:hover::-webkit-scrollbar { width: 5px; }
+	.note-list:hover::-webkit-scrollbar-thumb { background: var(--border-md); }
+	.note-list:hover::-webkit-scrollbar-track { background: transparent; }
 
 	.note-item {
 		position: relative;
