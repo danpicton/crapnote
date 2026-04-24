@@ -62,17 +62,7 @@
 		}
 	}
 
-	let themeChoice = $derived(theme.current);
-
-	function setTheme(t: 'light' | 'dark' | 'system') {
-		if (t === 'system') {
-			const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-			if (prefersDark && theme.current === 'light') theme.toggle();
-			if (!prefersDark && theme.current === 'dark') theme.toggle();
-		} else if (t !== theme.current) {
-			theme.toggle();
-		}
-	}
+	let themeLabel = $derived(theme.current === 'light' ? 'Enable dark mode' : 'Enable light mode');
 </script>
 
 <svelte:head>
@@ -166,11 +156,7 @@
 				<p>How Crapnote looks on this device.</p>
 			</div>
 			<div class="section-body">
-				<div class="segmented">
-					<button class="seg-btn" class:seg-active={themeChoice === 'light'} onclick={() => setTheme('light')}>Light</button>
-					<button class="seg-btn" class:seg-active={themeChoice === 'dark'} onclick={() => setTheme('dark')}>Dark</button>
-					<button class="seg-btn" onclick={() => setTheme('system')}>System</button>
-				</div>
+				<button class="btn-default" onclick={() => theme.toggle()}>{themeLabel}</button>
 			</div>
 		</section>
 
@@ -380,26 +366,7 @@
 		font-family: var(--sans);
 	}
 
-	/* Segmented control for theme */
-	.segmented {
-		display: inline-flex;
-		border: 1px solid var(--border-md);
-	}
-	.seg-btn {
-		font-family: var(--sans);
-		font-size: 0.8125rem;
-		padding: 0.5rem 1.125rem;
-		background: var(--bg);
-		color: var(--text);
-		border: none;
-		border-left: 1px solid var(--border-md);
-		cursor: pointer;
-	}
-	.seg-btn:first-child { border-left: none; }
-	.seg-btn:hover:not(.seg-active) { background: var(--bg-hover); }
-	.seg-active { background: var(--text); color: var(--bg); }
-
-	.account-info { font-size: 0.875rem; color: var(--text); margin: 0; font-family: var(--sans); }
+.account-info { font-size: 0.875rem; color: var(--text); margin: 0; font-family: var(--sans); }
 	.account-name { font-family: var(--serif); font-size: 1rem; font-weight: 600; }
 	.account-meta { color: var(--text-3); font-size: 0.8125rem; margin-left: 0.5rem; }
 

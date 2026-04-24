@@ -540,6 +540,24 @@
 		}
 	}
 
+	let tagFilterEl = $state<HTMLDivElement | null>(null);
+	let tagFilterExpanded = $state(false);
+	let tagFilterScrollable = $state(false);
+
+	function onTagFilterMouseEnter() {
+		if (isMobile()) return;
+		tagFilterExpanded = true;
+	}
+	function onTagFilterMouseLeave() {
+		if (isMobile()) return;
+		tagFilterScrollable = false;
+		tagFilterExpanded = false;
+		if (tagFilterEl) tagFilterEl.scrollTop = 0;
+	}
+	function onTagFilterTransitionEnd() {
+		if (tagFilterExpanded) tagFilterScrollable = true;
+	}
+
 	async function applyFilter(tagId: number | null, starred: boolean) {
 		activeTagId = tagId;
 		starredOnly = starred;
@@ -824,6 +842,30 @@
 						onclick={() => { filterByTag(activeTagId === tag.id ? null : tag.id); showTagsPanel = false; }}
 						title="{tag.name} ({tag.note_count})"
 					><span class="tag-dot" style="background:{c.text}"></span>{tag.name}</button>
+				{/each}
+			</div>
+		{/if}
+		{#if visibleTags.length > 0}
+			<div
+				class="filter-tags"
+				class:expanded={tagFilterExpanded}
+				class:scrollable={tagFilterScrollable}
+				bind:this={tagFilterEl}
+				role="group"
+				aria-label="Tag filters"
+				onmouseenter={onTagFilterMouseEnter}
+				onmouseleave={onTagFilterMouseLeave}
+				ontransitionend={onTagFilterTransitionEnd}
+			>
+				{#each visibleTags as tag (tag.id)}
+					{@const c = tagColor(tag)}
+					<button
+						class="tag-pill"
+						class:tag-pill-active={activeTagId === tag.id}
+						style="--tag-bg:{c.bg};--tag-text:{c.text}"
+						onclick={() => filterByTag(activeTagId === tag.id ? null : tag.id)}
+						title="{tag.name} ({tag.note_count})"
+					>{tag.name}</button>
 				{/each}
 			</div>
 		{/if}
@@ -1186,6 +1228,9 @@
 	}
 	.tag-panel-item:hover { color: var(--text); background: var(--bg-active); }
 	.tag-panel-active { color: var(--text) !important; background: var(--bg-active) !important; border-color: var(--border-md) !important; }
+
+	.filter-tags { height: 0; overflow: hidden; pointer-events: none; }
+	.filter-tags.expanded { height: auto; pointer-events: auto; }
 
 	.tag-dot {
 		display: inline-block;
