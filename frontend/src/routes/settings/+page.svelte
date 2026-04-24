@@ -11,6 +11,7 @@
 
 	let currentPassword = $state('');
 	let newPassword = $state('');
+	let newPasswordConfirm = $state('');
 	let pwError = $state('');
 	let pwSuccess = $state('');
 	let pwSubmitting = $state(false);
@@ -37,12 +38,17 @@
 			pwError = 'New password must be at least 12 characters.';
 			return;
 		}
+		if (newPassword !== newPasswordConfirm) {
+			pwError = 'New passwords do not match.';
+			return;
+		}
 		pwSubmitting = true;
 		try {
 			await api.auth.changePassword(currentPassword, newPassword);
 			pwSuccess = 'Password updated.';
 			currentPassword = '';
 			newPassword = '';
+			newPasswordConfirm = '';
 		} catch (err) {
 			if (err instanceof ApiError && err.status === 403) {
 				pwError = 'Current password is incorrect.';
@@ -120,6 +126,16 @@
 					id="new-password"
 					autocomplete="new-password"
 					bind:value={newPassword}
+					disabled={pwSubmitting}
+					required
+				/>
+			</div>
+			<div class="pw-row">
+				<label for="new-password-confirm">Confirm new password</label>
+				<PasswordInput
+					id="new-password-confirm"
+					autocomplete="new-password"
+					bind:value={newPasswordConfirm}
 					disabled={pwSubmitting}
 					required
 				/>

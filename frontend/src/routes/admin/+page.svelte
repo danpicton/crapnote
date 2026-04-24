@@ -20,6 +20,7 @@
 	let loading = $state(true);
 	let newUsername = $state('');
 	let newPassword = $state('');
+	let newPasswordConfirm = $state('');
 	let newIsAdmin = $state(false);
 	let createError = $state('');
 
@@ -46,6 +47,10 @@
 	async function createUser(e: Event) {
 		e.preventDefault();
 		createError = '';
+		if (newPassword !== newPasswordConfirm) {
+			createError = 'Passwords do not match.';
+			return;
+		}
 		const res = await fetch('/api/admin/users', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
@@ -55,6 +60,7 @@
 		if (res.ok) {
 			newUsername = '';
 			newPassword = '';
+			newPasswordConfirm = '';
 			newIsAdmin = false;
 			await loadUsers();
 		} else {
@@ -161,12 +167,21 @@
 					required
 				/>
 			</div>
+			<div class="pw-field">
+				<PasswordInput
+					id="new-user-password-confirm"
+					placeholder="Confirm password"
+					autocomplete="new-password"
+					bind:value={newPasswordConfirm}
+					required
+				/>
+			</div>
 			<label class="checkbox-label">
 				<input type="checkbox" bind:checked={newIsAdmin} />
 				Admin
 			</label>
-			<button type="submit" class="icon-btn create" title="Create user" aria-label="Create user">
-				<UserPlus size={16} />
+			<button type="submit" class="create-btn" title="Create user" aria-label="Create user">
+				<UserPlus size={16} /> Create user
 			</button>
 		</form>
 	</section>
@@ -331,8 +346,19 @@
 		background: transparent;
 	}
 
-	.icon-btn.create { color: var(--accent); }
-	.icon-btn.create:hover { background: var(--accent-lt); }
+	.create-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.375rem;
+		padding: 0.375rem 0.875rem;
+		border: 1px solid var(--accent);
+		border-radius: 0.375rem;
+		background: var(--accent);
+		color: white;
+		font-size: 0.875rem;
+		cursor: pointer;
+	}
+	.create-btn:hover { background: var(--accent-dk); }
 
 	.icon-btn.delete { color: var(--danger); }
 	.icon-btn.delete:hover { background: var(--danger-bg); }

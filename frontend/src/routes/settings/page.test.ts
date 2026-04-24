@@ -87,14 +87,17 @@ describe('Settings — Change password', () => {
 		expect(screen.getByRole('heading', { name: /change password/i })).toBeInTheDocument();
 	});
 
-	it('calls api.auth.changePassword on submit', async () => {
+	it('calls api.auth.changePassword when both fields match', async () => {
 		mockApi.auth.changePassword.mockResolvedValueOnce(undefined);
 		render(SettingsPage);
 
 		await fireEvent.input(screen.getByLabelText(/current password/i), {
 			target: { value: 'oldpassword12' },
 		});
-		await fireEvent.input(screen.getByLabelText(/new password/i), {
+		await fireEvent.input(screen.getByLabelText('New password'), {
+			target: { value: 'newpassword345' },
+		});
+		await fireEvent.input(screen.getByLabelText(/confirm new password/i), {
 			target: { value: 'newpassword345' },
 		});
 		await fireEvent.click(screen.getByRole('button', { name: /update password/i }));
@@ -102,6 +105,26 @@ describe('Settings — Change password', () => {
 		await waitFor(() => {
 			expect(mockApi.auth.changePassword).toHaveBeenCalledWith('oldpassword12', 'newpassword345');
 		});
+	});
+
+	it('rejects when the new password and confirmation differ', async () => {
+		render(SettingsPage);
+
+		await fireEvent.input(screen.getByLabelText(/current password/i), {
+			target: { value: 'oldpassword12' },
+		});
+		await fireEvent.input(screen.getByLabelText('New password'), {
+			target: { value: 'newpassword345' },
+		});
+		await fireEvent.input(screen.getByLabelText(/confirm new password/i), {
+			target: { value: 'something-else' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /update password/i }));
+
+		await waitFor(() => {
+			expect(screen.getByRole('alert').textContent).toMatch(/match/i);
+		});
+		expect(mockApi.auth.changePassword).not.toHaveBeenCalled();
 	});
 
 	it('shows an error when the current password is wrong', async () => {
@@ -112,7 +135,10 @@ describe('Settings — Change password', () => {
 		await fireEvent.input(screen.getByLabelText(/current password/i), {
 			target: { value: 'wrong12345678' },
 		});
-		await fireEvent.input(screen.getByLabelText(/new password/i), {
+		await fireEvent.input(screen.getByLabelText('New password'), {
+			target: { value: 'newpassword345' },
+		});
+		await fireEvent.input(screen.getByLabelText(/confirm new password/i), {
 			target: { value: 'newpassword345' },
 		});
 		await fireEvent.click(screen.getByRole('button', { name: /update password/i }));
@@ -127,7 +153,10 @@ describe('Settings — Change password', () => {
 		await fireEvent.input(screen.getByLabelText(/current password/i), {
 			target: { value: 'oldpassword12' },
 		});
-		await fireEvent.input(screen.getByLabelText(/new password/i), {
+		await fireEvent.input(screen.getByLabelText('New password'), {
+			target: { value: 'short' },
+		});
+		await fireEvent.input(screen.getByLabelText(/confirm new password/i), {
 			target: { value: 'short' },
 		});
 		await fireEvent.click(screen.getByRole('button', { name: /update password/i }));

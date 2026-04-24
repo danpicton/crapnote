@@ -140,23 +140,52 @@ describe('Admin page', () => {
 		).toBeFalsy();
 	});
 
-	it('calls POST /api/admin/users on create', async () => {
+	it('calls POST /api/admin/users on create when password and confirm match', async () => {
 		mockFetch
 			.mockResolvedValueOnce(ok(mockUsers)) // initial list
 			.mockResolvedValueOnce(ok({ id: 3, username: 'bob', is_admin: false, created_at: '' })) // create
 			.mockResolvedValueOnce(ok([...mockUsers, { id: 3, username: 'bob', is_admin: false, created_at: '' }])); // refresh
 
 		render(AdminPage);
-		await waitFor(() => screen.getByPlaceholderText(/username/i));
+		await waitFor(() => screen.getByPlaceholderText(/^username$/i));
 
-		await fireEvent.input(screen.getByPlaceholderText(/username/i), { target: { value: 'bob' } });
-		await fireEvent.input(screen.getByPlaceholderText(/password/i), { target: { value: 'pass123' } });
-		await fireEvent.click(screen.getByRole('button', { name: /create/i }));
+		await fireEvent.input(screen.getByPlaceholderText(/^username$/i), { target: { value: 'bob' } });
+		await fireEvent.input(screen.getByPlaceholderText(/^password$/i), {
+			target: { value: 'correct-horse-battery' },
+		});
+		await fireEvent.input(screen.getByPlaceholderText(/confirm password/i), {
+			target: { value: 'correct-horse-battery' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /create user/i }));
 
 		await waitFor(() => {
-			const calls = mockFetch.mock.calls;
-			const createCall = calls.find((c) => c[1]?.method === 'POST');
+			const createCall = mockFetch.mock.calls.find(
+				(c) => c[1]?.method === 'POST' && typeof c[0] === 'string' && c[0].endsWith('/api/admin/users'),
+			);
 			expect(createCall).toBeTruthy();
 		});
+	});
+
+	it('shows a mismatch error and skips create when the two password fields differ', async () => {
+		mockFetch.mockResolvedValueOnce(ok(mockUsers));
+
+		render(AdminPage);
+		await waitFor(() => screen.getByPlaceholderText(/^username$/i));
+
+		await fireEvent.input(screen.getByPlaceholderText(/^username$/i), { target: { value: 'bob' } });
+		await fireEvent.input(screen.getByPlaceholderText(/^password$/i), {
+			target: { value: 'correct-horse-battery' },
+		});
+		await fireEvent.input(screen.getByPlaceholderText(/confirm password/i), {
+			target: { value: 'different-pw-1234567' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /create user/i }));
+
+		expect(screen.getByRole('alert').textContent).toMatch(/match/i);
+		expect(
+			mockFetch.mock.calls.find(
+				(c) => c[1]?.method === 'POST' && typeof c[0] === 'string' && c[0].endsWith('/api/admin/users'),
+			),
+		).toBeFalsy();
 	});
 });
