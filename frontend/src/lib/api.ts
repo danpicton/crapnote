@@ -6,6 +6,12 @@ export interface User {
 	created_at: string;
 }
 
+export interface InviteResult {
+	user: User & { pending_setup: boolean };
+	setup_url: string;
+	expires_at: string;
+}
+
 export interface ApiToken {
 	id: number;
 	name: string;
@@ -86,6 +92,11 @@ export const api = {
 			request<User>('POST', '/api/auth/login', { username, password }),
 		logout: () => request<void>('POST', '/api/auth/logout'),
 		me: () => request<User>('GET', '/api/auth/me'),
+		changePassword: (currentPassword: string, newPassword: string) =>
+			request<void>('POST', '/api/auth/password', {
+				current_password: currentPassword,
+				new_password: newPassword,
+			}),
 	},
 
 	notes: {
@@ -130,6 +141,26 @@ export const api = {
 	admin: {
 		setApiTokensEnabled: (userId: number, enabled: boolean) =>
 			request<User>('PATCH', `/api/admin/users/${userId}/api-tokens`, { enabled }),
+		setPassword: (userId: number, password: string) =>
+			request<void>('PUT', `/api/admin/users/${userId}/password`, { password }),
+		lockUser: (userId: number) =>
+			request<User>('POST', `/api/admin/users/${userId}/lock`),
+		unlockUser: (userId: number) =>
+			request<User>('POST', `/api/admin/users/${userId}/unlock`),
+		inviteUser: (username: string, isAdmin: boolean) =>
+			request<InviteResult>('POST', '/api/admin/users/invite', {
+				username,
+				is_admin: isAdmin,
+			}),
+		regenerateInvite: (userId: number) =>
+			request<InviteResult>('POST', `/api/admin/users/${userId}/invite`),
+	},
+
+	setup: {
+		get: (token: string) =>
+			request<{ username: string; expires_at: string }>('GET', `/api/setup/${encodeURIComponent(token)}`),
+		complete: (token: string, password: string) =>
+			request<void>('POST', `/api/setup/${encodeURIComponent(token)}`, { password }),
 	},
 
 	trash: {

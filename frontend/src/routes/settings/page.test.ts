@@ -1,6 +1,19 @@
-import { render, screen, fireEvent } from '@testing-library/svelte';
-import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import SettingsPage from './+page.svelte';
+
+const mockApi = vi.hoisted(() => ({
+	auth: { changePassword: vi.fn() },
+	tokens: { list: vi.fn().mockResolvedValue([]) },
+}));
+vi.mock('$lib/api', () => ({
+	api: mockApi,
+	ApiError: class ApiError extends Error {
+		constructor(public status: number, message: string) {
+			super(message);
+		}
+	},
+}));
 
 vi.mock('$lib/stores/auth.svelte', () => ({
 	auth: { user: { id: 1, username: 'alice', is_admin: false, created_at: '' } },
@@ -61,5 +74,96 @@ describe('Settings — Appearance', () => {
 		render(SettingsPage);
 		await fireEvent.click(screen.getByRole('button', { name: /enable dark mode/i }));
 		expect(mockTheme.toggle).toHaveBeenCalledOnce();
+	});
+});
+
+describe('Settings — Change password', () => {
+	beforeEach(() => {
+		mockApi.auth.changePassword.mockReset();
+	});
+
+	it('shows a change password section', () => {
+		render(SettingsPage);
+		expect(screen.getByRole('heading', { name: /change password/i })).toBeInTheDocument();
+	});
+
+	it('calls api.auth.changePassword when both fields match', async () => {
+		mockApi.auth.changePassword.mockResolvedValueOnce(undefined);
+		render(SettingsPage);
+
+		await fireEvent.input(screen.getByLabelText(/current password/i), {
+			target: { value: 'oldpassword12' },
+		});
+		await fireEvent.input(screen.getByLabelText('New password'), {
+			target: { value: 'newpassword345' },
+		});
+		await fireEvent.input(screen.getByLabelText(/confirm new password/i), {
+			target: { value: 'newpassword345' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /update password/i }));
+
+		await waitFor(() => {
+			expect(mockApi.auth.changePassword).toHaveBeenCalledWith('oldpassword12', 'newpassword345');
+		});
+	});
+
+	it('rejects when the new password and confirmation differ', async () => {
+		render(SettingsPage);
+
+		await fireEvent.input(screen.getByLabelText(/current password/i), {
+			target: { value: 'oldpassword12' },
+		});
+		await fireEvent.input(screen.getByLabelText('New password'), {
+			target: { value: 'newpassword345' },
+		});
+		await fireEvent.input(screen.getByLabelText(/confirm new password/i), {
+			target: { value: 'something-else' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /update password/i }));
+
+		await waitFor(() => {
+			expect(screen.getByRole('alert').textContent).toMatch(/match/i);
+		});
+		expect(mockApi.auth.changePassword).not.toHaveBeenCalled();
+	});
+
+	it('shows an error when the current password is wrong', async () => {
+		const { ApiError } = await import('$lib/api');
+		mockApi.auth.changePassword.mockRejectedValueOnce(new ApiError(403, '{}'));
+		render(SettingsPage);
+
+		await fireEvent.input(screen.getByLabelText(/current password/i), {
+			target: { value: 'wrong12345678' },
+		});
+		await fireEvent.input(screen.getByLabelText('New password'), {
+			target: { value: 'newpassword345' },
+		});
+		await fireEvent.input(screen.getByLabelText(/confirm new password/i), {
+			target: { value: 'newpassword345' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /update password/i }));
+
+		await waitFor(() => {
+			expect(screen.getByRole('alert').textContent).toMatch(/incorrect/i);
+		});
+	});
+
+	it('rejects new passwords shorter than 12 characters client-side', async () => {
+		render(SettingsPage);
+		await fireEvent.input(screen.getByLabelText(/current password/i), {
+			target: { value: 'oldpassword12' },
+		});
+		await fireEvent.input(screen.getByLabelText('New password'), {
+			target: { value: 'short' },
+		});
+		await fireEvent.input(screen.getByLabelText(/confirm new password/i), {
+			target: { value: 'short' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /update password/i }));
+
+		await waitFor(() => {
+			expect(screen.getByRole('alert').textContent).toMatch(/12 characters/i);
+		});
+		expect(mockApi.auth.changePassword).not.toHaveBeenCalled();
 	});
 });

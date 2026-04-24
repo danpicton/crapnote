@@ -54,6 +54,7 @@ func newTestMux(t *testing.T) *http.ServeMux {
 	return newMux(
 		authH,
 		auth.NewAdminHandler(userRepo),
+		auth.NewSetupHandler(authSvc),
 		notes.NewHandler(notesSvc),
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
@@ -88,6 +89,7 @@ func newAuthedMux(t *testing.T) (*http.ServeMux, *http.Cookie) {
 	mux := newMux(
 		authH,
 		auth.NewAdminHandler(userRepo),
+		auth.NewSetupHandler(authSvc),
 		notes.NewHandler(notesSvc),
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
@@ -237,6 +239,7 @@ func TestLogin_RateLimited(t *testing.T) {
 	mux := newMux(
 		authH,
 		auth.NewAdminHandler(userRepo),
+		auth.NewSetupHandler(authSvc),
 		notes.NewHandler(notesSvc),
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),

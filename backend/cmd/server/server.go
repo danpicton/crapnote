@@ -18,6 +18,7 @@ import (
 func newMux(
 	authHandler    *auth.Handler,
 	adminHandler   *auth.AdminHandler,
+	setupHandler   *auth.SetupHandler,
 	notesHandler   *notes.Handler,
 	tagsHandler    *tags.Handler,
 	trashHandler   *trash.Handler,
@@ -75,10 +76,29 @@ func newMux(
 	admin("POST", "/api/admin/users", adminHandler.CreateUser)
 	admin("DELETE", "/api/admin/users/{id}", adminHandler.DeleteUser)
 	admin("PATCH", "/api/admin/users/{id}/api-tokens", adminHandler.SetAPITokensEnabled)
+	admin("PUT", "/api/admin/users/{id}/password", adminHandler.SetUserPassword)
+	admin("POST", "/api/admin/users/{id}/lock", adminHandler.LockUser)
+	admin("POST", "/api/admin/users/{id}/unlock", adminHandler.UnlockUser)
+	admin("POST", "/api/admin/users/invite", adminHandler.InviteUser)
+	admin("POST", "/api/admin/users/{id}/invite", adminHandler.RegenerateInvite)
+
+	// Public — setup-token flow. Rate-limited by IP so the token's 256 bits
+	// of entropy plus the limiter make brute force infeasible.
+	setupLimited := func(h http.HandlerFunc) http.Handler {
+		return ratelimit.Middleware(loginLimiter, ratelimit.ClientIP)(h)
+	}
+	mux.Handle("GET /api/setup/{token}", setupLimited(setupHandler.Get))
+	mux.Handle("POST /api/setup/{token}", setupLimited(setupHandler.Complete))
 
 	// Auth
 	protected("POST", "/api/auth/logout", authHandler.Logout)
 	protected("GET", "/api/auth/me", authHandler.Me)
+	// Changing your own password is gated behind cookie auth: a leaked read-write
+	// bearer token must not be able to hijack the account by changing the
+	// password.
+	mux.Handle("POST /api/auth/password",
+		bearerRateLimit(authHandler.RequireAuth(cookieOnly(authHandler.ChangePassword))),
+	)
 
 	// API tokens (user-facing). List/Revoke are safe over read scope; Create
 	// requires cookie auth — you can't bootstrap new tokens from a token.

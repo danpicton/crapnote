@@ -32,8 +32,16 @@ describe('Login page', () => {
 	it('renders username and password fields', () => {
 		render(LoginPage);
 		expect(screen.getByLabelText(/username/i)).toBeInTheDocument();
-		expect(screen.getByLabelText(/password/i)).toBeInTheDocument();
+		expect(screen.getByLabelText('Password')).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: /log in/i })).toBeInTheDocument();
+	});
+
+	it('has a show-password toggle that reveals the password', async () => {
+		render(LoginPage);
+		const field = screen.getByLabelText('Password') as HTMLInputElement;
+		expect(field.type).toBe('password');
+		await fireEvent.click(screen.getByRole('button', { name: /show password/i }));
+		expect(field.type).toBe('text');
 	});
 
 	it('calls api.auth.login with form values on submit', async () => {
@@ -47,7 +55,7 @@ describe('Login page', () => {
 		render(LoginPage);
 
 		await fireEvent.input(screen.getByLabelText(/username/i), { target: { value: 'alice' } });
-		await fireEvent.input(screen.getByLabelText(/password/i), { target: { value: 'secret' } });
+		await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'secret' } });
 		await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
 
 		await waitFor(() => {
@@ -66,11 +74,28 @@ describe('Login page', () => {
 		render(LoginPage);
 
 		await fireEvent.input(screen.getByLabelText(/username/i), { target: { value: 'alice' } });
-		await fireEvent.input(screen.getByLabelText(/password/i), { target: { value: 'secret' } });
+		await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'secret' } });
 		await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
 
 		await waitFor(() => {
 			expect(goto).toHaveBeenCalledWith('/');
+		});
+	});
+
+	it('shows a locked-account message on 403', async () => {
+		const { ApiError } = await import('$lib/api');
+		vi.mocked(api.auth.login).mockRejectedValueOnce(
+			new ApiError(403, '{"error":"account locked"}')
+		);
+
+		render(LoginPage);
+
+		await fireEvent.input(screen.getByLabelText(/username/i), { target: { value: 'alice' } });
+		await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'right' } });
+		await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
+
+		await waitFor(() => {
+			expect(screen.getByRole('alert').textContent).toMatch(/locked/i);
 		});
 	});
 
@@ -83,7 +108,7 @@ describe('Login page', () => {
 		render(LoginPage);
 
 		await fireEvent.input(screen.getByLabelText(/username/i), { target: { value: 'alice' } });
-		await fireEvent.input(screen.getByLabelText(/password/i), { target: { value: 'wrong' } });
+		await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'wrong' } });
 		await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
 
 		await waitFor(() => {

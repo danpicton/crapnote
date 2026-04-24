@@ -87,6 +87,210 @@ func TestUserRepo_Count(t *testing.T) {
 	}
 }
 
+// ── Lockout ──────────────────────────────────────────────────────────────────
+
+func TestUserRepo_NewUser_HasZeroFailedAttemptsAndNoLock(t *testing.T) {
+	repo := auth.NewUserRepo(openTestDB(t))
+	ctx := context.Background()
+
+	u, err := repo.Create(ctx, "alice", "hash", false)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if u.FailedLoginAttempts != 0 {
+		t.Fatalf("expected 0 failed attempts, got %d", u.FailedLoginAttempts)
+	}
+	if u.LockedAt != nil {
+		t.Fatalf("expected no lock, got %v", u.LockedAt)
+	}
+}
+
+func TestUserRepo_IncrementFailedAttempts(t *testing.T) {
+	repo := auth.NewUserRepo(openTestDB(t))
+	ctx := context.Background()
+
+	u, _ := repo.Create(ctx, "alice", "hash", false)
+
+	n, err := repo.IncrementFailedAttempts(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("IncrementFailedAttempts: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 after first increment, got %d", n)
+	}
+
+	n, _ = repo.IncrementFailedAttempts(ctx, u.ID)
+	if n != 2 {
+		t.Fatalf("expected 2, got %d", n)
+	}
+
+	got, _ := repo.FindByID(ctx, u.ID)
+	if got.FailedLoginAttempts != 2 {
+		t.Fatalf("persisted count mismatch: %d", got.FailedLoginAttempts)
+	}
+}
+
+func TestUserRepo_ResetFailedAttempts(t *testing.T) {
+	repo := auth.NewUserRepo(openTestDB(t))
+	ctx := context.Background()
+
+	u, _ := repo.Create(ctx, "alice", "hash", false)
+	repo.IncrementFailedAttempts(ctx, u.ID) //nolint:errcheck
+	repo.IncrementFailedAttempts(ctx, u.ID) //nolint:errcheck
+
+	if err := repo.ResetFailedAttempts(ctx, u.ID); err != nil {
+		t.Fatalf("ResetFailedAttempts: %v", err)
+	}
+
+	got, _ := repo.FindByID(ctx, u.ID)
+	if got.FailedLoginAttempts != 0 {
+		t.Fatalf("expected 0, got %d", got.FailedLoginAttempts)
+	}
+}
+
+func TestUserRepo_Lock_SetsLockedAt(t *testing.T) {
+	repo := auth.NewUserRepo(openTestDB(t))
+	ctx := context.Background()
+
+	u, _ := repo.Create(ctx, "alice", "hash", false)
+	if err := repo.Lock(ctx, u.ID); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	got, _ := repo.FindByID(ctx, u.ID)
+	if got.LockedAt == nil {
+		t.Fatal("expected LockedAt to be set")
+	}
+	if got.LockedAt.IsZero() {
+		t.Fatal("expected LockedAt to be a real time")
+	}
+}
+
+func TestUserRepo_Unlock_ClearsLockAndAttempts(t *testing.T) {
+	repo := auth.NewUserRepo(openTestDB(t))
+	ctx := context.Background()
+
+	u, _ := repo.Create(ctx, "alice", "hash", false)
+	repo.IncrementFailedAttempts(ctx, u.ID) //nolint:errcheck
+	repo.Lock(ctx, u.ID)                    //nolint:errcheck
+
+	if err := repo.Unlock(ctx, u.ID); err != nil {
+		t.Fatalf("Unlock: %v", err)
+	}
+
+	got, _ := repo.FindByID(ctx, u.ID)
+	if got.LockedAt != nil {
+		t.Fatalf("expected LockedAt cleared, got %v", got.LockedAt)
+	}
+	if got.FailedLoginAttempts != 0 {
+		t.Fatalf("expected 0 attempts after unlock, got %d", got.FailedLoginAttempts)
+	}
+}
+
+// ── Invite repository ────────────────────────────────────────────────────────
+
+func TestInviteRepo_CreateAndFind(t *testing.T) {
+	database := openTestDB(t)
+	users := auth.NewUserRepo(database)
+	invites := auth.NewInviteRepo(database)
+	ctx := context.Background()
+
+	u, _ := users.Create(ctx, "alice", "hash", false)
+	exp := time.Now().Add(7 * 24 * time.Hour).UTC().Truncate(time.Second)
+
+	inv, err := invites.Create(ctx, u.ID, "hash-of-token", exp)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if inv.ID == 0 {
+		t.Fatal("expected non-zero id")
+	}
+	if inv.UserID != u.ID {
+		t.Fatalf("user_id mismatch: %d", inv.UserID)
+	}
+
+	got, err := invites.FindByTokenHash(ctx, "hash-of-token")
+	if err != nil {
+		t.Fatalf("FindByTokenHash: %v", err)
+	}
+	if got.ID != inv.ID {
+		t.Fatalf("id mismatch")
+	}
+}
+
+func TestInviteRepo_FindByTokenHash_NotFound(t *testing.T) {
+	invites := auth.NewInviteRepo(openTestDB(t))
+	if _, err := invites.FindByTokenHash(context.Background(), "nope"); err != auth.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestInviteRepo_Delete(t *testing.T) {
+	database := openTestDB(t)
+	users := auth.NewUserRepo(database)
+	invites := auth.NewInviteRepo(database)
+	ctx := context.Background()
+
+	u, _ := users.Create(ctx, "alice", "hash", false)
+	inv, _ := invites.Create(ctx, u.ID, "h", time.Now().Add(time.Hour).UTC())
+
+	if err := invites.Delete(ctx, inv.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := invites.FindByTokenHash(ctx, "h"); err != auth.ErrNotFound {
+		t.Fatalf("expected invite to be gone, got %v", err)
+	}
+}
+
+func TestInviteRepo_DeleteForUser(t *testing.T) {
+	database := openTestDB(t)
+	users := auth.NewUserRepo(database)
+	invites := auth.NewInviteRepo(database)
+	ctx := context.Background()
+
+	u, _ := users.Create(ctx, "alice", "hash", false)
+	invites.Create(ctx, u.ID, "a", time.Now().Add(time.Hour).UTC()) //nolint:errcheck
+	invites.Create(ctx, u.ID, "b", time.Now().Add(time.Hour).UTC()) //nolint:errcheck
+
+	if err := invites.DeleteForUser(ctx, u.ID); err != nil {
+		t.Fatalf("DeleteForUser: %v", err)
+	}
+	if _, err := invites.FindByTokenHash(ctx, "a"); err != auth.ErrNotFound {
+		t.Fatal("a not deleted")
+	}
+	if _, err := invites.FindByTokenHash(ctx, "b"); err != auth.ErrNotFound {
+		t.Fatal("b not deleted")
+	}
+}
+
+func TestInviteRepo_HasActiveForUser(t *testing.T) {
+	database := openTestDB(t)
+	users := auth.NewUserRepo(database)
+	invites := auth.NewInviteRepo(database)
+	ctx := context.Background()
+
+	u, _ := users.Create(ctx, "alice", "hash", false)
+
+	has, _ := invites.HasActiveForUser(ctx, u.ID)
+	if has {
+		t.Fatal("expected no active invite")
+	}
+
+	// Expired invite shouldn't count.
+	invites.Create(ctx, u.ID, "expired", time.Now().Add(-time.Hour).UTC()) //nolint:errcheck
+	has, _ = invites.HasActiveForUser(ctx, u.ID)
+	if has {
+		t.Fatal("expired invite should not count as active")
+	}
+
+	// Future invite should.
+	invites.Create(ctx, u.ID, "fresh", time.Now().Add(time.Hour).UTC()) //nolint:errcheck
+	has, _ = invites.HasActiveForUser(ctx, u.ID)
+	if !has {
+		t.Fatal("expected active invite")
+	}
+}
+
 // ── Session repository ───────────────────────────────────────────────────────
 
 func TestSessionRepo_CreateAndFind(t *testing.T) {

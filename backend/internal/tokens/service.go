@@ -150,6 +150,11 @@ func (s *Service) Verify(ctx context.Context, raw string) (*VerifiedToken, error
 		return nil, ErrInvalidToken
 	}
 
+	// A locked account's tokens stop working until the account is unlocked.
+	if user.LockedAt != nil {
+		return nil, ErrInvalidToken
+	}
+
 	return &VerifiedToken{TokenID: tok.ID, User: user, Scope: tok.Scope}, nil
 }
 

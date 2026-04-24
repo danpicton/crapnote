@@ -179,6 +179,24 @@ func TestService_Verify_RejectsWhenUserDisabled(t *testing.T) {
 	}
 }
 
+func TestService_Verify_RejectsWhenUserLocked(t *testing.T) {
+	f := newServiceFixture(t)
+	if err := f.users.SetAPITokensEnabled(t.Context(), f.user.ID, true); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	u, _ := f.users.FindByID(t.Context(), f.user.ID)
+	created, err := f.svc.Create(t.Context(), u, "cli", tokens.ScopeRead, 0)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := f.users.Lock(t.Context(), f.user.ID); err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	if _, err := f.svc.Verify(t.Context(), created.RawToken); err != tokens.ErrInvalidToken {
+		t.Fatalf("expected ErrInvalidToken for locked user, got %v", err)
+	}
+}
+
 func TestService_Revoke_OtherUsersToken_ReturnsNotFound(t *testing.T) {
 	f := newServiceFixture(t)
 	adminTok, _ := f.svc.Create(t.Context(), f.admin, "a", tokens.ScopeRead, 0)

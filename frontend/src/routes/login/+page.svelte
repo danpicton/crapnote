@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { ApiError } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
+	import PasswordInput from '$lib/components/PasswordInput.svelte';
 
 	let username = $state('');
 	let password = $state('');
@@ -17,7 +18,11 @@
 			goto('/');
 		} catch (err) {
 			if (err instanceof ApiError) {
-				error = 'Invalid username or password.';
+				if (err.status === 403) {
+					error = 'This account has been locked. Contact an administrator.';
+				} else {
+					error = 'Invalid username or password.';
+				}
 			} else {
 				error = 'An unexpected error occurred.';
 			}
@@ -52,9 +57,8 @@
 
 		<div class="field">
 			<label for="password">Password</label>
-			<input
+			<PasswordInput
 				id="password"
-				type="password"
 				autocomplete="current-password"
 				bind:value={password}
 				disabled={submitting}

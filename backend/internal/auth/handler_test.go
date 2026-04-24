@@ -28,6 +28,19 @@ func newTestHandler(t *testing.T) (*auth.Handler, *auth.Service) {
 	return auth.NewHandler(svc), svc
 }
 
+func newTestHandlerWithRepo(t *testing.T) (*auth.Handler, *auth.Service, *auth.UserRepo) {
+	t.Helper()
+	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	users := auth.NewUserRepo(database)
+	svc := auth.NewService(users, auth.NewSessionRepo(database), 7*24*time.Hour)
+	return auth.NewHandler(svc), svc, users
+}
+
 func TestHandler_Login_Success(t *testing.T) {
 	h, svc := newTestHandler(t)
 	svc.SeedAdmin(t.Context(), "admin", "pass") //nolint:errcheck
@@ -138,6 +151,26 @@ func TestHandler_Login_BadCredentials(t *testing.T) {
 	}
 }
 
+func TestHandler_Login_LockedAccount_Returns403(t *testing.T) {
+	h, svc, users := newTestHandlerWithRepo(t)
+	createUser(t, users, "alice", "correctpass", false)
+
+	// Three failed attempts → locked.
+	for i := 0; i < 3; i++ {
+		svc.Login(t.Context(), "alice", "wrong") //nolint:errcheck
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+		bytes.NewBufferString(`{"username":"alice","password":"correctpass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.Login(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for locked account, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestHandler_Me(t *testing.T) {
 	h, svc := newTestHandler(t)
 	svc.SeedAdmin(t.Context(), "admin", "pass") //nolint:errcheck
@@ -167,6 +200,75 @@ func TestHandler_Me(t *testing.T) {
 	}
 	if _, ok := resp["api_tokens_enabled"]; !ok {
 		t.Fatalf("expected api_tokens_enabled in response, got %v", resp)
+	}
+}
+
+func TestHandler_ChangePassword_Success(t *testing.T) {
+	h, svc, users := newTestHandlerWithRepo(t)
+	u := createUser(t, users, "alice", "currentpass123", false)
+
+	body := `{"current_password":"currentpass123","new_password":"brandnewpass456"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithUser(req.Context(), u))
+	w := httptest.NewRecorder()
+	h.ChangePassword(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// New password works.
+	if _, err := svc.Login(t.Context(), "alice", "brandnewpass456"); err != nil {
+		t.Fatalf("new password should work: %v", err)
+	}
+	// Old password no longer works.
+	if _, err := svc.Login(t.Context(), "alice", "currentpass123"); err != auth.ErrInvalidCredentials {
+		t.Fatalf("old password should fail, got %v", err)
+	}
+}
+
+func TestHandler_ChangePassword_WrongCurrent_Returns403(t *testing.T) {
+	h, _, users := newTestHandlerWithRepo(t)
+	u := createUser(t, users, "alice", "currentpass123", false)
+
+	body := `{"current_password":"wrongpass","new_password":"brandnewpass456"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithUser(req.Context(), u))
+	w := httptest.NewRecorder()
+	h.ChangePassword(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandler_ChangePassword_ShortNew_Returns400(t *testing.T) {
+	h, _, users := newTestHandlerWithRepo(t)
+	u := createUser(t, users, "alice", "currentpass123", false)
+
+	body := `{"current_password":"currentpass123","new_password":"short"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(auth.WithUser(req.Context(), u))
+	w := httptest.NewRecorder()
+	h.ChangePassword(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestHandler_ChangePassword_Unauthenticated_Returns401(t *testing.T) {
+	h, _, _ := newTestHandlerWithRepo(t)
+	body := `{"current_password":"a","new_password":"brandnewpass456"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ChangePassword(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
 	}
 }
 

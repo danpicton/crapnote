@@ -3,8 +3,18 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import ApiTokens from '$lib/components/ApiTokens.svelte';
+	import PasswordInput from '$lib/components/PasswordInput.svelte';
+	import ShortcutEditor from '$lib/components/ShortcutEditor.svelte';
+	import { api, ApiError } from '$lib/api';
 
 	let exportPassword = $state('');
+
+	let currentPassword = $state('');
+	let newPassword = $state('');
+	let newPasswordConfirm = $state('');
+	let pwError = $state('');
+	let pwSuccess = $state('');
+	let pwSubmitting = $state(false);
 
 	const canCreateTokens = $derived(
 		!!auth.user && (auth.user.is_admin || !!auth.user.api_tokens_enabled),
@@ -18,6 +28,38 @@
 		a.href = url;
 		a.download = '';
 		a.click();
+	}
+
+	async function changePassword(e: Event) {
+		e.preventDefault();
+		pwError = '';
+		pwSuccess = '';
+		if (newPassword.length < 12) {
+			pwError = 'New password must be at least 12 characters.';
+			return;
+		}
+		if (newPassword !== newPasswordConfirm) {
+			pwError = 'New passwords do not match.';
+			return;
+		}
+		pwSubmitting = true;
+		try {
+			await api.auth.changePassword(currentPassword, newPassword);
+			pwSuccess = 'Password updated.';
+			currentPassword = '';
+			newPassword = '';
+			newPasswordConfirm = '';
+		} catch (err) {
+			if (err instanceof ApiError && err.status === 403) {
+				pwError = 'Current password is incorrect.';
+			} else if (err instanceof ApiError && err.status === 400) {
+				pwError = 'New password is not acceptable. Use at least 12 characters.';
+			} else {
+				pwError = 'Failed to update password.';
+			}
+		} finally {
+			pwSubmitting = false;
+		}
 	}
 </script>
 
@@ -58,6 +100,60 @@
 			</a>
 		</section>
 	{/if}
+
+	<section class="section">
+		<h2>Change password</h2>
+		{#if pwError}
+			<p role="alert" class="error">{pwError}</p>
+		{/if}
+		{#if pwSuccess}
+			<p role="status" class="success">{pwSuccess}</p>
+		{/if}
+		<form class="pw-form" onsubmit={changePassword}>
+			<div class="pw-row">
+				<label for="current-password">Current password</label>
+				<PasswordInput
+					id="current-password"
+					autocomplete="current-password"
+					bind:value={currentPassword}
+					disabled={pwSubmitting}
+					required
+				/>
+			</div>
+			<div class="pw-row">
+				<label for="new-password">New password</label>
+				<PasswordInput
+					id="new-password"
+					autocomplete="new-password"
+					bind:value={newPassword}
+					disabled={pwSubmitting}
+					required
+				/>
+			</div>
+			<div class="pw-row">
+				<label for="new-password-confirm">Confirm new password</label>
+				<PasswordInput
+					id="new-password-confirm"
+					autocomplete="new-password"
+					bind:value={newPasswordConfirm}
+					disabled={pwSubmitting}
+					required
+				/>
+			</div>
+			<button type="submit" class="pw-submit" disabled={pwSubmitting}>
+				{pwSubmitting ? 'Updating…' : 'Update password'}
+			</button>
+		</form>
+	</section>
+
+	<section class="section">
+		<h2>Keyboard shortcuts</h2>
+		<p class="hint">
+			Shortcuts are stored in this browser and apply only to your account.
+			Press <kbd>?</kbd> anywhere to view the cheat sheet.
+		</p>
+		<ShortcutEditor />
+	</section>
 
 	<section class="section">
 		<h2>Appearance</h2>
@@ -122,6 +218,15 @@
 	.section:last-child { border-bottom: none; }
 
 	.hint { font-size: 0.875rem; color: var(--text-3); margin: 0 0 0.75rem; }
+	.hint kbd {
+		padding: 0 0.35rem;
+		border: 1px solid var(--border-md);
+		border-radius: 0.25rem;
+		font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+		font-size: 0.8rem;
+		background: var(--bg-hover);
+		color: var(--text);
+	}
 
 	.export-row {
 		display: flex;
@@ -164,6 +269,40 @@
 		text-decoration: none;
 	}
 	.admin-btn:hover { background: var(--bg-hover); color: var(--text); }
+
+	.pw-form { display: flex; flex-direction: column; gap: 0.5rem; max-width: 24rem; }
+	.pw-row { display: flex; flex-direction: column; gap: 0.25rem; }
+	.pw-row label { font-size: 0.8125rem; color: var(--text-2); }
+	.pw-submit {
+		align-self: flex-start;
+		margin-top: 0.25rem;
+		padding: 0.375rem 0.875rem;
+		background: var(--accent);
+		color: white;
+		border: none;
+		border-radius: 0.375rem;
+		font-size: 0.875rem;
+		cursor: pointer;
+	}
+	.pw-submit:hover { background: var(--accent-dk); }
+	.pw-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+
+	.error {
+		color: var(--danger);
+		font-size: 0.875rem;
+		padding: 0.375rem 0.625rem;
+		background: var(--danger-bg);
+		border-radius: 0.375rem;
+		margin: 0 0 0.5rem;
+	}
+	.success {
+		color: var(--accent);
+		font-size: 0.875rem;
+		padding: 0.375rem 0.625rem;
+		background: var(--accent-lt);
+		border-radius: 0.375rem;
+		margin: 0 0 0.5rem;
+	}
 
 	.theme-btn {
 		display: inline-flex;

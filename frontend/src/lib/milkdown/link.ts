@@ -4,9 +4,10 @@
  * The commonmark preset already includes linkSchema, toggleLinkCommand, etc.
  * This plugin adds the interactive behaviours on top:
  *
- *  1. linkKeymapPlugin (Ctrl/Cmd+K)
+ *  1. linkKeymapPlugin (Ctrl/Cmd+Shift+K)
  *       - If selected text is a bare URL → apply link mark directly.
  *       - Otherwise → fire 'crapnote:insert-link' so Svelte shows the URL dialog.
+ *       (Ctrl/Cmd+K is reserved for focusing the app-wide search box.)
  *
  *  2. linkPasteRule ($pasteRule — runs inside Milkdown's paste pipeline)
  *       - Bare URL pasted with text selected → wrap selection in link.
@@ -52,7 +53,7 @@ export const linkKeymapPlugin = $prose(() =>
 			},
 
 			handleKeyDown(view: EditorView, event: KeyboardEvent): boolean {
-				if (!((event.ctrlKey || event.metaKey) && event.key === 'k')) return false;
+				if (!((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'k')) return false;
 				event.preventDefault();
 
 				const { state } = view;

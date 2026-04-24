@@ -44,13 +44,16 @@ func main() {
 
 	userRepo := auth.NewUserRepo(database)
 	sessRepo := auth.NewSessionRepo(database)
-	authSvc := auth.NewService(
+	inviteRepo := auth.NewInviteRepo(database)
+	authSvc := auth.NewServiceWithInvites(
 		userRepo,
 		sessRepo,
+		inviteRepo,
 		time.Duration(ttlDays)*24*time.Hour,
 	)
 	authHandler := auth.NewHandler(authSvc)
-	adminHandler := auth.NewAdminHandler(userRepo)
+	adminHandler := auth.NewAdminHandlerWithInvites(userRepo, authSvc)
+	setupHandler := auth.NewSetupHandler(authSvc)
 
 	// API tokens — bearer auth for external clients (CLIs, scripts).
 	tokensSvc := tokens.NewService(tokens.NewRepo(database), userRepo)
@@ -143,7 +146,7 @@ func main() {
 	bearerLimiter := ratelimit.New(bearerRate, bearerBurst)
 
 	port := envOrDefault("PORT", "8080")
-	mux := newMux(authHandler, adminHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, tokensHandler, loginLimiter, bearerLimiter)
+	mux := newMux(authHandler, adminHandler, setupHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, tokensHandler, loginLimiter, bearerLimiter)
 
 	// Wrap with observability middleware (metrics outermost, then logging, then security headers).
 	handler := middleware.Metrics()(middleware.Logging(logger)(middleware.SecurityHeaders()(mux)))
