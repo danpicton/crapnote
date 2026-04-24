@@ -215,14 +215,8 @@
 					<tr class:row-muted={st !== 'active'}>
 						<td class="col-name">{t.name}</td>
 						<td class="col-prefix"><code>{t.prefix}…</code></td>
-						<td class="col-scope">
-							<span class="dot" class:dot-accent={t.scope === 'read_write'} class:dot-muted={t.scope === 'read'}></span>
-							{t.scope === 'read_write' ? 'Read + write' : 'Read only'}
-						</td>
-						<td class="col-status">
-							<span class="dot" class:dot-green={st === 'active'} class:dot-muted={st !== 'active'}></span>
-							{st === 'active' ? 'Active' : st === 'revoked' ? 'Revoked' : 'Expired'}
-						</td>
+						<td class="col-scope"><span class="dot-cell"><span class="dot" class:dot-accent={t.scope === 'read_write'} class:dot-muted={t.scope === 'read'}></span>{t.scope === 'read_write' ? 'Read + write' : 'Read only'}</span></td>
+						<td class="col-status"><span class="dot-cell"><span class="dot" class:dot-green={st === 'active'} class:dot-muted={st !== 'active'}></span>{st === 'active' ? 'Active' : st === 'revoked' ? 'Revoked' : 'Expired'}</span></td>
 						<td class="col-used">{relativeTime(t.last_used_at)}</td>
 						<td class="col-expires">{fmtExpires(t)}</td>
 						<td class="col-action">
@@ -393,7 +387,8 @@
 
 	.col-name { font-family: var(--serif); font-weight: 600; font-size: 0.9375rem; color: var(--text); }
 	.col-prefix code { font-family: var(--mono); font-size: 0.8125rem; color: var(--text-3); }
-	.col-scope, .col-status { display: flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+	.col-scope, .col-status { white-space: nowrap; }
+	.dot-cell { display: inline-flex; align-items: center; gap: 0.4rem; }
 	.col-used { color: var(--text-3); white-space: nowrap; }
 	.col-expires { color: var(--text-2); white-space: nowrap; }
 	.col-action { width: 1px; white-space: nowrap; text-align: right; }

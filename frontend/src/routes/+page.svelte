@@ -1216,7 +1216,7 @@
 		margin-bottom: 1px;
 		border-radius: 2px;
 	}
-	.note-item.selected { background: var(--bg-select); border-left: 2px solid var(--accent); }
+	.note-item.selected { background: var(--bg-select); box-shadow: inset 2px 0 0 var(--accent); }
 	.note-item:not(.selected):hover { background: var(--bg-hover); }
 	.note-item.selected .note-btn { padding-left: calc(0.625rem - 2px); }
 

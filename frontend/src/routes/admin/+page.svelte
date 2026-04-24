@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { ChevronLeft, UserPlus, Trash2, Lock, LockOpen, Key, Mail, Copy, Check } from 'lucide-svelte';
+	import { ChevronLeft, UserPlus, Trash2, Lock, LockOpen, KeyRound, Mail, Copy, Check } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 	import PasswordPromptModal from '$lib/components/PasswordPromptModal.svelte';
@@ -353,7 +353,7 @@
 											title="Set password for {user.username}"
 											aria-label="Set password for {user.username}"
 										>
-											<Key size={14} />
+											<KeyRound size={14} />
 										</button>
 										<button
 											class="icon-btn icon-mail"
@@ -522,10 +522,10 @@
 		cursor: pointer;
 	}
 
-	.create-form { display: flex; flex-direction: column; gap: 0.625rem; }
+	.create-form { display: flex; flex-direction: column; gap: 0.625rem; max-width: 320px; }
 	.fields-row {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+		display: flex;
+		flex-direction: column;
 		gap: 0.5rem;
 	}
 	.form-actions {
@@ -548,10 +548,12 @@
 	.field-input:focus { border-color: var(--accent); }
 
 	/* Override PasswordInput inside the create form to match field-input sizing */
+	.fields-row :global(.pw-wrap) { width: 100%; }
 	.fields-row :global(.pw-wrap input) {
 		font-size: 0.875rem;
 		padding: 0.4rem 2rem 0.4rem 0.625rem;
 		border-radius: 0;
+		box-sizing: border-box;
 	}
 
 	.checkbox-label {
