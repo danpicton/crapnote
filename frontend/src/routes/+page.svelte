@@ -1463,7 +1463,7 @@
 		flex-shrink: 0;
 	}
 	.editor-header-inner {
-		padding: 2rem 3.5rem 0.75rem;
+		padding: 1.25rem 2rem 0.625rem;
 		max-width: 760px;
 		box-sizing: border-box;
 	}

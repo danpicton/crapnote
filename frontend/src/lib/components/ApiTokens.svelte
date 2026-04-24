@@ -135,36 +135,43 @@
 
 	<div class="create-card">
 		<p class="card-hint">
-			Authenticate with <code>Authorization: Bearer cnp_…</code>
-			Each token is shown once on creation.
+			Authenticate with <code>Authorization: Bearer cnp_…</code> — each token is shown once on creation.
 		</p>
 		{#if canCreate}
 			<form class="create-form" onsubmit={createToken}>
 				{#if createError}
 					<p role="alert" class="error">{createError}</p>
 				{/if}
-				<input
-					class="name-input"
-					type="text"
-					placeholder="Token name (e.g. cli-laptop)"
-					bind:value={newName}
-					maxlength={80}
-					required
-				/>
-				<div class="create-row">
-					<select bind:value={newScope}>
-						<option value="read">Read only</option>
-						<option value="read_write">Read and write</option>
-					</select>
-					<label class="ttl">
-						Expires in
-						<input class="ttl-input" type="number" min="-1" max="3650" bind:value={newTtlDays} />
-						days <span class="muted">(-1 = never)</span>
-					</label>
-					<button type="submit" class="primary" disabled={creating}>
-						{creating ? 'Creating…' : 'Create token'}
-					</button>
+				<div class="fields-row">
+					<div class="field-group field-name">
+						<span class="field-label">Name</span>
+						<input
+							type="text"
+							placeholder="e.g. cli-laptop"
+							bind:value={newName}
+							maxlength={80}
+							required
+						/>
+					</div>
+					<div class="field-group">
+						<span class="field-label">Scope</span>
+						<div class="seg-ctrl" role="group" aria-label="Token scope">
+							<button type="button" class="seg-btn" class:seg-active={newScope === 'read'} onclick={() => (newScope = 'read')}>Read only</button>
+							<button type="button" class="seg-btn" class:seg-active={newScope === 'read_write'} onclick={() => (newScope = 'read_write')}>Read + write</button>
+						</div>
+					</div>
+					<div class="field-group field-expires">
+						<span class="field-label">Expires (days)</span>
+						<input class="expires-input" type="number" min="-1" max="3650" bind:value={newTtlDays} />
+					</div>
+					<div class="field-group field-submit">
+						<span class="field-label">&nbsp;</span>
+						<button type="submit" class="primary" disabled={creating}>
+							{creating ? 'Creating…' : '+ Create token'}
+						</button>
+					</div>
 				</div>
+				<p class="sub-hint">Use -1 for no expiry.</p>
 			</form>
 		{:else}
 			<p class="hint">API token creation is disabled for your account. Ask an administrator to enable it.</p>
@@ -257,7 +264,7 @@
 		background: var(--bg-alt);
 		border: 1px solid var(--border);
 		border-radius: 6px;
-		padding: 1.125rem 1.25rem 1.25rem;
+		padding: 1rem 1.25rem 1.125rem;
 	}
 	.card-hint {
 		font-size: 0.8125rem;
@@ -271,34 +278,64 @@
 		background: var(--bg-hover);
 		padding: 1px 5px;
 		color: var(--text-2);
-		margin-right: 0.25rem;
 	}
 
-	.create-form { display: flex; flex-direction: column; gap: 0.625rem; }
-	.create-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
-	.name-input { width: 100%; max-width: 360px; }
+	.create-form { display: flex; flex-direction: column; gap: 0; }
+
+	.fields-row {
+		display: flex;
+		gap: 0.75rem;
+		align-items: flex-end;
+		flex-wrap: wrap;
+	}
+	.field-group {
+		display: flex;
+		flex-direction: column;
+		gap: 0.375rem;
+	}
+	.field-name { flex: 1; min-width: 160px; }
+	.field-expires { width: 90px; }
+	.field-label {
+		font-size: 0.6375rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.07em;
+		color: var(--text-3);
+		font-family: var(--sans);
+	}
 	.create-form input[type='text'],
-	.create-form select {
-		padding: 0.375rem 0.625rem;
+	.create-form input[type='number'] {
+		padding: 0.4rem 0.625rem;
 		border: 1px solid var(--border-md);
 		font-size: 0.875rem;
 		background: var(--bg);
 		color: var(--text);
 		font-family: var(--sans);
+		width: 100%;
+		box-sizing: border-box;
 	}
-	.ttl { display: flex; align-items: center; gap: 0.375rem; font-size: 0.875rem; color: var(--text-2); white-space: nowrap; }
-	.ttl-input {
-		width: 3.5rem;
-		padding: 0.375rem 0.5rem;
+	.expires-input { text-align: center; }
+	.sub-hint { font-size: 0.75rem; color: var(--text-4); margin: 0.5rem 0 0; }
+
+	/* Segmented scope control */
+	.seg-ctrl {
+		display: inline-flex;
 		border: 1px solid var(--border-md);
-		font-size: 0.875rem;
-		background: var(--bg);
-		color: var(--text);
-		font-family: var(--sans);
-		text-align: center;
-		flex-shrink: 0;
 	}
-	.muted { color: var(--text-4); font-size: 0.8125rem; }
+	.seg-btn {
+		font-family: var(--sans);
+		font-size: 0.8125rem;
+		padding: 0.4rem 0.75rem;
+		background: var(--bg);
+		color: var(--text-2);
+		border: none;
+		border-left: 1px solid var(--border-md);
+		cursor: pointer;
+		white-space: nowrap;
+	}
+	.seg-btn:first-child { border-left: none; }
+	.seg-btn:hover:not(.seg-active) { background: var(--bg-hover); }
+	.seg-active { background: var(--text); color: var(--bg); }
 
 	.primary {
 		padding: 0.375rem 0.875rem;
