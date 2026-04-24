@@ -837,7 +837,7 @@
 				<li class="note-item" class:selected={note.id === selectedId}>
 					<div class="note-btn" role="button" tabindex="0" onclick={() => selectNote(note.id)} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectNote(note.id)}>
 						<div class="note-row-top">
-							<span class="note-title" class:untitled={!note.title}>{note.title || 'Untitled'}</span>
+							<span class="note-title" class:untitled={!note.title} title={note.title || undefined}>{note.title || 'Untitled'}</span>
 							<span class="note-meta-icons">
 								{#if note.pinned}
 									<button class="meta-icon-btn" onclick={(e) => { e.stopPropagation(); togglePin(note.id); }} title="Unpin" aria-label="Unpin"><Pin size={11} /></button>

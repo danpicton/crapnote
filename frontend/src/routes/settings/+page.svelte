@@ -251,7 +251,7 @@
 	.wm-small {
 		font-family: var(--serif);
 		font-weight: 800;
-		font-size: 0.875rem;
+		font-size: 1.2rem;
 		letter-spacing: -0.02em;
 		color: rgb(122, 114, 103);
 		display: inline-flex;
@@ -311,8 +311,8 @@
 		background: var(--bg);
 		color: var(--text);
 		outline: none;
-		flex: 1;
-		min-width: 140px;
+		width: 260px;
+		max-width: 100%;
 	}
 	.field-input:focus { border-color: var(--accent); }
 
@@ -359,7 +359,7 @@
 	.hint { font-size: 0.8125rem; color: var(--text-3); margin: 0; line-height: 1.5; }
 	.hint code { font-family: var(--mono); font-size: 0.75rem; background: var(--bg-hover); padding: 1px 5px; color: var(--text-2); }
 
-	.pw-form { display: flex; flex-direction: column; gap: 1rem; max-width: 400px; }
+	.pw-form { display: flex; flex-direction: column; gap: 1rem; max-width: 320px; }
 	.pw-field { display: flex; flex-direction: column; gap: 0.25rem; }
 
 	.msg-error {

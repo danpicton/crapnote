@@ -453,7 +453,7 @@
 	.wm-small {
 		font-family: var(--serif);
 		font-weight: 800;
-		font-size: 0.875rem;
+		font-size: 1.2rem;
 		letter-spacing: -0.02em;
 		color: rgb(122, 114, 103);
 		display: inline-flex;
