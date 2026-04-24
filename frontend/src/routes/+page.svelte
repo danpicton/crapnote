@@ -857,7 +857,7 @@
 						{#if !note.pinned}
 							<button class="act-btn" onclick={() => togglePin(note.id)} title="Pin"><Pin size={12} /></button>
 						{/if}
-						<button class="act-btn" onclick={() => archiveNote(note.id)} title="Archive" aria-label="Archive"><Archive size={12} /></button>
+						<button class="act-btn" onclick={() => archiveNote(note.id)} title="Move to archive" aria-label="Move to archive"><Archive size={12} /></button>
 						<button class="act-btn danger" onclick={() => deleteNote(note.id)} title="Delete"><Trash2 size={12} /></button>
 					</div>
 				</li>
@@ -897,7 +897,7 @@
 				<button class="tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic"><Italic size={13} /></button>
 				<button class="tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline"><Underline size={13} /></button>
 				<div class="link-btn-wrap">
-					<button class="tb-btn" onclick={openLinkDialog} title="Insert link"><Link size={13} /></button>
+					<button class="tb-btn" onclick={openLinkDialog} title="Insert link (Ctrl+K)"><Link size={13} /></button>
 					{#if showLinkDialog}
 						<div class="link-dialog-backdrop" onclick={() => (showLinkDialog = false)} role="presentation"></div>
 						<div class="link-dialog" role="dialog" aria-label="Insert link">
