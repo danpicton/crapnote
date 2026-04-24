@@ -181,7 +181,6 @@
 				<p>API tokens for CLIs, scripts, and backups.</p>
 			</div>
 			<div class="section-body">
-				<p class="hint">Authenticate with <code>Authorization: Bearer cnp_…</code>. Each token is shown once on creation.</p>
 				<ApiTokens canCreate={canCreateTokens} />
 			</div>
 		</section>

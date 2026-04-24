@@ -73,10 +73,11 @@
 	.pw-wrap input {
 		flex: 1;
 		min-width: 0;
-		padding: 0.5rem 2.25rem 0.5rem 0.75rem;
+		padding: 0.4rem 2.25rem 0.4rem 0.625rem;
 		border: 1px solid var(--border-md);
-		border-radius: 0.375rem;
-		font-size: 1rem;
+		border-radius: 0;
+		font-size: 0.875rem;
+		font-family: var(--sans);
 		background: var(--bg);
 		color: var(--text);
 	}
@@ -84,7 +85,6 @@
 	.pw-wrap input:focus {
 		outline: none;
 		border-color: var(--accent);
-		box-shadow: 0 0 0 2px var(--focus-ring);
 	}
 
 	.toggle {

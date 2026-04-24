@@ -115,13 +115,6 @@
 </script>
 
 <div class="tokens">
-	{#if !canCreate}
-		<p class="hint">
-			API token creation is disabled for your account. Ask an administrator to enable it if
-			you need external API access.
-		</p>
-	{/if}
-
 	{#if justCreated}
 		<div class="new-token" role="alert">
 			<strong>Your new token (shown once — copy it now):</strong>
@@ -135,42 +128,48 @@
 					{/if}
 				</button>
 			</div>
-			<p class="hint">
-				Store this somewhere safe. You won't be able to see it again.
-			</p>
+			<p class="hint">Store this somewhere safe. You won't be able to see it again.</p>
 			<button type="button" class="secondary" onclick={dismissCreated}>Dismiss</button>
 		</div>
 	{/if}
 
-	{#if canCreate}
-		<form class="create-form" onsubmit={createToken}>
-			{#if createError}
-				<p role="alert" class="error">{createError}</p>
-			{/if}
-			<input
-				class="name-input"
-				type="text"
-				placeholder="Token name (e.g. cli-laptop)"
-				bind:value={newName}
-				maxlength={80}
-				required
-			/>
-			<div class="create-row">
-				<select bind:value={newScope}>
-					<option value="read">Read only</option>
-					<option value="read_write">Read and write</option>
-				</select>
-				<label class="ttl">
-					Expires in
-					<input class="ttl-input" type="number" min="-1" max="3650" bind:value={newTtlDays} />
-					days <span class="muted">(-1 = never)</span>
-				</label>
-				<button type="submit" class="primary" disabled={creating}>
-					{creating ? 'Creating…' : 'Create token'}
-				</button>
-			</div>
-		</form>
-	{/if}
+	<div class="create-card">
+		<p class="card-hint">
+			Authenticate with <code>Authorization: Bearer cnp_…</code>
+			Each token is shown once on creation.
+		</p>
+		{#if canCreate}
+			<form class="create-form" onsubmit={createToken}>
+				{#if createError}
+					<p role="alert" class="error">{createError}</p>
+				{/if}
+				<input
+					class="name-input"
+					type="text"
+					placeholder="Token name (e.g. cli-laptop)"
+					bind:value={newName}
+					maxlength={80}
+					required
+				/>
+				<div class="create-row">
+					<select bind:value={newScope}>
+						<option value="read">Read only</option>
+						<option value="read_write">Read and write</option>
+					</select>
+					<label class="ttl">
+						Expires in
+						<input class="ttl-input" type="number" min="-1" max="3650" bind:value={newTtlDays} />
+						days <span class="muted">(-1 = never)</span>
+					</label>
+					<button type="submit" class="primary" disabled={creating}>
+						{creating ? 'Creating…' : 'Create token'}
+					</button>
+				</div>
+			</form>
+		{:else}
+			<p class="hint">API token creation is disabled for your account. Ask an administrator to enable it.</p>
+		{/if}
+	</div>
 
 	{#if loading}
 		<p>Loading tokens…</p>
@@ -254,9 +253,30 @@
 		font-size: 0.8125rem;
 	}
 
-	.create-form { display: flex; flex-direction: column; gap: 0.5rem; }
-	.create-row { display: flex; gap: 0.625rem; align-items: center; flex-wrap: wrap; }
-	.name-input { width: 100%; }
+	.create-card {
+		background: var(--bg-alt);
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		padding: 1.125rem 1.25rem 1.25rem;
+	}
+	.card-hint {
+		font-size: 0.8125rem;
+		color: var(--text-3);
+		line-height: 1.5;
+		margin: 0 0 1rem;
+	}
+	.card-hint code {
+		font-family: var(--mono);
+		font-size: 0.75rem;
+		background: var(--bg-hover);
+		padding: 1px 5px;
+		color: var(--text-2);
+		margin-right: 0.25rem;
+	}
+
+	.create-form { display: flex; flex-direction: column; gap: 0.625rem; }
+	.create-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+	.name-input { width: 100%; max-width: 360px; }
 	.create-form input[type='text'],
 	.create-form select {
 		padding: 0.375rem 0.625rem;
@@ -266,7 +286,7 @@
 		color: var(--text);
 		font-family: var(--sans);
 	}
-	.ttl { display: flex; align-items: center; gap: 0.375rem; font-size: 0.875rem; color: var(--text-2); white-space: nowrap; flex: 1; }
+	.ttl { display: flex; align-items: center; gap: 0.375rem; font-size: 0.875rem; color: var(--text-2); white-space: nowrap; }
 	.ttl-input {
 		width: 3.5rem;
 		padding: 0.375rem 0.5rem;
