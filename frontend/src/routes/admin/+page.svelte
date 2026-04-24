@@ -455,7 +455,7 @@
 		font-weight: 800;
 		font-size: 0.875rem;
 		letter-spacing: -0.02em;
-		color: var(--text-4);
+		color: rgb(122, 114, 103);
 		display: inline-flex;
 		align-items: baseline;
 	}

@@ -1242,7 +1242,7 @@
 	.note-title {
 		flex: 1;
 		font-family: var(--serif);
-		font-size: 0.9375rem;
+		font-size: 1.1rem;
 		font-weight: 600;
 		line-height: 1.25;
 		white-space: nowrap;
