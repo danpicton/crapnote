@@ -159,7 +159,7 @@
 						<span class="field-label">Name</span>
 						<input
 							type="text"
-							placeholder="e.g. cli-laptop"
+							placeholder="Token name (e.g. cli-laptop)"
 							bind:value={newName}
 							maxlength={80}
 							required
@@ -167,10 +167,10 @@
 					</div>
 					<div class="field-group">
 						<span class="field-label">Scope</span>
-						<div class="seg-ctrl" role="group" aria-label="Token scope">
-							<button type="button" class="seg-btn" class:seg-active={newScope === 'read'} onclick={() => (newScope = 'read')}>Read only</button>
-							<button type="button" class="seg-btn" class:seg-active={newScope === 'read_write'} onclick={() => (newScope = 'read_write')}>Read + write</button>
-						</div>
+						<select bind:value={newScope}>
+							<option value="read_write">Read + write</option>
+							<option value="read">Read only</option>
+						</select>
 					</div>
 					<div class="field-group field-expires">
 						<span class="field-label">Expires (days)</span>
@@ -327,25 +327,16 @@
 	.expires-input { text-align: center; }
 	.sub-hint { font-size: 0.75rem; color: var(--text-4); margin: 0.5rem 0 0; }
 
-	/* Segmented scope control */
-	.seg-ctrl {
-		display: inline-flex;
+	.create-form select {
+		padding: 0.4rem 0.625rem;
 		border: 1px solid var(--border-md);
-	}
-	.seg-btn {
-		font-family: var(--sans);
-		font-size: 0.8125rem;
-		padding: 0.4rem 0.75rem;
+		font-size: 0.875rem;
 		background: var(--bg);
-		color: var(--text-2);
-		border: none;
-		border-left: 1px solid var(--border-md);
-		cursor: pointer;
-		white-space: nowrap;
+		color: var(--text);
+		font-family: var(--sans);
+		width: 100%;
+		box-sizing: border-box;
 	}
-	.seg-btn:first-child { border-left: none; }
-	.seg-btn:hover:not(.seg-active) { background: var(--bg-hover); }
-	.seg-active { background: var(--text); color: var(--bg); }
 
 	.primary {
 		padding: 0.375rem 0.875rem;
