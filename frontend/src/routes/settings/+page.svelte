@@ -212,7 +212,7 @@
 	}
 
 	.settings-inner {
-		max-width: 860px;
+		max-width: 1040px;
 		margin: 0 auto;
 		padding: 0 3rem;
 	}

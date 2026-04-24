@@ -40,7 +40,7 @@
 		List, ListOrdered, Minus, Undo2, Redo2, Image, Link,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search, Tag as TagIcon,
-		CloudUpload, CheckCircle2, Lock,
+		CloudUpload, CheckCircle2, Lock, MoreHorizontal,
 	} from 'lucide-svelte';
 
 	let notes = $state<Note[]>([]);
@@ -69,6 +69,10 @@
 	let newTagName = $state('');
 	let activeTagId = $state<number | null>(null);
 	let starredOnly = $state(false);
+	let showTagsPanel = $state(false);
+
+	// Note action menu
+	let showNoteMenu = $state(false);
 
 	const PALETTE = [
 		// Reds / Pinks / Rose
@@ -118,6 +122,8 @@
 
 	// Only show tags that have at least one note (active or trashed); pure UI erasure
 	let visibleTags = $derived(allTags.filter(t => t.note_count > 0));
+	let starredNoteCount = $derived(notes.filter(n => n.starred).length);
+	let tagsTabActive = $derived(activeTagId !== null);
 
 	let selectedNote = $derived(notes.find((n) => n.id === selectedId) ?? null);
 
@@ -508,7 +514,30 @@
 		if (isMobile()) { goto(`/notes/${id}`); return; }
 		selectedId = id;
 		showTagPopover = false;
+		showNoteMenu = false;
 		noteTags = await api.tags.listForNote(id);
+	}
+
+	async function duplicateNote(id: number) {
+		const note = notes.find(n => n.id === id);
+		if (!note) return;
+		showNoteMenu = false;
+		const dup = await api.notes.create((note.title || 'Untitled') + ' (copy)');
+		if (note.body) await api.notes.update(dup.id, { body: note.body });
+		dup.body = note.body;
+		const firstUnpinned = notes.findIndex(n => !n.pinned);
+		notes = firstUnpinned === -1 ? [...notes, dup] : [...notes.slice(0, firstUnpinned), dup, ...notes.slice(firstUnpinned)];
+		selectedId = dup.id;
+	}
+
+	function toggleTagsTab() {
+		if (tagsTabActive) {
+			// Clicking Tags tab when a tag is active → go back to All
+			activeTagId = null;
+			showTagsPanel = false;
+		} else {
+			showTagsPanel = !showTagsPanel;
+		}
 	}
 
 	let tagFilterEl = $state<HTMLDivElement | null>(null);
@@ -774,38 +803,34 @@
 			<button
 				class="pane-tab"
 				class:pane-tab-active={activeTagId === null && !starredOnly}
-				onclick={() => applyFilter(null, false)}
-			>All</button>
+				onclick={() => { applyFilter(null, false); showTagsPanel = false; }}
+			>All<span class="tab-count">{notes.length}</span></button>
 			<button
 				class="pane-tab"
 				class:pane-tab-active={starredOnly}
-				onclick={toggleStarFilter}
-			>Starred</button>
+				onclick={() => { toggleStarFilter(); showTagsPanel = false; }}
+			>Starred<span class="tab-count">{starredNoteCount}</span></button>
 			{#if visibleTags.length > 0}
-				<div
-					class="filter-tags"
-					class:expanded={tagFilterExpanded}
-					class:scrollable={tagFilterScrollable}
-					bind:this={tagFilterEl}
-					onmouseenter={onTagFilterMouseEnter}
-					onmouseleave={onTagFilterMouseLeave}
-					ontransitionend={onTagFilterTransitionEnd}
-					role="group"
-					aria-label="Tag filters"
-				>
-					{#each visibleTags as tag (tag.id)}
-						{@const c = tagColor(tag)}
-						<button
-							class="pane-tab tag-tab"
-							class:pane-tab-active={activeTagId === tag.id}
-							style="--dot-color:{c.text}"
-							onclick={() => filterByTag(activeTagId === tag.id ? null : tag.id)}
-							title="{tag.name} ({tag.note_count})"
-						><span class="tag-dot" style="background:{c.text}"></span>{tag.name}</button>
-					{/each}
-				</div>
+				<button
+					class="pane-tab"
+					class:pane-tab-active={tagsTabActive || showTagsPanel}
+					onclick={toggleTagsTab}
+				>Tags<span class="tab-count">{visibleTags.length}</span></button>
 			{/if}
 		</div>
+		{#if showTagsPanel || tagsTabActive}
+			<div class="tag-panel" role="group" aria-label="Filter by tag">
+				{#each visibleTags as tag (tag.id)}
+					{@const c = tagColor(tag)}
+					<button
+						class="tag-panel-item"
+						class:tag-panel-active={activeTagId === tag.id}
+						onclick={() => { filterByTag(activeTagId === tag.id ? null : tag.id); showTagsPanel = false; }}
+						title="{tag.name} ({tag.note_count})"
+					><span class="tag-dot" style="background:{c.text}"></span>{tag.name}</button>
+				{/each}
+			</div>
+		{/if}
 
 		<ul class="note-list" role="list">
 			{#each notes as note (note.id)}
@@ -900,17 +925,36 @@
 				<button class="tb-btn" onclick={() => cmd(insertImageCommand.key)} title="Insert image"><Image size={13} /></button>
 				<span class="tb-spacer"></span>
 				<button class="tb-btn tb-star" class:tb-star-on={selectedNote.starred} onclick={() => toggleStar(selectedNote.id)} title={selectedNote.starred ? 'Unstar' : 'Star'}><Star size={13} /></button>
+				<div class="note-menu-wrap">
+					<button class="tb-btn" onclick={() => (showNoteMenu = !showNoteMenu)} title="More actions" aria-label="More actions"><MoreHorizontal size={13} /></button>
+					{#if showNoteMenu}
+						<div class="note-menu-backdrop" onclick={() => (showNoteMenu = false)} role="presentation"></div>
+						<div class="note-menu" role="menu">
+							<button class="note-menu-item" role="menuitem" onclick={() => { togglePin(selectedNote.id); showNoteMenu = false; }}>
+								<Pin size={13} />{selectedNote.pinned ? 'Unpin note' : 'Pin note'}
+							</button>
+							<button class="note-menu-item" role="menuitem" onclick={() => duplicateNote(selectedNote.id)}>
+								<Plus size={13} />Duplicate note
+							</button>
+							<button class="note-menu-item danger" role="menuitem" onclick={() => { deleteNote(selectedNote.id); showNoteMenu = false; }}>
+								<Trash2 size={13} />Move to trash
+							</button>
+						</div>
+					{/if}
+				</div>
 			</div>
 
 			<div class="editor-header">
-				<input
-					bind:this={titleInput}
-					class="title-input"
-					type="text"
-					value={selectedNote.title}
-					oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
-					placeholder="Untitled"
-				/>
+				<div class="editor-header-inner">
+					<input
+						bind:this={titleInput}
+						class="title-input"
+						type="text"
+						value={selectedNote.title}
+						oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
+						placeholder="Untitled"
+					/>
+				</div>
 			</div>
 
 			{#key selectedId}
@@ -1111,14 +1155,36 @@
 	.pane-tab:hover { color: var(--text-2); }
 	.pane-tab-active { color: var(--text) !important; border-bottom-color: var(--accent); }
 
-	.filter-tags {
+	.tab-count {
+		margin-left: 0.3rem;
+		font-size: 0.625rem;
+		color: var(--text-4);
+		font-weight: 400;
+	}
+	.pane-tab-active .tab-count { color: var(--text-3); }
+
+	.tag-panel {
+		padding: 0.375rem 1.25rem 0.5rem;
+		border-bottom: 1px solid var(--border);
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0;
-		width: 100%;
-		padding-bottom: 0.25rem;
+		gap: 0.25rem;
+		flex-shrink: 0;
 	}
-	.tag-tab { margin-right: 0.5rem; }
+	.tag-panel-item {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-family: var(--sans);
+		font-size: 0.6875rem;
+		color: var(--text-3);
+		background: var(--bg-hover);
+		border: 1px solid var(--border);
+		padding: 0.2rem 0.5rem;
+		cursor: pointer;
+	}
+	.tag-panel-item:hover { color: var(--text); background: var(--bg-active); }
+	.tag-panel-active { color: var(--text) !important; background: var(--bg-active) !important; border-color: var(--border-md) !important; }
 
 	.tag-dot {
 		display: inline-block;
@@ -1133,6 +1199,7 @@
 		flex: 1;
 		min-height: 0;
 		overflow-y: auto;
+		overflow-x: hidden;
 		list-style: none;
 		margin: 0;
 		padding: 0.375rem 0.625rem;
@@ -1352,14 +1419,46 @@
 		flex-shrink: 0;
 	}
 
+	/* ─── Note action menu ───────────────────────────────── */
+	.note-menu-wrap { position: relative; }
+	.note-menu-backdrop { position: fixed; inset: 0; z-index: 49; }
+	.note-menu {
+		position: absolute;
+		top: calc(100% + 4px);
+		right: 0;
+		background: var(--bg-toolbar);
+		border: 1px solid var(--border-md);
+		box-shadow: var(--shadow);
+		z-index: 50;
+		min-width: 160px;
+		display: flex;
+		flex-direction: column;
+	}
+	.note-menu-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 0.875rem;
+		font-size: 0.8125rem;
+		font-family: var(--sans);
+		color: var(--text);
+		background: none;
+		border: none;
+		cursor: pointer;
+		text-align: left;
+	}
+	.note-menu-item:hover { background: var(--bg-hover); }
+	.note-menu-item.danger { color: var(--danger); }
+	.note-menu-item.danger:hover { background: var(--danger-bg); }
+
 	/* ─── Editor header (title) ─────────────────────────── */
 	.editor-header {
-		padding: 2rem 3.5rem 0.75rem;
 		border-bottom: 1px solid var(--border);
 		flex-shrink: 0;
+	}
+	.editor-header-inner {
+		padding: 2rem 3.5rem 0.75rem;
 		max-width: 760px;
-		width: 100%;
-		margin: 0 auto;
 		box-sizing: border-box;
 	}
 
@@ -1556,6 +1655,5 @@
 		.note-hover-actions { opacity: 1; }
 		.act-btn { padding: 0.375rem 0.5rem; }
 		.note-btn { padding: 0.75rem 0.625rem 0.375rem; }
-		.filter-tags { max-height: none; overflow-y: visible; }
 	}
 </style>

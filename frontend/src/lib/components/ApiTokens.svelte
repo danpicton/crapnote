@@ -147,26 +147,30 @@
 			{#if createError}
 				<p role="alert" class="error">{createError}</p>
 			{/if}
-			<input
-				type="text"
-				placeholder="Token name (e.g. cli-laptop)"
-				bind:value={newName}
-				maxlength={80}
-				required
-			/>
-			<select bind:value={newScope}>
-				<option value="read">Read only</option>
-				<option value="read_write">Read and write</option>
-			</select>
-			<label class="ttl">
-				Expires in
-				<input type="number" min="-1" max="3650" bind:value={newTtlDays} />
-				days
-				<span class="hint inline">(-1 = never)</span>
-			</label>
-			<button type="submit" class="primary" disabled={creating}>
-				{creating ? 'Creating…' : 'Create token'}
-			</button>
+			<div class="create-row">
+				<input
+					class="name-input"
+					type="text"
+					placeholder="Token name (e.g. cli-laptop)"
+					bind:value={newName}
+					maxlength={80}
+					required
+				/>
+				<select bind:value={newScope}>
+					<option value="read">Read only</option>
+					<option value="read_write">Read and write</option>
+				</select>
+			</div>
+			<div class="create-row">
+				<label class="ttl">
+					Expires in
+					<input type="number" min="-1" max="3650" bind:value={newTtlDays} />
+					days <span class="hint inline">(-1 = never)</span>
+				</label>
+				<button type="submit" class="primary" disabled={creating}>
+					{creating ? 'Creating…' : 'Create token'}
+				</button>
+			</div>
 		</form>
 	{/if}
 
@@ -253,23 +257,20 @@
 		font-size: 0.8125rem;
 	}
 
-	.create-form {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-		align-items: center;
-	}
+	.create-form { display: flex; flex-direction: column; gap: 0.5rem; }
+	.create-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+	.name-input { flex: 1; min-width: 160px; }
 	.create-form input[type='text'],
 	.create-form select,
 	.create-form input[type='number'] {
 		padding: 0.375rem 0.625rem;
 		border: 1px solid var(--border-md);
-		border-radius: 0.375rem;
 		font-size: 0.875rem;
 		background: var(--bg);
 		color: var(--text);
+		font-family: var(--sans);
 	}
-	.create-form input[type='number'] { width: 5rem; }
+	.create-form input[type='number'] { width: 4.5rem; }
 	.ttl { display: flex; align-items: center; gap: 0.375rem; font-size: 0.875rem; color: var(--text-2); }
 
 	.primary {

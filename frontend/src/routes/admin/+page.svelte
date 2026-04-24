@@ -233,7 +233,7 @@
 				</fieldset>
 
 				<form onsubmit={createUser} class="create-form">
-					<div class="form-row">
+					<div class="fields-row">
 						<input type="text" placeholder="Username" bind:value={newUsername} required class="field-input" />
 						{#if createMode === 'password'}
 							<PasswordInput
@@ -251,6 +251,8 @@
 								required
 							/>
 						{/if}
+					</div>
+					<div class="form-actions">
 						<label class="checkbox-label">
 							<input type="checkbox" bind:checked={newIsAdmin} />
 							Admin
@@ -412,7 +414,7 @@
 	}
 
 	.admin-inner {
-		max-width: 900px;
+		max-width: 1040px;
 		margin: 0 auto;
 		padding: 0 3rem;
 	}
@@ -521,14 +523,20 @@
 	}
 
 	.create-form { display: flex; flex-direction: column; gap: 0.625rem; }
-	.form-row {
-		display: flex;
+	.fields-row {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
 		gap: 0.5rem;
-		flex-wrap: wrap;
+	}
+	.form-actions {
+		display: flex;
+		gap: 0.75rem;
 		align-items: center;
 	}
 
 	.field-input {
+		width: 100%;
+		box-sizing: border-box;
 		padding: 0.4rem 0.625rem;
 		border: 1px solid var(--border-md);
 		font-size: 0.875rem;
@@ -536,9 +544,15 @@
 		background: var(--bg);
 		color: var(--text);
 		outline: none;
-		min-width: 140px;
 	}
 	.field-input:focus { border-color: var(--accent); }
+
+	/* Override PasswordInput inside the create form to match field-input sizing */
+	.fields-row :global(.pw-wrap input) {
+		font-size: 0.875rem;
+		padding: 0.4rem 2rem 0.4rem 0.625rem;
+		border-radius: 0;
+	}
 
 	.checkbox-label {
 		display: flex;
