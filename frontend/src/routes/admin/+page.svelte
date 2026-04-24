@@ -4,6 +4,7 @@
 	import { ChevronLeft, UserPlus, Trash2, Lock, LockOpen, Key } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
+	import PasswordPromptModal from '$lib/components/PasswordPromptModal.svelte';
 
 	interface AdminUser {
 		id: number;
@@ -21,6 +22,10 @@
 	let newPassword = $state('');
 	let newIsAdmin = $state(false);
 	let createError = $state('');
+
+	let passwordModalUser = $state<AdminUser | null>(null);
+	let passwordModalSubmitting = $state(false);
+	let passwordModalError = $state('');
 
 	onMount(async () => {
 		if (!auth.user?.is_admin) {
@@ -93,26 +98,38 @@
 		}
 	}
 
-	async function setUserPassword(user: AdminUser) {
-		const pw = prompt(`Enter new password for ${user.username} (min 12 chars):`);
-		if (pw == null) return;
-		if (pw.length < 12) {
-			alert('Password must be at least 12 characters.');
-			return;
+	function openPasswordModal(user: AdminUser) {
+		passwordModalUser = user;
+		passwordModalError = '';
+	}
+
+	function closePasswordModal() {
+		passwordModalUser = null;
+		passwordModalSubmitting = false;
+	}
+
+	async function submitPasswordChange(password: string) {
+		if (!passwordModalUser) return;
+		passwordModalSubmitting = true;
+		passwordModalError = '';
+		try {
+			const res = await fetch(`/api/admin/users/${passwordModalUser.id}/password`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				credentials: 'include',
+				body: JSON.stringify({ password }),
+			});
+			if (!res.ok) {
+				const text = await res.text();
+				passwordModalError = text || 'Failed to set password.';
+				return;
+			}
+			closePasswordModal();
+			// Server also clears the lock on a password reset; refresh the list.
+			await loadUsers();
+		} finally {
+			passwordModalSubmitting = false;
 		}
-		const res = await fetch(`/api/admin/users/${user.id}/password`, {
-			method: 'PUT',
-			headers: { 'Content-Type': 'application/json' },
-			credentials: 'include',
-			body: JSON.stringify({ password: pw }),
-		});
-		if (!res.ok) {
-			const text = await res.text();
-			alert(text || 'Failed to set password.');
-			return;
-		}
-		// Server also clears the lock on a password reset; refresh the list.
-		await loadUsers();
 	}
 </script>
 
@@ -200,7 +217,7 @@
 							<td class="actions">
 								<button
 									class="icon-btn key"
-									onclick={() => setUserPassword(user)}
+									onclick={() => openPasswordModal(user)}
 									title="Set password for {user.username}"
 									aria-label="Set password for {user.username}"
 								>
@@ -231,6 +248,15 @@
 		{/if}
 	</section>
 </div>
+
+<PasswordPromptModal
+	open={passwordModalUser != null}
+	title={passwordModalUser ? `Set password for ${passwordModalUser.username}` : ''}
+	submitting={passwordModalSubmitting}
+	externalError={passwordModalError}
+	onsubmit={submitPasswordChange}
+	oncancel={closePasswordModal}
+/>
 
 <style>
 	.page {

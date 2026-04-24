@@ -89,8 +89,7 @@ describe('Admin page', () => {
 		});
 	});
 
-	it('calls PUT /password when setting a new password for a user', async () => {
-		window.prompt = vi.fn().mockReturnValue('new-strong-pass-1234');
+	it('opens a modal when the Key button is clicked and calls PUT /password on submit', async () => {
 		mockFetch
 			.mockResolvedValueOnce(ok(mockUsers))
 			.mockResolvedValueOnce({ ok: true, status: 204, json: () => Promise.resolve(null), text: () => Promise.resolve('') });
@@ -99,11 +98,46 @@ describe('Admin page', () => {
 		await waitFor(() => screen.getByText('alice'));
 		await fireEvent.click(screen.getByRole('button', { name: /set password for alice/i }));
 
+		// Modal renders with two password fields.
+		const dialog = await screen.findByRole('dialog');
+		expect(dialog).toBeInTheDocument();
+
+		await fireEvent.input(screen.getByLabelText('New password'), {
+			target: { value: 'new-strong-pass-1234' },
+		});
+		await fireEvent.input(screen.getByLabelText('Confirm password'), {
+			target: { value: 'new-strong-pass-1234' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
 		await waitFor(() => {
 			const call = mockFetch.mock.calls.find((c) => typeof c[0] === 'string' && c[0].endsWith('/password'));
 			expect(call).toBeTruthy();
 			expect(call?.[1]?.method).toBe('PUT');
 		});
+	});
+
+	it('shows a mismatch error and does not call the API when passwords differ', async () => {
+		mockFetch.mockResolvedValueOnce(ok(mockUsers));
+
+		render(AdminPage);
+		await waitFor(() => screen.getByText('alice'));
+		await fireEvent.click(screen.getByRole('button', { name: /set password for alice/i }));
+
+		await screen.findByRole('dialog');
+		await fireEvent.input(screen.getByLabelText('New password'), {
+			target: { value: 'new-strong-pass-1234' },
+		});
+		await fireEvent.input(screen.getByLabelText('Confirm password'), {
+			target: { value: 'different-password-xyz' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+		expect(screen.getByRole('alert').textContent).toMatch(/match/i);
+		// Only the initial list fetch — no PUT.
+		expect(
+			mockFetch.mock.calls.find((c) => typeof c[0] === 'string' && c[0].endsWith('/password'))
+		).toBeFalsy();
 	});
 
 	it('calls POST /api/admin/users on create', async () => {
