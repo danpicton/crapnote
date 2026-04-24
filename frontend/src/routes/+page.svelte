@@ -39,7 +39,7 @@
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, Minus, Undo2, Redo2, Image, Link,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
-		ChevronRight, Search, Tag as TagIcon,
+		ChevronRight, Search,
 		CloudUpload, CheckCircle2, Lock, MoreHorizontal,
 	} from 'lucide-svelte';
 
@@ -538,24 +538,6 @@
 		} else {
 			showTagsPanel = !showTagsPanel;
 		}
-	}
-
-	let tagFilterEl = $state<HTMLDivElement | null>(null);
-	let tagFilterExpanded = $state(false);
-	let tagFilterScrollable = $state(false);
-
-	function onTagFilterMouseEnter() {
-		if (isMobile()) return; // touch devices fire mouseenter on tap — skip to avoid layout jump
-		tagFilterExpanded = true;
-	}
-	function onTagFilterMouseLeave() {
-		if (isMobile()) return;
-		tagFilterScrollable = false;
-		tagFilterExpanded = false;
-		if (tagFilterEl) tagFilterEl.scrollTop = 0;
-	}
-	function onTagFilterTransitionEnd() {
-		if (tagFilterExpanded) tagFilterScrollable = true;
 	}
 
 	async function applyFilter(tagId: number | null, starred: boolean) {

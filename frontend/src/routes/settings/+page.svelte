@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Sun, Moon, ChevronLeft } from 'lucide-svelte';
+	import { ChevronLeft } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import ApiTokens from '$lib/components/ApiTokens.svelte';
