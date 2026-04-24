@@ -1222,13 +1222,15 @@
 		list-style: none;
 		margin: 0;
 		padding: 0.375rem 0;
-		scrollbar-width: none;
+		scrollbar-gutter: stable;
+		scrollbar-width: thin;
+		scrollbar-color: transparent transparent;
 	}
-	.note-list::-webkit-scrollbar { width: 0; }
-	.note-list:hover { scrollbar-width: thin; scrollbar-color: var(--border-md) transparent; }
-	.note-list:hover::-webkit-scrollbar { width: 5px; }
+	.note-list::-webkit-scrollbar { width: 5px; }
+	.note-list::-webkit-scrollbar-thumb { background: transparent; }
+	.note-list::-webkit-scrollbar-track { background: transparent; }
+	.note-list:hover { scrollbar-color: var(--border-md) transparent; }
 	.note-list:hover::-webkit-scrollbar-thumb { background: var(--border-md); }
-	.note-list:hover::-webkit-scrollbar-track { background: transparent; }
 
 	.note-item {
 		position: relative;
