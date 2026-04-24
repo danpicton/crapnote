@@ -1245,7 +1245,7 @@
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
-		padding: 0.6875rem 1.25rem 0.5rem;
+		padding: 0.6875rem calc(1.25rem - 5px) 0.5rem 1.25rem;
 		background: none;
 		border: none;
 		cursor: pointer;
@@ -1304,7 +1304,7 @@
 	.note-hover-actions {
 		display: flex;
 		gap: 1px;
-		padding: 0.125rem 1.25rem 0.375rem;
+		padding: 0.125rem calc(1.25rem - 5px) 0.375rem 1.25rem;
 		opacity: 0;
 		transition: opacity 0.1s;
 	}
