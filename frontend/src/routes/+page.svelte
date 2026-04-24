@@ -763,6 +763,20 @@
 		if (e.key === 'Enter') { e.preventDefault(); applyLink(); }
 		if (e.key === 'Escape') { showLinkDialog = false; }
 	}
+
+	function wordCount(body: string): number {
+		if (!body?.trim()) return 0;
+		return body
+			.replace(/```[\s\S]*?```/g, ' ')
+			.replace(/`[^`]*`/g, ' ')
+			.replace(/!\[.*?\]\(.*?\)/g, ' ')
+			.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+			.replace(/[*_#>`~\-=|[\]()]/g, ' ')
+			.trim()
+			.split(/\s+/)
+			.filter(w => /\w/.test(w))
+			.length;
+	}
 </script>
 
 
@@ -968,22 +982,27 @@
 			<div class="editor-statusbar">
 				<span class="status-meta">
 					{#if selectedNote.created_at}
-						{new Date(selectedNote.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(selectedNote.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+						Created {new Date(selectedNote.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(selectedNote.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
 						<span class="status-sep" aria-hidden="true">·</span>
 					{/if}
-					<span class:status-saving={saving}>{saving ? 'Saving…' : 'Saved'}</span>
+					{wordCount(selectedNote.body)} words
+					{#if saving}
+						<span class="status-sep" aria-hidden="true">·</span>
+						<span class="status-saving">Saving…</span>
+					{/if}
 				</span>
 				<span class="status-tags">
 					<span class="status-tags-label">Tags</span>
 					{#each noteTags as tag (tag.id)}
 						{@const c = tagColor(tag)}
-						<button class="status-tag" onclick={() => applyFilter(activeTagId === tag.id ? null : tag.id, starredOnly)} title="Filter by {tag.name}">
+						<span class="status-tag">
 							<span class="tag-dot" style="background:{c.text}"></span>{tag.name}
-						</button>
+						</span>
 					{/each}
 					<div class="tag-popover-wrap">
 						<button class="status-add-tag" onclick={() => (showTagPopover = !showTagPopover)} title="Tags">+ tag</button>
 						{#if showTagPopover}
+							<div class="tag-popover-backdrop" onclick={() => (showTagPopover = false)} role="presentation"></div>
 							<div class="tag-popover">
 								<p class="popover-label">Tags</p>
 								{#each visibleTags as tag (tag.id)}
@@ -1521,15 +1540,10 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.3rem;
-		background: none;
-		border: none;
-		cursor: pointer;
 		font-size: 0.6875rem;
 		color: var(--text-2);
 		font-family: var(--sans);
-		padding: 0;
 	}
-	.status-tag:hover { color: var(--text); }
 
 	.status-add-tag {
 		background: none;
@@ -1545,6 +1559,7 @@
 	.status-add-tag:hover { color: var(--text-2); }
 
 	/* ─── Tag popover ────────────────────────────────────── */
+	.tag-popover-backdrop { position: fixed; inset: 0; z-index: 29; }
 	.tag-popover-wrap { position: relative; }
 
 	.tag-popover {
