@@ -1202,7 +1202,7 @@
 		overflow-x: hidden;
 		list-style: none;
 		margin: 0;
-		padding: 0.375rem 0.625rem;
+		padding: 0.375rem 0;
 		scrollbar-width: none;
 	}
 	.note-list::-webkit-scrollbar { width: 0; }
@@ -1214,18 +1214,16 @@
 	.note-item {
 		position: relative;
 		margin-bottom: 1px;
-		border-radius: 2px;
 	}
 	.note-item.selected { background: var(--bg-select); box-shadow: inset 2px 0 0 var(--accent); }
 	.note-item:not(.selected):hover { background: var(--bg-hover); }
-	.note-item.selected .note-btn { padding-left: calc(0.625rem - 2px); }
 
 	.note-btn {
 		width: 100%;
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
-		padding: 0.6875rem 0.625rem 0.5rem;
+		padding: 0.6875rem 1.25rem 0.5rem;
 		background: none;
 		border: none;
 		cursor: pointer;
@@ -1284,7 +1282,7 @@
 	.note-hover-actions {
 		display: flex;
 		gap: 1px;
-		padding: 0.125rem 0.375rem 0.375rem;
+		padding: 0.125rem 1.25rem 0.375rem;
 		opacity: 0;
 		transition: opacity 0.1s;
 	}
@@ -1657,9 +1655,9 @@
 		.editor-pane { display: none; }
 		.mobile-show-editor { display: flex; }
 		.sidebar-header { padding: 0.875rem 1rem 0.5rem; }
-		.note-item { margin: 0 0.25rem 1px; }
+		.note-item { margin: 0 0 1px; }
 		.note-hover-actions { opacity: 1; }
 		.act-btn { padding: 0.375rem 0.5rem; }
-		.note-btn { padding: 0.75rem 0.625rem 0.375rem; }
+		.note-btn { padding: 0.75rem 1.25rem 0.375rem; }
 	}
 </style>
