@@ -17,7 +17,7 @@
 	let pwSubmitting = $state(false);
 
 	const canCreateTokens = $derived(
-		!!auth.user && (auth.user.is_admin || !!auth.user.api_tokens_enabled),
+		!auth.loading && !!auth.user && (auth.user.is_admin || !!auth.user.api_tokens_enabled),
 	);
 
 	function doExport() {
@@ -105,7 +105,7 @@
 		</section>
 
 		<!-- Administration -->
-		{#if auth.user?.is_admin}
+		{#if !auth.loading && auth.user?.is_admin}
 		<section class="section">
 			<div class="section-label">
 				<h2>Administration</h2>
@@ -181,7 +181,7 @@
 				<p>API tokens for CLIs, scripts, and backups.</p>
 			</div>
 			<div class="section-body">
-				<ApiTokens canCreate={canCreateTokens} />
+				<ApiTokens canCreate={canCreateTokens} authLoading={auth.loading} />
 			</div>
 		</section>
 

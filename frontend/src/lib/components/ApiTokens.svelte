@@ -4,13 +4,13 @@
 	import { api, ApiError, type ApiToken, type CreatedApiToken } from '$lib/api';
 
 	interface Props {
-		/** Whether the caller may create tokens. If false we still show the
-		 * list (so the user can see/revoke existing ones), but the create form
-		 * is hidden with an explanatory note. */
 		canCreate: boolean;
+		/** Pass true while the parent auth state is still resolving so we
+		 * don't flash a "disabled" message before we know the user's role. */
+		authLoading?: boolean;
 	}
 
-	let { canCreate }: Props = $props();
+	let { canCreate, authLoading = false }: Props = $props();
 
 	let tokens = $state<ApiToken[]>([]);
 	let loading = $state(true);
@@ -102,15 +102,27 @@
 		}
 	}
 
-	function fmtDate(iso?: string) {
+	function relativeTime(iso?: string): string {
 		if (!iso) return '—';
-		return new Date(iso).toLocaleString();
+		const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+		if (mins < 1) return 'just now';
+		if (mins < 60) return `${mins} min ago`;
+		const hrs = Math.floor(mins / 60);
+		if (hrs < 24) return `${hrs} hr ago`;
+		const days = Math.floor(hrs / 24);
+		return `${days} days ago`;
 	}
 
-	function status(t: ApiToken): string {
+	function fmtExpires(t: ApiToken): string {
 		if (t.revoked_at) return 'Revoked';
-		if (t.expires_at && new Date(t.expires_at) < new Date()) return 'Expired';
-		return 'Active';
+		if (!t.expires_at) return 'Never';
+		return new Date(t.expires_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+	}
+
+	function tokenStatus(t: ApiToken): 'active' | 'revoked' | 'expired' {
+		if (t.revoked_at) return 'revoked';
+		if (t.expires_at && new Date(t.expires_at) < new Date()) return 'expired';
+		return 'active';
 	}
 </script>
 
@@ -173,21 +185,16 @@
 				</div>
 				<p class="sub-hint">Use -1 for no expiry.</p>
 			</form>
-		{:else}
+		{:else if !authLoading}
 			<p class="hint">API token creation is disabled for your account. Ask an administrator to enable it.</p>
 		{/if}
 	</div>
 
 	{#if loading}
-		<p>Loading tokens…</p>
+		<p class="hint">Loading tokens…</p>
 	{:else if loadError}
 		<p role="alert" class="error">{loadError}</p>
-	{:else if tokens.length === 0}
-		<p class="hint">No API tokens yet.</p>
-	{:else}
-		<div class="list-header">
-			<button type="button" class="secondary danger" onclick={revokeAll}>Revoke all</button>
-		</div>
+	{:else if tokens.length > 0}
 		<table class="tokens-table">
 			<thead>
 				<tr>
@@ -197,19 +204,28 @@
 					<th>Status</th>
 					<th>Last used</th>
 					<th>Expires</th>
-					<th></th>
+					<th>
+						<button type="button" class="revoke-all-btn" onclick={revokeAll}>Revoke all</button>
+					</th>
 				</tr>
 			</thead>
 			<tbody>
 				{#each tokens as t (t.id)}
-					<tr class:revoked={!!t.revoked_at}>
-						<td>{t.name}</td>
-						<td><code>{t.prefix}…</code></td>
-						<td>{t.scope === 'read_write' ? 'Read+Write' : 'Read'}</td>
-						<td>{status(t)}</td>
-						<td>{fmtDate(t.last_used_at)}</td>
-						<td>{fmtDate(t.expires_at)}</td>
-						<td>
+					{@const st = tokenStatus(t)}
+					<tr class:row-muted={st !== 'active'}>
+						<td class="col-name">{t.name}</td>
+						<td class="col-prefix"><code>{t.prefix}…</code></td>
+						<td class="col-scope">
+							<span class="dot" class:dot-accent={t.scope === 'read_write'} class:dot-muted={t.scope === 'read'}></span>
+							{t.scope === 'read_write' ? 'Read + write' : 'Read only'}
+						</td>
+						<td class="col-status">
+							<span class="dot" class:dot-green={st === 'active'} class:dot-muted={st !== 'active'}></span>
+							{st === 'active' ? 'Active' : st === 'revoked' ? 'Revoked' : 'Expired'}
+						</td>
+						<td class="col-used">{relativeTime(t.last_used_at)}</td>
+						<td class="col-expires">{fmtExpires(t)}</td>
+						<td class="col-action">
 							{#if !t.revoked_at}
 								<button class="icon-btn" onclick={() => revokeToken(t.id)} aria-label="Revoke token" title="Revoke token">
 									<Trash2 size={14} />
@@ -349,33 +365,63 @@
 	.primary:disabled { opacity: 0.6; cursor: not-allowed; }
 	.primary:hover:not(:disabled) { background: var(--accent-dk); }
 
-	.secondary {
-		padding: 0.375rem 0.625rem;
-		background: transparent;
-		border: 1px solid var(--border-md);
-		border-radius: 0.375rem;
-		cursor: pointer;
-		color: var(--text-2);
-		font-size: 0.875rem;
-	}
-	.secondary.danger { color: var(--danger); border-color: var(--danger); }
-	.secondary:hover { background: var(--bg-hover); }
-
-	.list-header { display: flex; justify-content: flex-end; }
-
+	/* Token table */
 	.tokens-table {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.875rem;
+		font-size: 0.8125rem;
+		margin-top: 0.25rem;
 	}
-	.tokens-table th,
-	.tokens-table td {
+	.tokens-table th {
 		text-align: left;
-		padding: 0.375rem 0.5rem;
+		padding: 0.375rem 0.75rem;
+		font-size: 0.6375rem;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.07em;
+		color: var(--text-4);
 		border-bottom: 1px solid var(--border);
+		background: var(--bg-alt);
+		white-space: nowrap;
 	}
-	.tokens-table th { font-weight: 600; color: var(--text-3); }
-	.tokens-table tr.revoked { opacity: 0.6; }
+	.tokens-table td {
+		padding: 0.75rem 0.75rem;
+		border-bottom: 1px solid var(--border);
+		vertical-align: middle;
+	}
+	.row-muted { opacity: 0.5; }
+
+	.col-name { font-family: var(--serif); font-weight: 600; font-size: 0.9375rem; color: var(--text); }
+	.col-prefix code { font-family: var(--mono); font-size: 0.8125rem; color: var(--text-3); }
+	.col-scope, .col-status { display: flex; align-items: center; gap: 0.4rem; white-space: nowrap; }
+	.col-used { color: var(--text-3); white-space: nowrap; }
+	.col-expires { color: var(--text-2); white-space: nowrap; }
+	.col-action { width: 1px; white-space: nowrap; text-align: right; }
+
+	.dot {
+		display: inline-block;
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+	.dot-accent { background: var(--accent); }
+	.dot-green { background: #22c55e; }
+	.dot-muted { background: var(--border-hi); }
+
+	.revoke-all-btn {
+		font-size: 0.75rem;
+		font-family: var(--sans);
+		color: var(--danger);
+		background: none;
+		border: none;
+		cursor: pointer;
+		padding: 0;
+		text-decoration: underline;
+		text-underline-offset: 2px;
+		white-space: nowrap;
+	}
+	.revoke-all-btn:hover { color: var(--accent-dk); }
 
 	.icon-btn {
 		display: inline-flex;
@@ -384,7 +430,6 @@
 		width: 1.75rem;
 		height: 1.75rem;
 		border: none;
-		border-radius: 0.25rem;
 		cursor: pointer;
 		background: transparent;
 		color: var(--danger);
