@@ -203,11 +203,11 @@
 <div class="admin-page">
 	<div class="admin-inner">
 		<header class="page-header">
+			<a href="/" class="wordmark">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
 			<a href="/settings" class="back-btn" title="Back to settings" aria-label="Back to settings">
 				<ChevronLeft size={20} />
 			</a>
 			<h1 class="page-title">User management<span class="accent-dot" aria-hidden="true">.</span></h1>
-			<span class="wm-small">Crapnote<span class="wm-dot" aria-hidden="true"></span></span>
 		</header>
 
 		<!-- Create user -->
@@ -450,22 +450,26 @@
 	}
 	.accent-dot { color: var(--accent); }
 
-	.wm-small {
+	.wordmark {
 		font-family: var(--serif);
 		font-weight: 800;
-		font-size: 1.2rem;
-		letter-spacing: -0.02em;
-		color: rgb(122, 114, 103);
+		font-size: 1.5rem;
+		letter-spacing: -0.04em;
+		line-height: 1;
+		color: var(--text);
+		text-decoration: none;
 		display: inline-flex;
 		align-items: baseline;
+		flex-shrink: 0;
 	}
-	.wm-dot {
+	.wordmark:hover { opacity: 0.8; }
+	.wordmark-dot {
 		display: inline-block;
-		width: 5px;
-		height: 5px;
+		width: 7px;
+		height: 7px;
 		border-radius: 50%;
 		background: var(--accent);
-		margin-left: 2px;
+		margin-left: 3px;
 		margin-bottom: 1px;
 	}
 

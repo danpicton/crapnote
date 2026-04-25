@@ -226,3 +226,12 @@ describe('Admin page', () => {
 		).toBeFalsy();
 	});
 });
+
+describe('Admin — Typemark', () => {
+	it('typemark is a link to the home page', async () => {
+		render(AdminPage);
+		await waitFor(() => screen.getByRole('heading', { name: /user management/i }));
+		const link = screen.getByRole('link', { name: /^crapnote/i });
+		expect(link).toHaveAttribute('href', '/');
+	});
+});

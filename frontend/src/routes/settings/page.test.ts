@@ -167,3 +167,11 @@ describe('Settings — Change password', () => {
 		expect(mockApi.auth.changePassword).not.toHaveBeenCalled();
 	});
 });
+
+describe('Settings — Typemark', () => {
+	it('typemark is a link to the home page', () => {
+		render(SettingsPage);
+		const link = screen.getByRole('link', { name: /^crapnote/i });
+		expect(link).toHaveAttribute('href', '/');
+	});
+});
