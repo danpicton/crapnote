@@ -959,7 +959,7 @@
 						type="text"
 						value={selectedNote.title}
 						oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
-						placeholder="Untitled"
+						placeholder="Note title"
 					/>
 				</div>
 			</div>
