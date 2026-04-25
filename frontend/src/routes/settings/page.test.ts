@@ -51,28 +51,28 @@ describe('Settings — Appearance', () => {
 		expect(screen.getByRole('heading', { name: /appearance/i })).toBeInTheDocument();
 	});
 
-	it('shows a theme toggle button', () => {
+	it('shows a Dark mode toggle switch', () => {
 		render(SettingsPage);
-		expect(screen.getByRole('button', { name: /dark mode|light mode/i })).toBeInTheDocument();
+		expect(screen.getByRole('switch', { name: /dark mode/i })).toBeInTheDocument();
 	});
 
-	it('labels the button "Enable dark mode" when theme is light', () => {
+	it('toggle is unchecked when theme is light', () => {
 		mockTheme.current = 'light';
 		render(SettingsPage);
-		expect(screen.getByRole('button', { name: /enable dark mode/i })).toBeInTheDocument();
+		expect(screen.getByRole('switch', { name: /dark mode/i })).not.toBeChecked();
 	});
 
-	it('labels the button "Enable light mode" when theme is dark', () => {
+	it('toggle is checked when theme is dark', () => {
 		mockTheme.current = 'dark';
 		render(SettingsPage);
-		expect(screen.getByRole('button', { name: /enable light mode/i })).toBeInTheDocument();
+		expect(screen.getByRole('switch', { name: /dark mode/i })).toBeChecked();
 	});
 
-	it('calls theme.toggle() when the button is clicked', async () => {
+	it('calls theme.toggle() when the switch is clicked', async () => {
 		mockTheme.current = 'light';
 		mockTheme.toggle = vi.fn();
 		render(SettingsPage);
-		await fireEvent.click(screen.getByRole('button', { name: /enable dark mode/i }));
+		await fireEvent.click(screen.getByRole('switch', { name: /dark mode/i }));
 		expect(mockTheme.toggle).toHaveBeenCalledOnce();
 	});
 });

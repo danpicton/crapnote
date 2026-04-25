@@ -36,6 +36,12 @@ async function createTagInPopover(page: Page, name: string) {
   await expect(page.locator('.note-tag-chip', { hasText: name })).toBeVisible();
 }
 
+/** Open the Tags pane-tab to reveal the tag panel. */
+async function openTagsTab(page: Page) {
+  await page.getByRole('group', { name: /filter notes/i }).getByRole('button', { name: /^tags/i }).click();
+  await expect(page.getByRole('group', { name: /tag filters/i })).toBeVisible();
+}
+
 test.describe('Tags', () => {
   test.beforeEach(async ({ page }) => {
     await login(page);
@@ -46,7 +52,7 @@ test.describe('Tags', () => {
     await openTagPopover(page);
     await createTagInPopover(page, 'e2e-tag');
 
-    // Chip appears above the title
+    // Chip appears in the editor status bar
     await expect(page.locator('.note-tag-chip', { hasText: 'e2e-tag' })).toBeVisible();
 
     // Checkbox in popover is checked
@@ -54,13 +60,14 @@ test.describe('Tags', () => {
     await expect(checkbox).toBeChecked();
   });
 
-  test('tag appears in sidebar filter after being applied', async ({ page }) => {
+  test('tag appears in tag panel after being applied', async ({ page }) => {
     await createNote(page, 'Sidebar filter note');
     await openTagPopover(page);
     await createTagInPopover(page, 'sidebar-tag');
 
-    // Sidebar pill should appear
-    await expect(page.locator('.filter-tags .tag-pill', { hasText: 'sidebar-tag' })).toBeVisible();
+    // Open the Tags pane-tab to reveal the tag panel
+    await openTagsTab(page);
+    await expect(page.locator('.tag-panel-item', { hasText: 'sidebar-tag' })).toBeVisible();
   });
 
   test('filtering by tag shows only tagged notes', async ({ page }) => {
@@ -72,9 +79,10 @@ test.describe('Tags', () => {
 
     await createNote(page, 'Untagged note');
 
-    // Register wait BEFORE the click — the GET fires immediately with no debounce
+    // Open the Tags tab then click the tag in the panel
+    await openTagsTab(page);
     const filterDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
-    await page.locator('.filter-tags .tag-pill', { hasText: 'filter-tag' }).click();
+    await page.locator('.tag-panel-item', { hasText: 'filter-tag' }).click();
     await filterDone;
 
     // Only tagged note visible in list
@@ -82,7 +90,7 @@ test.describe('Tags', () => {
     await expect(page.getByRole('list').getByText('Untagged note')).not.toBeVisible();
   });
 
-  test('"All" pill restores full note list', async ({ page }) => {
+  test('"All" tab restores full note list', async ({ page }) => {
     await createNote(page, 'Note A');
     await openTagPopover(page);
     await createTagInPopover(page, 'restore-tag');
@@ -90,15 +98,16 @@ test.describe('Tags', () => {
 
     await createNote(page, 'Note B');
 
-    // Activate tag filter — set up wait before click
+    // Activate tag filter via the Tags pane-tab
+    await openTagsTab(page);
     let notesDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
-    await page.locator('.filter-tags .tag-pill', { hasText: 'restore-tag' }).click();
+    await page.locator('.tag-panel-item', { hasText: 'restore-tag' }).click();
     await notesDone;
     await expect(page.getByRole('list').getByText('Note B')).not.toBeVisible();
 
-    // Click All — set up wait before click
+    // Click the All tab to restore the full list
     notesDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
-    await page.locator('.filter-fixed .tag-pill', { hasText: 'All' }).click();
+    await page.getByRole('group', { name: /filter notes/i }).getByRole('button', { name: /^all/i }).click();
     await notesDone;
     await expect(page.getByRole('list').getByText('Note B')).toBeVisible();
   });
@@ -108,13 +117,13 @@ test.describe('Tags', () => {
     await openTagPopover(page);
     await createTagInPopover(page, 'chip-tag');
 
-    // Register wait before clicking the chip
+    // Click the chip — this activates the tag filter and opens the tag panel
     const filterDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
     await page.locator('.note-tag-chip', { hasText: 'chip-tag' }).click();
     await filterDone;
 
-    // Sidebar filter pill should be active
-    await expect(page.locator('.filter-tags .tag-pill.tag-pill-active', { hasText: 'chip-tag' })).toBeVisible();
+    // The Tags tab should be active and the tag item highlighted in the panel
+    await expect(page.locator('.tag-panel-item.tag-panel-active', { hasText: 'chip-tag' })).toBeVisible();
   });
 
   test('can remove a tag from a note', async ({ page }) => {
@@ -144,29 +153,32 @@ test.describe('Tags', () => {
 
     await createNote(page, 'Plain note');
 
-    // Activate starred filter — register wait before click
+    // Activate starred filter via the Starred pane-tab
     const filterDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
-    await page.locator('.filter-fixed .tag-pill', { hasText: 'Starred' }).click();
+    await page.getByRole('group', { name: /filter notes/i }).getByRole('button', { name: /^starred/i }).click();
     await filterDone;
 
     await expect(page.getByRole('list').getByText('Starred note')).toBeVisible();
     await expect(page.getByRole('list').getByText('Plain note')).not.toBeVisible();
   });
 
-  test('tag disappears from filter when no notes have it', async ({ page }) => {
+  test('tag disappears from tag panel when no notes have it', async ({ page }) => {
     await createNote(page, 'Solo tag note');
     await openTagPopover(page);
     await createTagInPopover(page, 'solo-tag');
 
-    await expect(page.locator('.filter-tags .tag-pill', { hasText: 'solo-tag' })).toBeVisible();
+    // Tag appears in panel
+    await openTagsTab(page);
+    await expect(page.locator('.tag-panel-item', { hasText: 'solo-tag' })).toBeVisible();
 
     // Remove the tag — register wait before unchecking
+    await openTagPopover(page);
     const checkbox = page.locator('.popover-item').filter({ hasText: 'solo-tag' }).locator('input[type=checkbox]');
     const deleteDone = page.waitForResponse((r) => r.url().includes('/tags/') && r.request().method() === 'DELETE');
     await checkbox.uncheck();
     await deleteDone;
 
-    // Pill should disappear (pseudo-erasure)
-    await expect(page.locator('.filter-tags .tag-pill', { hasText: 'solo-tag' })).not.toBeVisible();
+    // Tag panel item should disappear (pseudo-erasure)
+    await expect(page.locator('.tag-panel-item', { hasText: 'solo-tag' })).not.toBeVisible();
   });
 });

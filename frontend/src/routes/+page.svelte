@@ -69,6 +69,7 @@
 	let newTagName = $state('');
 	let activeTagId = $state<number | null>(null);
 	let starredOnly = $state(false);
+	let showTagsPanel = $state(false);
 	// Note action menu
 	let showNoteMenu = $state(false);
 
@@ -120,6 +121,8 @@
 
 	// Only show tags that have at least one note (active or trashed); pure UI erasure
 	let visibleTags = $derived(allTags.filter(t => t.note_count > 0));
+	let starredNoteCount = $derived(notes.filter(n => n.starred).length);
+	let tagsTabActive = $derived(activeTagId !== null);
 
 	let selectedNote = $derived(notes.find((n) => n.id === selectedId) ?? null);
 
@@ -527,22 +530,13 @@
 		selectedId = dup.id;
 	}
 
-	let tagFilterEl = $state<HTMLDivElement | null>(null);
-	let tagFilterExpanded = $state(false);
-	let tagFilterScrollable = $state(false);
-
-	function onTagFilterMouseEnter() {
-		if (isMobile()) return;
-		tagFilterExpanded = true;
-	}
-	function onTagFilterMouseLeave() {
-		if (isMobile()) return;
-		tagFilterScrollable = false;
-		tagFilterExpanded = false;
-		if (tagFilterEl) tagFilterEl.scrollTop = 0;
-	}
-	function onTagFilterTransitionEnd() {
-		if (tagFilterExpanded) tagFilterScrollable = true;
+	function toggleTagsTab() {
+		if (tagsTabActive) {
+			activeTagId = null;
+			showTagsPanel = false;
+		} else {
+			showTagsPanel = !showTagsPanel;
+		}
 	}
 
 	async function applyFilter(tagId: number | null, starred: boolean) {
@@ -793,52 +787,46 @@
 			<Search size={13} />
 			<input
 				type="search"
-				placeholder="Search notes…"
+				placeholder="Search {notes.length} notes"
 				bind:this={searchInput}
 				bind:value={search}
 				oninput={handleSearch}
 			/>
+			<span class="search-shortcut" aria-hidden="true">⌘K</span>
 		</div>
 
-		<div class="filter-bar" role="group" aria-label="Filter notes">
-			<div class="filter-fixed">
-				<button
-					class="tag-pill"
-					class:tag-pill-active={activeTagId === null && !starredOnly}
-					onclick={() => applyFilter(null, false)}
-				>All</button>
-				<button
-					class="tag-pill tag-pill-star"
-					class:tag-pill-active={starredOnly}
-					onclick={toggleStarFilter}
-					title="Starred notes"
-				><Star size={11} /> Starred</button>
-			</div>
+		<div class="pane-switcher" role="group" aria-label="Filter notes">
+			<button
+				class="pane-tab"
+				class:pane-tab-active={activeTagId === null && !starredOnly}
+				onclick={() => { applyFilter(null, false); showTagsPanel = false; }}
+			>All<span class="tab-sep"> · </span><span class="tab-count">{notes.length}</span></button>
+			<button
+				class="pane-tab"
+				class:pane-tab-active={starredOnly}
+				onclick={() => { toggleStarFilter(); showTagsPanel = false; }}
+			>Starred<span class="tab-sep"> · </span><span class="tab-count">{starredNoteCount}</span></button>
 			{#if visibleTags.length > 0}
-				<div
-					class="filter-tags"
-					class:expanded={tagFilterExpanded}
-					class:scrollable={tagFilterScrollable}
-					bind:this={tagFilterEl}
-					role="group"
-					aria-label="Tag filters"
-					onmouseenter={onTagFilterMouseEnter}
-					onmouseleave={onTagFilterMouseLeave}
-					ontransitionend={onTagFilterTransitionEnd}
-				>
-					{#each visibleTags as tag (tag.id)}
-						{@const c = tagColor(tag)}
-						<button
-							class="tag-pill"
-							class:tag-pill-active={activeTagId === tag.id}
-							style="--tag-bg:{c.bg};--tag-text:{c.text}"
-							onclick={() => filterByTag(activeTagId === tag.id ? null : tag.id)}
-							title="{tag.name} ({tag.note_count})"
-						>{tag.name}</button>
-					{/each}
-				</div>
+				<button
+					class="pane-tab"
+					class:pane-tab-active={tagsTabActive || showTagsPanel}
+					onclick={toggleTagsTab}
+				>Tags<span class="tab-sep"> · </span><span class="tab-count">{visibleTags.length}</span></button>
 			{/if}
 		</div>
+		{#if showTagsPanel || tagsTabActive}
+			<div class="tag-panel" role="group" aria-label="Tag filters">
+				{#each visibleTags as tag (tag.id)}
+					{@const c = tagColor(tag)}
+					<button
+						class="tag-panel-item"
+						class:tag-panel-active={activeTagId === tag.id}
+						onclick={() => { filterByTag(activeTagId === tag.id ? null : tag.id); showTagsPanel = false; }}
+						title="{tag.name} ({tag.note_count})"
+					><span class="tag-dot" style="background:{c.text}"></span>{tag.name}</button>
+				{/each}
+			</div>
+		{/if}
 
 		<ul class="note-list" role="list">
 			{#each notes as note (note.id)}
@@ -1134,61 +1122,78 @@
 		color: var(--text);
 	}
 	.search-box input::placeholder { color: var(--text-4); }
+	.search-shortcut {
+		font-size: 0.625rem;
+		color: var(--text-4);
+		background: var(--bg-hover);
+		border: 1px solid var(--border);
+		padding: 0.1rem 0.3rem;
+		border-radius: 2px;
+		flex-shrink: 0;
+		font-family: var(--mono);
+	}
 
-	/* Filter bar */
-	.filter-bar {
+	/* Pane switcher */
+	.pane-switcher {
 		display: flex;
-		flex-direction: column;
+		align-items: center;
+		padding: 0 1.25rem;
 		border-bottom: 1px solid var(--border);
 		flex-shrink: 0;
 	}
-	.filter-fixed {
-		display: flex;
-		gap: 0.25rem;
-		padding: 0.5rem 1.25rem 0.375rem;
-		flex-wrap: wrap;
+	.pane-tab {
+		font-family: var(--sans);
+		font-size: 0.6875rem;
+		font-weight: 500;
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		color: var(--text-4);
+		background: none;
+		border: none;
+		border-bottom: 2px solid transparent;
+		padding: 0.6rem 0;
+		margin-right: 1.25rem;
+		cursor: pointer;
+		display: inline-flex;
+		align-items: center;
 	}
-	.filter-tags {
-		display: flex;
-		flex-wrap: nowrap;
-		gap: 0.25rem;
-		padding: 0 1.25rem 0.5rem;
-		overflow: hidden;
-		max-height: 1.875rem;
-		transition: max-height 0.2s ease;
-	}
-	.filter-tags.expanded { max-height: 10rem; flex-wrap: wrap; }
-	.filter-tags.scrollable { overflow-y: auto; }
+	.pane-tab:last-child { margin-right: 0; }
+	.pane-tab:hover { color: var(--text-2); }
+	.pane-tab-active { color: var(--text) !important; border-bottom-color: var(--accent); }
+	.tab-sep { color: var(--text-4); font-weight: 400; letter-spacing: 0; }
+	.tab-count { font-size: 0.625rem; color: var(--text-4); font-weight: 400; letter-spacing: 0; }
+	.pane-tab-active .tab-count { color: var(--text-3); }
 
-	.tag-pill {
+	/* Tag panel (shown when Tags tab is active) */
+	.tag-panel {
+		padding: 0.375rem 1.25rem 0.5rem;
+		border-bottom: 1px solid var(--border);
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.25rem;
+		flex-shrink: 0;
+	}
+	.tag-panel-item {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.3rem;
 		font-family: var(--sans);
 		font-size: 0.6875rem;
-		font-weight: 500;
-		padding: 0.2rem 0.6rem;
-		border: 1px solid var(--border-md);
-		background: var(--tag-bg, var(--bg-hover));
-		color: var(--tag-text, var(--text-3));
+		color: var(--text-3);
+		background: var(--bg-hover);
+		border: 1px solid var(--border);
+		padding: 0.2rem 0.5rem;
 		cursor: pointer;
-		white-space: nowrap;
+	}
+	.tag-panel-item:hover { color: var(--text); background: var(--bg-alt); }
+	.tag-panel-active { color: var(--text) !important; background: var(--bg-alt) !important; border-color: var(--border-md) !important; }
+	.tag-dot {
+		display: inline-block;
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
 		flex-shrink: 0;
 	}
-	.tag-pill:hover { opacity: 0.8; }
-	.tag-pill-active {
-		background: var(--tag-text, var(--accent)) !important;
-		color: white !important;
-		border-color: transparent !important;
-	}
-	.tag-pill:not([style]).tag-pill-active {
-		background: var(--accent) !important;
-		color: white !important;
-	}
-	.tag-pill-star { --tag-bg: #fef9c3; --tag-text: #854d0e; }
-	.tag-pill-star.tag-pill-active { background: #854d0e !important; color: white !important; }
-	:global([data-theme="dark"]) .tag-pill-star { --tag-bg: #451a03; --tag-text: #fde68a; }
-	:global([data-theme="dark"]) .tag-pill-star.tag-pill-active { background: #fde68a !important; color: #451a03 !important; }
 
 
 

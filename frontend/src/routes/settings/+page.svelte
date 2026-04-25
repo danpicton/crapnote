@@ -62,7 +62,6 @@
 		}
 	}
 
-	let themeLabel = $derived(theme.current === 'light' ? 'Enable dark mode' : 'Enable light mode');
 </script>
 
 <svelte:head>
@@ -156,7 +155,17 @@
 				<p>How Crapnote looks on this device.</p>
 			</div>
 			<div class="section-body">
-				<button class="btn-default" onclick={() => theme.toggle()}>{themeLabel}</button>
+				<label class="theme-toggle-row">
+					<input
+						type="checkbox"
+						role="switch"
+						aria-label="Dark mode"
+						checked={theme.current === 'dark'}
+						onchange={() => theme.toggle()}
+					/>
+					<span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
+					<span class="toggle-text">Dark mode</span>
+				</label>
 			</div>
 		</section>
 
@@ -341,6 +350,38 @@
 	.btn-chevron .chevron { color: var(--text-3); }
 
 	.export-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+
+	/* Dark mode toggle switch */
+	.theme-toggle-row {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.625rem;
+		cursor: pointer;
+		user-select: none;
+	}
+	.theme-toggle-row input[type="checkbox"] { position: absolute; opacity: 0; width: 0; height: 0; }
+	.toggle-track {
+		position: relative;
+		width: 2.25rem;
+		height: 1.25rem;
+		border-radius: 9999px;
+		background: var(--border-md);
+		flex-shrink: 0;
+		transition: background 0.15s;
+	}
+	.theme-toggle-row input:checked ~ .toggle-track { background: var(--accent); }
+	.toggle-thumb {
+		position: absolute;
+		top: 0.1875rem;
+		left: 0.1875rem;
+		width: 0.875rem;
+		height: 0.875rem;
+		border-radius: 50%;
+		background: white;
+		transition: transform 0.15s;
+	}
+	.theme-toggle-row input:checked ~ .toggle-track .toggle-thumb { transform: translateX(1rem); }
+	.toggle-text { font-size: 0.875rem; color: var(--text); font-family: var(--sans); }
 
 	.hint { font-size: 0.8125rem; color: var(--text-3); margin: 0; line-height: 1.5; }
 	.hint code { font-family: var(--mono); font-size: 0.75rem; background: var(--bg-hover); padding: 1px 5px; color: var(--text-2); }
