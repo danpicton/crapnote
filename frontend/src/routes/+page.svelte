@@ -593,6 +593,7 @@
 		}
 		newTagName = '';
 		allTags = await api.tags.list();
+		showTagPopover = false;
 	}
 
 	function scheduleAutoSave(field: 'title' | 'body', value: string) {
