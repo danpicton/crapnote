@@ -542,6 +542,7 @@
 			activeTagId = null;
 			showTagsPanel = false;
 		} else {
+			starredOnly = false;
 			showTagsPanel = !showTagsPanel;
 		}
 	}
