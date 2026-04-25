@@ -55,6 +55,8 @@
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
 	// Helpers for detecting mobile viewport
 	function isMobile() { return window.matchMedia('(max-width: 767px)').matches; }
+	// Platform-aware modifier key label (⌘ on Mac, Ctrl on everything else)
+	const modKey = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+';
 	// Editor command ref
 	let editorRef = $state<EditorRef | null>(null);
 	// Title input ref (used to focus + highlight on new-note creation)
@@ -793,7 +795,7 @@
 				bind:value={search}
 				oninput={handleSearch}
 			/>
-			<span class="search-shortcut" aria-hidden="true">⌘K</span>
+			<span class="search-shortcut" aria-hidden="true">{modKey}K</span>
 		</div>
 
 		<div class="pane-switcher" role="group" aria-label="Filter notes">
@@ -815,7 +817,7 @@
 				>Tags<span class="tab-sep"> · </span><span class="tab-count">{visibleTags.length}</span></button>
 			{/if}
 		</div>
-		{#if showTagsPanel || tagsTabActive}
+		{#if showTagsPanel}
 			<div class="tag-panel" role="group" aria-label="Tag filters">
 				{#each visibleTags as tag (tag.id)}
 					{@const c = tagColor(tag)}
@@ -827,7 +829,7 @@
 					><span class="tag-dot" style="background:{c.text}"></span>{tag.name}</button>
 				{/each}
 			</div>
-		{/if}
+		{:else}
 
 		<ul class="note-list" role="list">
 			{#each notes as note (note.id)}
@@ -867,6 +869,7 @@
 				<li class="empty">No notes yet.</li>
 			{/if}
 		</ul>
+		{/if}
 
 		<div class="sidebar-bottom">
 			<span class="sidebar-user">{auth.user?.username ?? ''}</span>
@@ -978,10 +981,13 @@
 					<span class="status-tags-label">Tags</span>
 					{#each noteTags as tag (tag.id)}
 						{@const c = tagColor(tag)}
-						<button class="note-tag-chip" style="--tag-bg:{c.bg};--tag-text:{c.text}" onclick={() => applyFilter(activeTagId === tag.id ? null : tag.id, starredOnly)} title="Filter by {tag.name}">{tag.name}</button>
+						<button class="note-tag-chip" onclick={() => applyFilter(activeTagId === tag.id ? null : tag.id, starredOnly)} title="Filter by {tag.name}">
+							<span class="status-tag-dot" style="background:{c.text}"></span>
+							<span class="status-tag-word">{tag.name}</span>
+						</button>
 					{/each}
 					<div class="tag-popover-wrap">
-						<button class="status-add-tag" onclick={() => (showTagPopover = !showTagPopover)} title="Tags">+ tag</button>
+						<button class="status-add-tag" onclick={() => (showTagPopover = !showTagPopover)} title="Tags">+ add tag</button>
 						{#if showTagPopover}
 							<div class="tag-popover-backdrop" onclick={() => (showTagPopover = false)} role="presentation"></div>
 							<div class="tag-popover">
@@ -1001,6 +1007,7 @@
 							</div>
 						{/if}
 					</div>
+					<span class="status-shortcut" aria-hidden="true">{modKey}T</span>
 				</span>
 			</div>
 		{:else}
@@ -1515,29 +1522,47 @@
 		margin-left: auto;
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: 0.625rem;
 	}
 	.status-tags-label {
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
-		font-size: 0.625rem;
+		font-size: 0.6875rem;
 		color: var(--text-4);
 	}
+	/* Typographic tag: dot + word, no fill or border */
 	.note-tag-chip {
-		position: relative;
-		z-index: 31;
 		display: inline-flex;
 		align-items: center;
-		gap: 0.3rem;
-		font-size: 0.6875rem;
-		font-family: var(--sans);
-		padding: 0.15rem 0.5rem;
-		background: var(--tag-bg, var(--bg-hover));
-		color: var(--tag-text, var(--text-2));
-		border: 1px solid var(--border);
+		gap: 0.375rem;
+		background: none;
+		border: none;
+		padding: 0;
 		cursor: pointer;
 	}
-	.note-tag-chip:hover { opacity: 0.75; }
+	.note-tag-chip:hover .status-tag-word { color: var(--text-2); }
+	.status-tag-dot {
+		width: 5px;
+		height: 5px;
+		border-radius: 50%;
+		flex-shrink: 0;
+	}
+	.status-tag-word {
+		font-size: 0.8125rem;
+		font-family: var(--sans);
+		font-weight: 400;
+		color: var(--text);
+	}
+	.status-shortcut {
+		font-size: 0.625rem;
+		color: var(--text-4);
+		background: var(--bg-hover);
+		border: 1px solid var(--border);
+		padding: 0.1rem 0.3rem;
+		border-radius: 2px;
+		flex-shrink: 0;
+		font-family: var(--mono);
+	}
 
 	.status-add-tag {
 		background: none;
