@@ -55,7 +55,8 @@ test.describe('Tags', () => {
     // Chip appears in the editor status bar
     await expect(page.locator('.note-tag-chip', { hasText: 'e2e-tag' })).toBeVisible();
 
-    // Checkbox in popover is checked
+    // Reopen popover (it closes automatically after tag creation) and check the checkbox
+    await openTagPopover(page);
     const checkbox = page.locator('.popover-item').filter({ hasText: 'e2e-tag' }).locator('input[type=checkbox]');
     await expect(checkbox).toBeChecked();
   });
@@ -131,7 +132,8 @@ test.describe('Tags', () => {
     await openTagPopover(page);
     await createTagInPopover(page, 'remove-tag');
 
-    // Uncheck via popover — register wait before unchecking
+    // Reopen popover (it closes automatically after tag creation) and uncheck
+    await openTagPopover(page);
     const checkbox = page.locator('.popover-item').filter({ hasText: 'remove-tag' }).locator('input[type=checkbox]');
     const deleteDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.url().includes('/tags/') && r.request().method() === 'DELETE');
     await checkbox.uncheck();
