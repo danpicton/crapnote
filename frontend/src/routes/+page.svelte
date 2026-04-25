@@ -124,7 +124,6 @@
 
 	// Only show tags that have at least one note (active or trashed); pure UI erasure
 	let visibleTags = $derived(allTags.filter(t => t.note_count > 0));
-	let starredNoteCount = $derived(notes.filter(n => n.starred).length);
 	let tagsTabActive = $derived(activeTagId !== null);
 
 	let selectedNote = $derived(notes.find((n) => n.id === selectedId) ?? null);
@@ -558,10 +557,6 @@
 			selectedId = null;
 			noteTags = [];
 		}
-	}
-
-	function filterByTag(id: number | null) {
-		return applyFilter(id, starredOnly);
 	}
 
 	function toggleStarFilter() {
