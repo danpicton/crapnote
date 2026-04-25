@@ -39,8 +39,8 @@
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, Minus, Undo2, Redo2, Image, Link,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
-		ChevronRight, Search, Tag as TagIcon,
-		CloudUpload, CheckCircle2, Lock,
+		ChevronRight, Search,
+		CloudUpload, CheckCircle2, Lock, MoreHorizontal,
 	} from 'lucide-svelte';
 
 	let notes = $state<Note[]>([]);
@@ -69,6 +69,8 @@
 	let newTagName = $state('');
 	let activeTagId = $state<number | null>(null);
 	let starredOnly = $state(false);
+	// Note action menu
+	let showNoteMenu = $state(false);
 
 	const PALETTE = [
 		// Reds / Pinks / Rose
@@ -361,6 +363,7 @@
 			void refreshSyncStatus();
 		};
 		const handleKeydown = (e: KeyboardEvent) => {
+			if (e.key === 'Escape') { showTagPopover = false; }
 			const id = matchShortcut(e, { skipInInputs: true });
 			if (!id) return;
 			runShortcut(id, e);
@@ -508,7 +511,20 @@
 		if (isMobile()) { goto(`/notes/${id}`); return; }
 		selectedId = id;
 		showTagPopover = false;
+		showNoteMenu = false;
 		noteTags = await api.tags.listForNote(id);
+	}
+
+	async function duplicateNote(id: number) {
+		const note = notes.find(n => n.id === id);
+		if (!note) return;
+		showNoteMenu = false;
+		const dup = await api.notes.create((note.title || 'Untitled') + ' (copy)');
+		if (note.body) await api.notes.update(dup.id, { body: note.body });
+		dup.body = note.body;
+		const firstUnpinned = notes.findIndex(n => !n.pinned);
+		notes = firstUnpinned === -1 ? [...notes, dup] : [...notes.slice(0, firstUnpinned), dup, ...notes.slice(firstUnpinned)];
+		selectedId = dup.id;
 	}
 
 	let tagFilterEl = $state<HTMLDivElement | null>(null);
@@ -516,7 +532,7 @@
 	let tagFilterScrollable = $state(false);
 
 	function onTagFilterMouseEnter() {
-		if (isMobile()) return; // touch devices fire mouseenter on tap — skip to avoid layout jump
+		if (isMobile()) return;
 		tagFilterExpanded = true;
 	}
 	function onTagFilterMouseLeave() {
@@ -734,7 +750,22 @@
 		if (e.key === 'Enter') { e.preventDefault(); applyLink(); }
 		if (e.key === 'Escape') { showLinkDialog = false; }
 	}
+
+	function wordCount(body: string): number {
+		if (!body?.trim()) return 0;
+		return body
+			.replace(/```[\s\S]*?```/g, ' ')
+			.replace(/`[^`]*`/g, ' ')
+			.replace(/!\[.*?\]\(.*?\)/g, ' ')
+			.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+			.replace(/[*_#>`~\-=|[\]()]/g, ' ')
+			.trim()
+			.split(/\s+/)
+			.filter(w => /\w/.test(w))
+			.length;
+	}
 </script>
+
 
 <svelte:head>
 	<title>Crapnote</title>
@@ -744,7 +775,7 @@
 	<!-- ── Sidebar ── -->
 	<aside class="sidebar">
 		<header class="sidebar-header">
-			<span class="app-name">Crapnote</span>
+			<a href="/" class="wordmark app-name">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
 			{#if !isOnline}
 				<span class="offline-badge" title="You are offline — changes will sync when reconnected">Offline</span>
 			{/if}
@@ -753,16 +784,16 @@
 					<ChevronRight size={18} />
 				</button>
 			{/if}
-			<button class="hdr-btn" onclick={newNote} title="New note" aria-label="New note">
-				<Plus size={18} />
+			<button class="hdr-btn new-btn" onclick={newNote} title="New note" aria-label="New note">
+				<Plus size={16} />
 			</button>
 		</header>
 
 		<div class="search-box">
-			<Search size={14} class="search-icon" />
+			<Search size={13} />
 			<input
 				type="search"
-				placeholder="Search…"
+				placeholder="Search notes…"
 				bind:this={searchInput}
 				bind:value={search}
 				oninput={handleSearch}
@@ -812,32 +843,34 @@
 		<ul class="note-list" role="list">
 			{#each notes as note (note.id)}
 				<li class="note-item" class:selected={note.id === selectedId}>
-					<button class="note-btn" onclick={() => selectNote(note.id)}>
-						<span class="note-title-row">
+					<div class="note-btn" role="button" tabindex="0" onclick={() => selectNote(note.id)} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectNote(note.id)}>
+						<div class="note-row-top">
 							<span class="note-title" class:untitled={!note.title}>{note.title || 'Untitled'}</span>
-							<span class="note-badges">
-								{#if note.pinned}<span title="Pinned"><Pin size={11} /></span>{/if}
-								{#if note.starred}<span title="Starred"><Star size={11} /></span>{/if}
+							<span class="note-meta-icons">
+								{#if note.pinned}
+									<button class="meta-icon-btn" onclick={(e) => { e.stopPropagation(); togglePin(note.id); }} title="Unpin" aria-label="Unpin"><Pin size={11} /></button>
+								{/if}
+								{#if note.starred}
+									<button class="meta-icon-btn meta-star" onclick={(e) => { e.stopPropagation(); toggleStar(note.id); }} title="Unstar" aria-label="Unstar"><Star size={11} /></button>
+								{/if}
 								{#if !isOnline && noteHasImages(note.body)}
-									<span title="Images not available offline"><Lock size={11} /></span>
+									<span title="Images unavailable offline"><Lock size={11} /></span>
 								{/if}
 							</span>
+						</div>
+						<span class="note-date">
+							{new Date(note.created_at ?? note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(note.created_at ?? note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
 						</span>
-						<span class="note-date">{new Date(note.updated_at).toLocaleDateString()}</span>
-					</button>
-					<div class="note-actions">
-						<button class="act-btn" onclick={() => toggleStar(note.id)} title={note.starred ? 'Unstar' : 'Star'}>
-							<Star size={13} class={note.starred ? 'icon-active' : ''} />
-						</button>
-						<button class="act-btn" onclick={() => togglePin(note.id)} title={note.pinned ? 'Unpin' : 'Pin'}>
-							<Pin size={13} class={note.pinned ? 'icon-active' : ''} />
-						</button>
-						<button class="act-btn" onclick={() => archiveNote(note.id)} title="Move to archive" aria-label="Move to archive">
-							<Archive size={13} />
-						</button>
-						<button class="act-btn danger" onclick={() => deleteNote(note.id)} title="Delete">
-							<Trash2 size={13} />
-						</button>
+					</div>
+					<div class="note-hover-actions">
+						{#if !note.starred}
+							<button class="act-btn" onclick={() => toggleStar(note.id)} title="Star"><Star size={12} /></button>
+						{/if}
+						{#if !note.pinned}
+							<button class="act-btn" onclick={() => togglePin(note.id)} title="Pin"><Pin size={12} /></button>
+						{/if}
+						<button class="act-btn" onclick={() => archiveNote(note.id)} title="Move to archive" aria-label="Move to archive"><Archive size={12} /></button>
+						<button class="act-btn danger" onclick={() => deleteNote(note.id)} title="Delete"><Trash2 size={12} /></button>
 					</div>
 				</li>
 			{/each}
@@ -847,18 +880,11 @@
 		</ul>
 
 		<div class="sidebar-bottom">
-			<div class="bottom-left">
-				<a href="/archive" class="bottom-btn icon-only" title="Archive">
-					<Archive size={16} />
-				</a>
-				<a href="/trash" class="bottom-btn icon-only" title="Trash">
-					<Trash2 size={16} />
-				</a>
-			</div>
-			<div class="bottom-right">
+			<span class="sidebar-user">{auth.user?.username ?? ''}</span>
+			<div class="bottom-actions">
 				<button
 					type="button"
-					class="sync-status"
+					class="bottom-btn"
 					class:sync-unsynced={syncStatus === 'unsynced'}
 					class:sync-syncing={syncStatus === 'syncing'}
 					title={syncTooltip}
@@ -866,18 +892,11 @@
 					disabled={syncStatus === 'syncing' || !isOnline}
 					onclick={manualSync}
 				>
-					{#if syncStatus === 'synced'}
-						<CheckCircle2 size={14} />
-					{:else}
-						<CloudUpload size={14} />
-					{/if}
+					{#if syncStatus === 'synced'}<CheckCircle2 size={14} />{:else}<CloudUpload size={14} />{/if}
 				</button>
-				<a href="/settings" class="bottom-btn icon-only" title="Settings">
-					<Settings size={16} />
-				</a>
-				<button class="bottom-btn icon-only" onclick={handleLogout} title="Log out">
-					<LogOut size={16} />
-				</button>
+				<a href="/archive" class="bottom-btn" title="Archive"><Archive size={15} /></a>
+				<a href="/settings" class="bottom-btn" title="Settings"><Settings size={15} /></a>
+				<button class="bottom-btn" onclick={handleLogout} title="Log out"><LogOut size={15} /></button>
 			</div>
 		</div>
 	</aside>
@@ -885,146 +904,116 @@
 	<!-- ── Editor pane ── -->
 	<main class="editor-pane">
 		{#if selectedNote}
-			<!-- Toolbar (above title) -->
 			<div class="toolbar" role="toolbar" aria-label="Formatting">
-				<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold">
-					<Bold size={14} />
-				</button>
-				<button class="tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic">
-					<Italic size={14} />
-				</button>
-				<button class="tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline">
-					<Underline size={14} />
-				</button>
+				<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold"><Bold size={13} /></button>
+				<button class="tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic"><Italic size={13} /></button>
+				<button class="tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline"><Underline size={13} /></button>
 				<div class="link-btn-wrap">
-					<button class="tb-btn" onclick={openLinkDialog} title="Insert link (Ctrl+K)">
-						<Link size={14} />
-					</button>
+					<button class="tb-btn" onclick={openLinkDialog} title="Insert link (Ctrl+K)"><Link size={13} /></button>
 					{#if showLinkDialog}
 						<div class="link-dialog-backdrop" onclick={() => (showLinkDialog = false)} role="presentation"></div>
 						<div class="link-dialog" role="dialog" aria-label="Insert link">
-							<input
-								class="link-dialog-input"
-								type="url"
-								placeholder="https://…"
-								bind:value={linkDialogHref}
-								onkeydown={linkInputKeydown}
-								use:focusInput
-							/>
+							<input class="link-dialog-input" type="url" placeholder="https://…" bind:value={linkDialogHref} onkeydown={linkInputKeydown} use:focusInput />
 							<button class="link-dialog-btn" onclick={applyLink}>Apply</button>
 						</div>
 					{/if}
 				</div>
 				<span class="tb-sep"></span>
-				<button class="tb-btn" onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote">
-					<Quote size={14} />
-				</button>
-				<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code">
-					<Code size={14} />
-				</button>
-				<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block">
-					<FileCode2 size={14} />
-				</button>
+				<button class="tb-btn" onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote"><Quote size={13} /></button>
+				<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code"><Code size={13} /></button>
+				<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={13} /></button>
 				<span class="tb-sep"></span>
-				<button class="tb-btn" onclick={() => cmd(wrapInBulletListCommand.key)} title="Bullet list">
-					<List size={14} />
-				</button>
-				<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list">
-					<ListOrdered size={14} />
-				</button>
-				<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule">
-					<Minus size={14} />
-				</button>
+				<button class="tb-btn" onclick={() => cmd(wrapInBulletListCommand.key)} title="Bullet list"><List size={13} /></button>
+				<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list"><ListOrdered size={13} /></button>
+				<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={13} /></button>
 				<span class="tb-sep"></span>
-				<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo">
-					<Undo2 size={14} />
-				</button>
-				<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo">
-					<Redo2 size={14} />
-				</button>
+				<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={13} /></button>
+				<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo"><Redo2 size={13} /></button>
 				<span class="tb-sep"></span>
-				<button class="tb-btn" onclick={() => cmd(insertImageCommand.key)} title="Insert image">
-					<Image size={14} />
-				</button>
+				<button class="tb-btn" onclick={() => cmd(insertImageCommand.key)} title="Insert image"><Image size={13} /></button>
 				<span class="tb-spacer"></span>
-				<span class="save-status">{saving ? 'Saving…' : ''}</span>
-			</div>
-
-			<!-- Tags (above title) + Title + Popover button (absolute right) -->
-			<div class="editor-header">
-				{#if noteTags.length > 0}
-					<div class="note-tags-chips">
-						{#each noteTags as tag (tag.id)}
-							{@const c = tagColor(tag)}
-							<button
-								class="note-tag-chip"
-								style="--tag-bg:{c.bg};--tag-text:{c.text}"
-								onclick={() => applyFilter(activeTagId === tag.id ? null : tag.id, starredOnly)}
-								title="Filter by {tag.name}"
-							><TagIcon size={9} />{tag.name}</button>
-						{/each}
-					</div>
-				{/if}
-				<input
-					bind:this={titleInput}
-					class="title-input"
-					type="text"
-					value={selectedNote.title}
-					oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
-					placeholder="Note title"
-				/>
-				<!-- Popover button: always visible, absolutely pinned to top-right -->
-				<!-- When no tags it sits level with the title; when tags exist it aligns with the first chip row -->
-				<div class="tag-popover-wrap">
-					<button
-						class="tag-chip-btn"
-						class:tag-chip-btn-active={noteTags.length > 0}
-						onclick={() => (showTagPopover = !showTagPopover)}
-						title="Tags"
-					>
-						<TagIcon size={11} />
-						{#if noteTags.length > 0}<span class="tb-tag-count">{noteTags.length}</span>{/if}
-					</button>
-					{#if showTagPopover}
-						<div class="tag-popover">
-							<p class="popover-label">Tags</p>
-							{#each visibleTags as tag (tag.id)}
-								{@const c = tagColor(tag)}
-								<label class="popover-item">
-									<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
-									<span class="popover-tag-dot" style="background:{c.text}"></span>
-									{tag.name}
-								</label>
-							{/each}
-							<div class="popover-new">
-								<input
-									class="popover-new-input"
-									type="text"
-									placeholder="New tag…"
-									bind:value={newTagName}
-									onkeydown={(e) => e.key === 'Enter' && createAndAddTag()}
-								/>
-								<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={12} /></button>
-							</div>
+				<button class="tb-btn tb-star" class:tb-star-on={selectedNote.starred} onclick={() => toggleStar(selectedNote.id)} title={selectedNote.starred ? 'Unstar' : 'Star'}><Star size={13} /></button>
+				<div class="note-menu-wrap">
+					<button class="tb-btn" onclick={() => (showNoteMenu = !showNoteMenu)} title="More actions" aria-label="More actions"><MoreHorizontal size={13} /></button>
+					{#if showNoteMenu}
+						<div class="note-menu-backdrop" onclick={() => (showNoteMenu = false)} role="presentation"></div>
+						<div class="note-menu" role="menu">
+							<button class="note-menu-item" role="menuitem" onclick={() => { togglePin(selectedNote.id); showNoteMenu = false; }}>
+								<Pin size={13} />{selectedNote.pinned ? 'Unpin note' : 'Pin note'}
+							</button>
+							<button class="note-menu-item" role="menuitem" onclick={() => duplicateNote(selectedNote.id)}>
+								<Plus size={13} />Duplicate note
+							</button>
+							<button class="note-menu-item danger" role="menuitem" onclick={() => { deleteNote(selectedNote.id); showNoteMenu = false; }}>
+								<Trash2 size={13} />Move to trash
+							</button>
 						</div>
 					{/if}
 				</div>
 			</div>
 
-			<!-- Editor body -->
+			<div class="editor-header">
+				<div class="editor-header-inner">
+					<input
+						bind:this={titleInput}
+						class="title-input"
+						type="text"
+						value={selectedNote.title}
+						oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
+						placeholder="Note title"
+					/>
+				</div>
+			</div>
+
 			{#key selectedId}
-				<Editor
-					value={selectedNote.body}
-					onchange={(md) => scheduleAutoSave('body', md)}
-					bind:ref={editorRef}
-					oninsertlink={openLinkDialog}
-				/>
+				<Editor value={selectedNote.body} onchange={(md) => scheduleAutoSave('body', md)} bind:ref={editorRef} oninsertlink={openLinkDialog} />
 			{/key}
 			{#if !isOnline && noteHasImages(selectedNote.body)}
-				<div class="offline-image-notice">
-					<Lock size={13} /> Images aren't available offline
-				</div>
+				<div class="offline-image-notice"><Lock size={13} /> Images aren't available offline</div>
 			{/if}
+
+			<!-- Bottom status bar -->
+			<div class="editor-statusbar">
+				<span class="status-meta">
+					{#if selectedNote.created_at}
+						Created {new Date(selectedNote.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(selectedNote.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+						<span class="status-sep" aria-hidden="true">·</span>
+					{/if}
+					{wordCount(selectedNote.body)} words
+					{#if saving}
+						<span class="status-sep" aria-hidden="true">·</span>
+						<span class="status-saving">Saving…</span>
+					{/if}
+				</span>
+				<span class="status-tags">
+					<span class="status-tags-label">Tags</span>
+					{#each noteTags as tag (tag.id)}
+						{@const c = tagColor(tag)}
+						<button class="note-tag-chip" style="--tag-bg:{c.bg};--tag-text:{c.text}" onclick={() => applyFilter(activeTagId === tag.id ? null : tag.id, starredOnly)} title="Filter by {tag.name}">{tag.name}</button>
+					{/each}
+					<div class="tag-popover-wrap">
+						<button class="status-add-tag" onclick={() => (showTagPopover = !showTagPopover)} title="Tags">+ tag</button>
+						{#if showTagPopover}
+							<div class="tag-popover-backdrop" onclick={() => (showTagPopover = false)} role="presentation"></div>
+							<div class="tag-popover">
+								<p class="popover-label">Tags</p>
+								{#each visibleTags as tag (tag.id)}
+									{@const c = tagColor(tag)}
+									<label class="popover-item">
+										<input type="checkbox" checked={!!noteTags.find(t => t.id === tag.id)} onchange={() => toggleTag(tag)} />
+										<span class="popover-tag-dot" style="background:{c.text}"></span>
+										{tag.name}
+									</label>
+								{/each}
+								<div class="popover-new">
+									<input class="popover-new-input" type="text" placeholder="New tag…" bind:value={newTagName} onkeydown={(e) => e.key === 'Enter' && createAndAddTag()} />
+									<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={12} /></button>
+								</div>
+							</div>
+						{/if}
+					</div>
+				</span>
+			</div>
 		{:else}
 			<div class="empty-state">
 				<p>Select a note or create a new one.</p>
@@ -1040,32 +1029,53 @@
 	/* ─── Layout ─────────────────────────────────────────── */
 	.app {
 		display: flex;
-		height: 100dvh; /* dvh handles mobile browser chrome */
+		height: 100dvh;
 		overflow: hidden;
+		font-family: var(--sans);
 	}
 
 	/* ─── Sidebar ────────────────────────────────────────── */
 	.sidebar {
-		width: 260px;
-		min-width: 200px;
+		width: 300px;
+		min-width: 220px;
 		display: flex;
 		flex-direction: column;
 		border-right: 1px solid var(--border);
 		background: var(--bg-alt);
 		flex-shrink: 0;
-		overflow: hidden; /* clip children; note-list handles its own scroll */
+		overflow: hidden;
 	}
 
 	.sidebar-header {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		padding: 0.75rem 1rem;
-		border-bottom: 1px solid var(--border);
-		flex-shrink: 0; /* never pushed off-screen */
+		gap: 0.5rem;
+		padding: 1.25rem 1.25rem 0.75rem;
+		flex-shrink: 0;
 	}
 
-	.app-name { font-weight: 700; font-size: 1.125rem; }
+	/* Wordmark */
+	.wordmark {
+		font-family: var(--serif);
+		font-weight: 800;
+		font-size: 1.5rem;
+		letter-spacing: -0.04em;
+		line-height: 1;
+		color: var(--text);
+		text-decoration: none;
+		display: inline-flex;
+		align-items: baseline;
+		margin-right: auto;
+	}
+	.wordmark-dot {
+		display: inline-block;
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: var(--accent);
+		margin-left: 3px;
+		margin-bottom: 1px;
+	}
 
 	.offline-badge {
 		font-size: 0.65rem;
@@ -1073,10 +1083,9 @@
 		letter-spacing: 0.04em;
 		text-transform: uppercase;
 		padding: 0.1rem 0.4rem;
-		border-radius: 999px;
-		background: var(--warning-bg, #fef3c7);
-		color: var(--warning-text, #92400e);
-		border: 1px solid var(--warning-border, #fde68a);
+		background: #fef3c7;
+		color: #92400e;
+		border: 1px solid #fde68a;
 	}
 
 	.hdr-btn {
@@ -1085,170 +1094,250 @@
 		cursor: pointer;
 		color: var(--text-3);
 		padding: 0.25rem;
-		border-radius: 0.375rem;
 		display: flex;
 		align-items: center;
 	}
-	.hdr-btn:hover { background: var(--border); color: var(--text); }
+	.hdr-btn:hover { color: var(--text); }
 
+	.new-btn {
+		width: 26px;
+		height: 26px;
+		border: 1px solid var(--border);
+		border-radius: 50%;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--text-3);
+		background: transparent;
+		cursor: pointer;
+		padding: 0;
+	}
+	.new-btn:hover { color: var(--text); border-color: var(--text-3); }
+
+	/* Search */
 	.search-box {
 		display: flex;
 		align-items: center;
-		gap: 0.375rem;
-		padding: 0.5rem 0.75rem;
-		border-bottom: 1px solid var(--border);
+		gap: 0.5rem;
+		padding: 0 1.25rem 0.75rem;
 		color: var(--text-4);
-		flex-shrink: 0; /* always visible above note list */
+		border-bottom: 1px solid var(--border);
+		flex-shrink: 0;
 	}
-
 	.search-box input {
 		flex: 1;
 		border: none;
 		background: none;
-		font-size: 0.875rem;
+		font-size: 0.8125rem;
+		font-family: var(--sans);
 		outline: none;
 		color: var(--text);
 	}
+	.search-box input::placeholder { color: var(--text-4); }
+
+	/* Filter bar */
+	.filter-bar {
+		display: flex;
+		flex-direction: column;
+		border-bottom: 1px solid var(--border);
+		flex-shrink: 0;
+	}
+	.filter-fixed {
+		display: flex;
+		gap: 0.25rem;
+		padding: 0.5rem 1.25rem 0.375rem;
+		flex-wrap: wrap;
+	}
+	.filter-tags {
+		display: flex;
+		flex-wrap: nowrap;
+		gap: 0.25rem;
+		padding: 0 1.25rem 0.5rem;
+		overflow: hidden;
+		max-height: 1.875rem;
+		transition: max-height 0.2s ease;
+	}
+	.filter-tags.expanded { max-height: 10rem; flex-wrap: wrap; }
+	.filter-tags.scrollable { overflow-y: auto; }
+
+	.tag-pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+		font-family: var(--sans);
+		font-size: 0.6875rem;
+		font-weight: 500;
+		padding: 0.2rem 0.6rem;
+		border: 1px solid var(--border-md);
+		background: var(--tag-bg, var(--bg-hover));
+		color: var(--tag-text, var(--text-3));
+		cursor: pointer;
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+	.tag-pill:hover { opacity: 0.8; }
+	.tag-pill-active {
+		background: var(--tag-text, var(--accent)) !important;
+		color: white !important;
+		border-color: transparent !important;
+	}
+	.tag-pill:not([style]).tag-pill-active {
+		background: var(--accent) !important;
+		color: white !important;
+	}
+	.tag-pill-star { --tag-bg: #fef9c3; --tag-text: #854d0e; }
+	.tag-pill-star.tag-pill-active { background: #854d0e !important; color: white !important; }
+	:global([data-theme="dark"]) .tag-pill-star { --tag-bg: #451a03; --tag-text: #fde68a; }
+	:global([data-theme="dark"]) .tag-pill-star.tag-pill-active { background: #fde68a !important; color: #451a03 !important; }
+
+
 
 	/* ─── Note list ──────────────────────────────────────── */
 	.note-list {
 		flex: 1;
-		min-height: 0; /* required: allows flex-child to shrink below content height */
-		overflow-y: auto;
+		min-height: 0;
+		overflow-y: scroll;
+		overflow-x: hidden;
 		list-style: none;
 		margin: 0;
-		padding: 0.25rem 0;
+		padding: 0.375rem 0;
+		scrollbar-gutter: stable;
+		scrollbar-width: thin;
+		scrollbar-color: transparent transparent;
 	}
+	.note-list::-webkit-scrollbar { width: 5px; }
+	.note-list::-webkit-scrollbar-thumb { background: transparent; }
+	.note-list::-webkit-scrollbar-track { background: transparent; }
+	.note-list:hover { scrollbar-color: var(--border-md) transparent; }
+	.note-list:hover::-webkit-scrollbar-thumb { background: var(--border-md); }
 
 	.note-item {
 		position: relative;
-		margin: 0 0.25rem 0.125rem;
-		border-radius: 0.375rem;
+		margin-bottom: 1px;
 	}
-
-	.note-item.selected { background: var(--bg-select); }
-	.note-item:hover:not(.selected) { background: var(--bg-hover); }
+	.note-item.selected { background: var(--bg-select); box-shadow: inset 2px 0 0 var(--accent); }
+	.note-item:not(.selected):hover { background: var(--bg-hover); }
 
 	.note-btn {
 		width: 100%;
+		box-sizing: border-box;
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
-		padding: 0.5rem 0.5rem 0.25rem;
+		padding: 0.6875rem calc(1.25rem - 5px) 0.5rem 1.25rem;
 		background: none;
 		border: none;
 		cursor: pointer;
 		text-align: left;
 	}
 
-	.note-title-row {
+	.note-row-top {
 		display: flex;
-		align-items: center;
+		align-items: flex-start;
 		width: 100%;
-		gap: 0.25rem;
+		gap: 0.375rem;
 	}
 
 	.note-title {
 		flex: 1;
-		font-size: 0.875rem;
-		font-weight: 700;
+		font-family: var(--serif);
+		font-size: 1.1rem;
+		font-weight: 600;
+		line-height: 1.25;
 		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
 		color: var(--text);
 	}
+	.note-title.untitled { color: var(--text-4); font-style: italic; }
 
-	.note-badges {
+	.note-meta-icons {
 		display: flex;
-		gap: 0.125rem;
-		flex-shrink: 0;
+		align-items: center;
+		gap: 4px;
 		color: var(--text-4);
+		flex-shrink: 0;
+		margin-top: 1px;
 	}
 
-	.note-date { font-size: 0.7rem; color: var(--text-4); padding-left: 0.125rem; }
+	.meta-icon-btn {
+		background: none;
+		border: none;
+		padding: 0;
+		cursor: pointer;
+		display: inline-flex;
+		color: var(--text-4);
+		line-height: 1;
+	}
+	.meta-star { color: var(--accent); }
 
-	.note-actions {
+	.note-date {
+		font-size: 0.6875rem;
+		color: var(--text-4);
+		font-family: var(--sans);
+		font-variant-numeric: tabular-nums;
+		margin-top: 0.2rem;
+		padding-left: 0;
+	}
+
+	.note-hover-actions {
 		display: flex;
-		gap: 0.125rem;
-		padding: 0.125rem 0.25rem 0.25rem;
+		gap: 1px;
+		padding: 0.125rem calc(1.25rem - 5px) 0.375rem 1.25rem;
 		opacity: 0;
 		transition: opacity 0.1s;
 	}
-	.note-item:hover .note-actions { opacity: 1; }
+	.note-item:hover .note-hover-actions { opacity: 1; }
 
 	.act-btn {
 		background: none;
 		border: none;
 		cursor: pointer;
 		padding: 0.2rem 0.3rem;
-		border-radius: 0.25rem;
 		color: var(--text-4);
 		display: flex;
 		align-items: center;
+		border-radius: 2px;
 	}
 	.act-btn:hover { background: var(--border); color: var(--text-2); }
 	.act-btn.danger:hover { color: var(--danger); background: var(--danger-bg); }
 
-	:global(.icon-active) { color: var(--accent); }
-
-	.empty { padding: 1.5rem 1rem; color: var(--text-4); font-size: 0.875rem; text-align: center; }
+	.empty { padding: 1.5rem 1rem; color: var(--text-4); font-size: 0.8125rem; text-align: center; }
 
 	/* ─── Sidebar bottom ─────────────────────────────────── */
 	.sidebar-bottom {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		padding: 0.5rem 0.75rem;
+		padding: 0.625rem 1rem;
 		border-top: 1px solid var(--border);
-		flex-shrink: 0; /* always visible below note list */
+		flex-shrink: 0;
 	}
 
-	.bottom-left { display: flex; gap: 0.25rem; align-items: center; }
-	.bottom-right { display: flex; gap: 0.25rem; align-items: center; }
-
-	.sync-status {
-		display: flex;
-		align-items: center;
-		color: var(--text-4);
-		padding: 0.25rem;
-		background: transparent;
-		border: none;
-		border-radius: 4px;
-		cursor: pointer;
-		font: inherit;
-	}
-	.sync-status:hover:not(:disabled) { background: var(--hover-bg, rgba(0, 0, 0, 0.05)); color: var(--text-2); }
-	.sync-status:disabled { cursor: default; opacity: 0.7; }
-	.sync-status.sync-unsynced { color: var(--warning-text, #92400e); }
-	.sync-status.sync-syncing  { color: var(--text-3); }
-
-	.untitled { color: var(--text-4); font-style: italic; }
-
-	.offline-image-notice {
-		display: flex;
-		align-items: center;
-		gap: 0.375rem;
+	.sidebar-user {
+		font-family: var(--sans);
 		font-size: 0.75rem;
 		color: var(--text-4);
-		padding: 0.4rem 1rem;
-		border-top: 1px solid var(--border);
 	}
+
+	.bottom-actions { display: flex; gap: 2px; align-items: center; }
 
 	.bottom-btn {
 		display: flex;
 		align-items: center;
-		gap: 0.375rem;
-		padding: 0.375rem 0.5rem;
-		border-radius: 0.375rem;
-		font-size: 0.8rem;
-		color: var(--text-3);
+		padding: 0.3rem;
+		color: var(--text-4);
 		background: none;
 		border: none;
 		cursor: pointer;
 		text-decoration: none;
+		border-radius: 2px;
 	}
-	.bottom-btn:hover { background: var(--border); color: var(--text-2); }
-	.bottom-btn.icon-only { padding: 0.375rem; }
+	.bottom-btn:hover { color: var(--text-2); background: var(--bg-hover); }
+	.bottom-btn:disabled { cursor: default; opacity: 0.6; }
+	.sync-unsynced { color: #92400e; }
+
+	.mobile-show-editor { display: none; }
 
 	/* ─── Editor pane ────────────────────────────────────── */
 	.editor-pane {
@@ -1256,7 +1345,7 @@
 		display: flex;
 		flex-direction: column;
 		min-width: 0;
-		min-height: 0; /* allow flex shrinking */
+		min-height: 0;
 		overflow: hidden;
 		background: var(--bg);
 	}
@@ -1265,8 +1354,8 @@
 	.toolbar {
 		display: flex;
 		align-items: center;
-		gap: 0.125rem;
-		padding: 0.375rem 0.75rem;
+		gap: 1px;
+		padding: 0.3rem 1rem;
 		border-bottom: 1px solid var(--border);
 		background: var(--bg-toolbar);
 		flex-shrink: 0;
@@ -1274,41 +1363,31 @@
 	}
 
 	.tb-btn {
-		padding: 0.3rem 0.4rem;
+		padding: 0.3rem 0.35rem;
 		background: none;
 		border: 1px solid transparent;
-		border-radius: 0.25rem;
+		border-radius: 2px;
 		cursor: pointer;
-		color: var(--text-2);
+		color: var(--text-3);
 		display: flex;
 		align-items: center;
 		justify-content: center;
 	}
-	.tb-btn:hover { background: var(--border); border-color: var(--border-md); }
-	.tb-btn:active { background: var(--bg-active); border-color: var(--border-hi); }
+	.tb-btn:hover { background: var(--bg-hover); color: var(--text-2); }
+	.tb-star-on { color: var(--accent) !important; }
 
 	.tb-sep {
 		width: 1px;
-		height: 1rem;
+		height: 14px;
 		background: var(--border);
 		margin: 0 0.2rem;
 		flex-shrink: 0;
 	}
-
 	.tb-spacer { flex: 1; }
 
-	.save-status { font-size: 0.75rem; color: var(--text-4); white-space: nowrap; }
+	.link-btn-wrap { position: relative; display: inline-flex; }
 
-	.link-btn-wrap {
-		position: relative;
-		display: inline-flex;
-	}
-
-	.link-dialog-backdrop {
-		position: fixed;
-		inset: 0;
-		z-index: 49;
-	}
+	.link-dialog-backdrop { position: fixed; inset: 0; z-index: 49; }
 
 	.link-dialog {
 		position: absolute;
@@ -1316,218 +1395,207 @@
 		left: 0;
 		background: var(--bg);
 		border: 1px solid var(--border);
-		border-radius: 0.5rem;
 		box-shadow: var(--shadow);
-		padding: 0.4rem;
+		padding: 0.375rem;
 		display: flex;
 		gap: 0.25rem;
 		z-index: 50;
 		min-width: 14rem;
 	}
-
 	.link-dialog-input {
 		flex: 1;
 		border: 1px solid var(--border-md);
-		border-radius: 0.25rem;
 		padding: 0.25rem 0.4rem;
 		font-size: 0.8rem;
 		outline: none;
 		min-width: 0;
 		background: var(--bg);
 		color: var(--text);
+		font-family: var(--sans);
 	}
 	.link-dialog-input:focus { border-color: var(--accent); }
-
 	.link-dialog-btn {
 		background: var(--accent);
 		color: white;
 		border: none;
-		border-radius: 0.25rem;
 		padding: 0.25rem 0.6rem;
 		font-size: 0.8rem;
 		cursor: pointer;
-		white-space: nowrap;
-		flex-shrink: 0;
-	}
-	.link-dialog-btn:hover { background: var(--accent-dk); }
-
-	.mobile-show-editor { display: none; }
-
-	/* ─── Editor header (tags + title) ─────────────────── */
-	.editor-header {
-		position: relative;
-		/* Right padding reserves a clear gutter for the absolute popover button.
-		   Sized to comfortably fit the button even with a 2-digit count badge. */
-		padding: 0.45rem 5rem 0.45rem 1rem;
-		border-bottom: 1px solid var(--border);
 		flex-shrink: 0;
 	}
 
-	/* Chip row above the title (only rendered when note has tags) */
-	.note-tags-chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.25rem;
-		margin-bottom: 0.3rem;
-	}
-
-	/* ─── Sidebar filter bar ─────────────────────────────── */
-	.filter-bar {
-		border-bottom: 1px solid var(--border);
-		flex-shrink: 0;
-	}
-
-	/* Fixed row: All + Starred — always visible */
-	.filter-fixed {
-		display: flex;
-		gap: 0.25rem;
-		padding: 0.4rem 0.75rem 0.25rem;
-	}
-
-	/* Scrollable tag pills — 2 rows by default, expands to 4 rows (then scrolls) on hover */
-	.filter-tags {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.25rem;
-		padding: 0 0.75rem 0.4rem;
-		max-height: 2.55rem;
-		overflow-y: hidden;
-		transition: max-height 0.2s ease;
-	}
-	.filter-tags.expanded {
-		max-height: 5.1rem;
-	}
-	.filter-tags.scrollable {
-		overflow-y: auto;
-	}
-
-	.tag-pill {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.2rem;
-		padding: 0.15rem 0.55rem;
-		border: 1px solid var(--border);
-		border-radius: 999px;
-		background: var(--tag-bg, transparent);
-		color: var(--tag-text, var(--text-3));
-		font-size: 0.7rem;
-		font-weight: 500;
-		cursor: pointer;
-		transition: opacity 0.1s;
-	}
-	.tag-pill:hover { opacity: 0.8; }
-	.tag-pill-active {
-		border-color: var(--tag-text, var(--accent));
-		box-shadow: 0 0 0 1.5px var(--tag-text, var(--accent));
-	}
-	/* "All" pill — no CSS vars, use themed indigo */
-	.tag-pill:not([style]).tag-pill-active {
-		background: var(--bg-select);
-		color: var(--accent-tx);
-		border-color: var(--accent);
-		box-shadow: 0 0 0 1.5px var(--accent);
-	}
-
-	/* Starred pill — amber (intentionally not theme-variable; amber looks fine on both) */
-	.tag-pill-star { --tag-bg: #fef9c3; --tag-text: #854d0e; }
-	.tag-pill-star.tag-pill-active {
-		background: #fef9c3;
-		color: #854d0e;
-		border-color: #d97706;
-		box-shadow: 0 0 0 1.5px #d97706;
-	}
-	:global([data-theme="dark"]) .tag-pill-star { --tag-bg: #451a03; --tag-text: #fde68a; }
-	:global([data-theme="dark"]) .tag-pill-star.tag-pill-active {
-		background: #451a03;
-		color: #fde68a;
-		border-color: #d97706;
-		box-shadow: 0 0 0 1.5px #d97706;
-	}
-
-	/* ─── Tag popover (pinned to top-right of editor-header) ── */
-	/* Absolute, so it stays top-right whether tags exist or not */
-	.tag-popover-wrap {
+	/* ─── Note action menu ───────────────────────────────── */
+	.note-menu-wrap { position: relative; }
+	.note-menu-backdrop { position: fixed; inset: 0; z-index: 49; }
+	.note-menu {
 		position: absolute;
-		right: 1rem;
-		top: 0.45rem; /* matches editor-header padding-top */
+		top: calc(100% + 4px);
+		right: 0;
+		background: var(--bg-toolbar);
+		border: 1px solid var(--border-md);
+		box-shadow: var(--shadow);
+		z-index: 50;
+		min-width: 160px;
+		display: flex;
+		flex-direction: column;
+	}
+	.note-menu-item {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 0.875rem;
+		font-size: 0.8125rem;
+		font-family: var(--sans);
+		color: var(--text);
+		background: none;
+		border: none;
+		cursor: pointer;
+		text-align: left;
+	}
+	.note-menu-item:hover { background: var(--bg-hover); }
+	.note-menu-item.danger { color: var(--danger); }
+	.note-menu-item.danger:hover { background: var(--danger-bg); }
+
+	/* ─── Editor header (title) ─────────────────────────── */
+	.editor-header {
+		border-bottom: 1px solid var(--border);
+		flex-shrink: 0;
+	}
+	.editor-header-inner {
+		padding: 1.25rem 2rem 0.625rem;
+		max-width: 760px;
+		box-sizing: border-box;
 	}
 
-	/* Chip-style button that triggers the popover */
-	.tag-chip-btn {
+	.title-input {
+		width: 100%;
+		font-family: var(--serif);
+		font-size: 2rem;
+		font-weight: 700;
+		letter-spacing: -0.03em;
+		line-height: 1.08;
+		border: none;
+		outline: none;
+		padding: 0;
+		background: transparent;
+		color: var(--text);
+	}
+	.title-input::placeholder { color: var(--text-4); }
+
+	/* ─── Bottom status bar ──────────────────────────────── */
+	.editor-statusbar {
+		border-top: 1px solid var(--border);
+		padding: 0.5rem 1.25rem;
+		display: flex;
+		align-items: center;
+		gap: 1rem;
+		font-family: var(--sans);
+		font-size: 0.6875rem;
+		color: var(--text-4);
+		flex-shrink: 0;
+		background: var(--bg-toolbar);
+	}
+
+	.status-meta {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-variant-numeric: tabular-nums;
+	}
+	.status-sep { opacity: 0.4; }
+	.status-saving { color: var(--accent); }
+
+	.status-tags {
+		margin-left: auto;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.status-tags-label {
+		text-transform: uppercase;
+		letter-spacing: 0.08em;
+		font-size: 0.625rem;
+		color: var(--text-4);
+	}
+	.note-tag-chip {
+		position: relative;
+		z-index: 31;
 		display: inline-flex;
 		align-items: center;
-		gap: 0.2rem;
-		padding: 0.1rem 0.45rem;
-		background: transparent;
-		color: var(--text-4);
-		border-radius: 999px;
-		font-size: 0.7rem;
-		font-weight: 500;
-		border: 1px dashed var(--border-md);
+		gap: 0.3rem;
+		font-size: 0.6875rem;
+		font-family: var(--sans);
+		padding: 0.15rem 0.5rem;
+		background: var(--tag-bg, var(--bg-hover));
+		color: var(--tag-text, var(--text-2));
+		border: 1px solid var(--border);
 		cursor: pointer;
-		transition: all 0.1s;
 	}
-	.tag-chip-btn:hover { background: var(--bg-hover); color: var(--text-2); border-color: var(--text-4); }
-	.tag-chip-btn.tag-chip-btn-active { color: var(--accent); border-color: var(--accent); }
+	.note-tag-chip:hover { opacity: 0.75; }
 
-	.tb-tag-count {
-		background: var(--accent);
-		color: white;
-		border-radius: 999px;
-		padding: 0 0.3rem;
-		font-size: 0.6rem;
+	.status-add-tag {
+		background: none;
+		border: none;
+		cursor: pointer;
+		color: var(--text-4);
+		font-size: 0.6875rem;
+		font-family: var(--sans);
+		padding: 0;
+		border-bottom: 1px dashed var(--border-md);
+		line-height: 1.2;
 	}
+	.status-add-tag:hover { color: var(--text-2); }
+
+	/* ─── Tag popover ────────────────────────────────────── */
+	.tag-popover-backdrop { position: fixed; inset: 0; z-index: 29; }
+	.tag-popover-wrap { position: relative; }
 
 	.tag-popover {
 		position: absolute;
 		right: 0;
-		top: calc(100% + 4px);
+		bottom: calc(100% + 6px);
 		background: var(--bg);
 		border: 1px solid var(--border);
-		border-radius: 0.5rem;
 		box-shadow: var(--shadow);
 		padding: 0.5rem;
 		min-width: 11rem;
 		z-index: 30;
 	}
-
 	.popover-label {
-		font-size: 0.7rem;
+		font-size: 0.625rem;
 		font-weight: 600;
 		color: var(--text-4);
 		text-transform: uppercase;
-		letter-spacing: 0.05em;
+		letter-spacing: 0.08em;
 		margin: 0 0 0.25rem;
 		padding: 0 0.25rem;
+		font-family: var(--sans);
 	}
-
 	.popover-item {
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
 		padding: 0.3rem 0.25rem;
-		border-radius: 0.25rem;
 		cursor: pointer;
-		font-size: 0.85rem;
+		font-size: 0.8125rem;
+		font-family: var(--sans);
+		color: var(--text);
 	}
 	.popover-item:hover { background: var(--bg-hover); }
-
 	.popover-tag-dot {
 		width: 0.5rem;
 		height: 0.5rem;
 		border-radius: 50%;
 		flex-shrink: 0;
 	}
-
 	.popover-new {
 		display: flex;
 		align-items: center;
 		gap: 0.25rem;
 		margin-top: 0.375rem;
 		padding-top: 0.375rem;
-		border-top: 1px solid var(--bg-hover);
+		border-top: 1px solid var(--border);
 	}
-
 	.popover-new-input {
 		flex: 1;
 		border: none;
@@ -1537,9 +1605,9 @@
 		padding: 0.15rem 0.1rem;
 		background: transparent;
 		color: var(--text);
+		font-family: var(--sans);
 	}
 	.popover-new-input:focus { border-color: var(--accent); }
-
 	.popover-add-btn {
 		background: none;
 		border: none;
@@ -1549,33 +1617,15 @@
 		display: flex;
 	}
 
-	/* ─── Tag chips in the note-tags-row ────────────────── */
-	.note-tag-chip {
-		display: inline-flex;
+	.offline-image-notice {
+		display: flex;
 		align-items: center;
-		gap: 0.2rem;
-		padding: 0.1rem 0.45rem;
-		background: var(--tag-bg, var(--bg-select));
-		color: var(--tag-text, var(--accent-tx));
-		border-radius: 999px;
-		font-size: 0.7rem;
-		font-weight: 500;
-		border: none;
-		cursor: pointer;
-		transition: opacity 0.1s;
-	}
-	.note-tag-chip:hover { opacity: 0.75; }
-
-	.title-input {
-		width: 100%;
-		font-size: 1.25rem;
-		font-weight: 600;
-		border: none;
-		outline: none;
-		padding: 0;
-		background: transparent;
-		color: var(--text);
-		font-family: system-ui, -apple-system, sans-serif;
+		gap: 0.375rem;
+		font-size: 0.75rem;
+		color: var(--text-4);
+		padding: 0.4rem 1rem;
+		border-top: 1px solid var(--border);
+		font-family: var(--sans);
 	}
 
 	.empty-state {
@@ -1586,7 +1636,9 @@
 		justify-content: center;
 		color: var(--text-4);
 		gap: 1rem;
+		font-family: var(--sans);
 	}
+	.empty-state p { font-size: 0.875rem; }
 	.empty-state button {
 		display: flex;
 		align-items: center;
@@ -1595,51 +1647,21 @@
 		background: var(--accent);
 		color: white;
 		border: none;
-		border-radius: 0.375rem;
 		cursor: pointer;
 		font-size: 0.875rem;
+		font-family: var(--sans);
 	}
 
-	/* ─── Mobile layout (<= 767px) ───────────────────────── */
+	/* ─── Mobile (<= 767px) ──────────────────────────────── */
 	@media (max-width: 767px) {
-		.app {
-			flex-direction: column;
-			height: 100dvh;
-		}
-
-		/* Tag filter: on mobile the hover-expand is disabled (JS guard), so remove
-		   the max-height clip entirely — all tags always visible, no transition */
-		.filter-tags,
-		.filter-tags.expanded {
-			max-height: none;
-			overflow-y: visible;
-			transition: none;
-		}
-
-		/* On mobile the list is a full-screen page; tapping a note navigates to
-		   /notes/[id] via SvelteKit routing — the editor pane is never shown here */
-		.sidebar {
-			width: 100%;
-			min-width: unset;
-			flex: 1;
-			border-right: none;
-			overflow: hidden;
-		}
-
+		.app { flex-direction: column; height: 100dvh; }
+		.sidebar { width: 100%; min-width: unset; flex: 1; border-right: none; overflow: hidden; }
 		.editor-pane { display: none; }
-
-		/* Show the chevron button to navigate to the currently-selected note */
 		.mobile-show-editor { display: flex; }
-
-		/* Tighter sidebar padding */
-		.sidebar-header { padding: 0.625rem 1rem; }
-		.note-item { margin: 0 0.125rem 0.125rem; }
-
-		/* Always show note actions on mobile (no hover) */
-		.note-actions { opacity: 1; }
-
-		/* Larger touch targets */
+		.sidebar-header { padding: 0.875rem 1rem 0.5rem; }
+		.note-item { margin: 0 0 1px; }
+		.note-hover-actions { opacity: 1; }
 		.act-btn { padding: 0.375rem 0.5rem; }
-		.note-btn { padding: 0.625rem 0.5rem 0.375rem; }
+		.note-btn { padding: 0.75rem 1.25rem 0.375rem; }
 	}
 </style>

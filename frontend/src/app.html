@@ -4,85 +4,106 @@
 		<meta charset="utf-8" />
 		<link rel="icon" href="%sveltekit.assets%/favicon.png" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="theme-color" content="#ffffff" />
+		<meta name="theme-color" content="#faf8f4" />
 		<link rel="manifest" href="%sveltekit.assets%/manifest.json" />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+		<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400..700;1,400..700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 		<style>
-			/* Remove default browser margin so the app fills the viewport exactly */
-			html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+			/* Remove default browser margin so the app fills the viewport exactly.
+			   overflow is NOT set here — the main .app container handles its own
+			   clipping so that sub-screens (settings, admin) can scroll freely. */
+			html, body { margin: 0; padding: 0; height: 100%; }
+
+			/* ── Font families ───────────────────────────────────── */
+			:root {
+				--serif: "Crimson Pro", "Source Serif Pro", Georgia, serif;
+				--sans:  "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+				--mono:  "JetBrains Mono", ui-monospace, monospace;
+			}
 
 			/* ── CSS design tokens ───────────────────────────────── */
 			:root {
-				--bg:         #ffffff;
-				--bg-alt:     #f9fafb;
-				--bg-toolbar: #fafafa;
-				--bg-hover:   #f3f4f6;
-				--bg-select:  #e0e7ff;
-				--bg-active:  #dbeafe;
+				--bg:         #faf8f4;
+				--bg-alt:     #f4f1ea;
+				--bg-toolbar: #ffffff;
+				--bg-hover:   #efe9da;
+				--bg-select:  #efe9da;
+				--bg-active:  #e4dccf;
 
-				--border:     #e5e7eb;
-				--border-md:  #d1d5db;
-				--border-hi:  #93c5fd;
+				--border:     #e8e2d6;
+				--border-md:  #d9d2c4;
+				--border-hi:  #c8b89e;
 
-				--text:       #111827;
-				--text-2:     #374151;
-				--text-3:     #6b7280;
-				--text-4:     #9ca3af;
+				--text:       #1a1612;
+				--text-2:     #3a332a;
+				--text-3:     #7a7267;
+				--text-4:     #a89f92;
 
-				--accent:     #6366f1;
-				--accent-dk:  #4f46e5;
-				--accent-lt:  #eef2ff;
-				--accent-tx:  #4338ca;
+				--accent:     #e45c3a;
+				--accent-dk:  #c94a28;
+				--accent-lt:  rgba(228, 92, 58, 0.08);
+				--accent-tx:  #c94a28;
 
-				--danger:     #dc2626;
-				--danger-bg:  #fef2f2;
-				--danger-bd:  #fecaca;
+				--danger:     #c2574a;
+				--danger-bg:  #fbeee9;
+				--danger-bd:  #e8c0b4;
 
-				--focus-ring: rgba(99, 102, 241, 0.25);
-				--shadow:     0 4px 16px rgba(0, 0, 0, 0.12);
+				--focus-ring: rgba(228, 92, 58, 0.2);
+				--shadow:     0 4px 16px rgba(0, 0, 0, 0.10);
 			}
 
 			[data-theme="dark"] {
-				--bg:         #0f172a;
-				--bg-alt:     #1e293b;
-				--bg-toolbar: #1e293b;
-				--bg-hover:   #334155;
-				--bg-select:  #1e3a5f;
-				--bg-active:  #1e3a5f;
+				--bg:         #141210;
+				--bg-alt:     #181613;
+				--bg-toolbar: #1c1a17;
+				--bg-hover:   #242019;
+				--bg-select:  #242019;
+				--bg-active:  #2e2a22;
 
-				--border:     #334155;
-				--border-md:  #475569;
-				--border-hi:  #3b82f6;
+				--border:     #2a2621;
+				--border-md:  #3a332a;
+				--border-hi:  #5a4f3a;
 
-				--text:       #f1f5f9;
-				--text-2:     #cbd5e1;
-				--text-3:     #94a3b8;
-				--text-4:     #64748b;
+				--text:       #e9e4da;
+				--text-2:     #c4bbaf;
+				--text-3:     #8a837a;
+				--text-4:     #55504a;
 
-				--accent:     #818cf8;
-				--accent-dk:  #6366f1;
-				--accent-lt:  #1e1b4b;
-				--accent-tx:  #c7d2fe;
+				--accent:     #e45c3a;
+				--accent-dk:  #f07050;
+				--accent-lt:  rgba(228, 92, 58, 0.12);
+				--accent-tx:  #f08060;
 
-				--danger:     #f87171;
-				--danger-bg:  #450a0a;
-				--danger-bd:  #7f1d1d;
+				--danger:     #d97a6a;
+				--danger-bg:  #3a1a14;
+				--danger-bd:  #7f3a2a;
 
-				--focus-ring: rgba(129, 140, 248, 0.25);
+				--focus-ring: rgba(228, 92, 58, 0.25);
 				--shadow:     0 4px 24px rgba(0, 0, 0, 0.5);
 			}
 
 			/* Base colours on the root so the background is always themed */
-			body { background: var(--bg); color: var(--text); }
+			body {
+				background: var(--bg);
+				color: var(--text);
+				font-family: var(--sans);
+			}
 
 			/* Milkdown / ProseMirror editor ─ ensure it follows the theme */
-			.ProseMirror { color: var(--text) !important; caret-color: var(--text); }
+			.ProseMirror { color: var(--text) !important; caret-color: var(--text); font-family: var(--serif); font-size: 1.0625rem; line-height: 1.6; }
+			.ProseMirror h1 { font-family: var(--serif); font-weight: 700; font-size: 2rem; letter-spacing: -0.03em; line-height: 1.08; color: var(--text); }
+			.ProseMirror h2 { font-family: var(--serif); font-weight: 600; font-size: 1.35rem; letter-spacing: -0.01em; }
+			.ProseMirror h3 { font-family: var(--serif); font-weight: 600; font-size: 1.1rem; }
 			.ProseMirror code, .ProseMirror pre {
 				background: var(--bg-hover) !important;
 				color: var(--text-2) !important;
+				font-family: var(--mono) !important;
 			}
 			.ProseMirror blockquote {
 				border-left-color: var(--border-md) !important;
 				color: var(--text-3) !important;
+				font-style: italic;
 			}
 		</style>
 		%sveltekit.head%
