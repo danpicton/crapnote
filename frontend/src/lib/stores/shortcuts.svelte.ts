@@ -8,7 +8,8 @@ export type ShortcutId =
 	| 'bold'
 	| 'italic'
 	| 'underline'
-	| 'insert-link';
+	| 'insert-link'
+	| 'open-tags';
 
 export interface ShortcutAction {
 	id: ShortcutId;
@@ -44,6 +45,7 @@ const actions: ShortcutAction[] = [
 		allowInInputs: true,
 	},
 	{ id: 'help-modal', description: 'Show keyboard shortcuts', defaultCombo: '?' },
+	{ id: 'open-tags', description: 'Open tag popover', defaultCombo: 'Ctrl+.' },
 ];
 
 // ── Parsing / formatting ─────────────────────────────────────────────────────

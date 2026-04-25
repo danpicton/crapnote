@@ -440,6 +440,10 @@
 				// currently-focused field so the save fires immediately.
 				(document.activeElement as HTMLElement | null)?.blur();
 				break;
+			case 'open-tags':
+				e.preventDefault();
+				showTagPopover = !showTagPopover;
+				break;
 		}
 	}
 
@@ -981,7 +985,7 @@
 					<span class="status-tags-label">Tags</span>
 					{#each noteTags as tag (tag.id)}
 						{@const c = tagColor(tag)}
-						<button class="note-tag-chip" onclick={() => applyFilter(activeTagId === tag.id ? null : tag.id, starredOnly)} title="Filter by {tag.name}">
+						<button class="note-tag-chip" onclick={() => { const newId = activeTagId === tag.id ? null : tag.id; applyFilter(newId, starredOnly); if (newId !== null) showTagsPanel = true; }} title="Filter by {tag.name}">
 							<span class="status-tag-dot" style="background:{c.text}"></span>
 							<span class="status-tag-word">{tag.name}</span>
 						</button>
@@ -1007,7 +1011,7 @@
 							</div>
 						{/if}
 					</div>
-					<span class="status-shortcut" aria-hidden="true">{modKey}T</span>
+					<span class="status-shortcut" aria-hidden="true">{shortcuts.displayCombo(shortcuts.get('open-tags'))}</span>
 				</span>
 			</div>
 		{:else}
