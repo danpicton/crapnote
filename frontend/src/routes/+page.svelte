@@ -823,7 +823,7 @@
 			<button
 				class="pane-tab"
 				class:pane-tab-active={!starredOnly && !showTagsPanel}
-				onclick={() => { applyFilter(activeTagId, false); showTagsPanel = false; }}
+				onclick={() => { applyFilter(starredOnly ? activeTagId : null, false); showTagsPanel = false; }}
 			>{tagsTabActive && !showTagsPanel ? 'Filtered' : 'All'}</button>
 			<button
 				class="pane-tab"
@@ -847,7 +847,7 @@
 					<span class="filter-capsule">
 						<span class="filter-capsule-dot" style="background:{c.text}"></span>
 						<span class="filter-capsule-name">{activeTag.name}</span>
-						<button class="filter-capsule-clear" onclick={() => { applyFilter(null, false); }} aria-label="Clear filter">×</button>
+						<button class="filter-capsule-clear" onclick={() => { applyFilter(null, starredOnly); }} aria-label="Clear filter">×</button>
 					</span>
 				</div>
 			{/if}
