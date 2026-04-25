@@ -106,9 +106,9 @@ test.describe('Tags', () => {
     await notesDone;
     await expect(page.getByRole('list').getByText('Note B')).not.toBeVisible();
 
-    // Click the All tab to restore the full list
+    // Click the All/Filtered tab to restore the full list
     notesDone = page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'GET');
-    await page.getByRole('group', { name: /filter notes/i }).getByRole('button', { name: /^all/i }).click();
+    await page.getByRole('group', { name: /filter notes/i }).getByRole('button', { name: /^(all|filtered)/i }).click();
     await notesDone;
     await expect(page.getByRole('list').getByText('Note B')).toBeVisible();
   });
