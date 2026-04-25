@@ -59,6 +59,10 @@ describe('shortcuts store', () => {
 		expect(matchShortcut(ev('k', { ctrlKey: true }))).toBe('search-focus');
 	});
 
+	it('matches open-tags on Ctrl+.', () => {
+		expect(matchShortcut(ev('.', { ctrlKey: true }))).toBe('open-tags');
+	});
+
 	it('returns null for unbound keys', () => {
 		expect(matchShortcut(ev('q'))).toBeNull();
 		expect(matchShortcut(ev('n'))).toBeNull();

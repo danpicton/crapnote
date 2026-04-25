@@ -354,7 +354,7 @@ describe('Tag popover', () => {
 	});
 });
 
-describe('Tag filter hover', () => {
+describe('Pane switcher', () => {
 	const mockTags = [
 		{ id: 1, name: 'Alpha', note_count: 1 },
 		{ id: 2, name: 'Beta',  note_count: 1 },
@@ -364,38 +364,39 @@ describe('Tag filter hover', () => {
 		vi.mocked(api.tags.list).mockResolvedValue(mockTags);
 	});
 
-	it('adds expanded class on mouseenter on desktop', async () => {
-		mockViewport(false); // desktop
+	it('shows All, Starred and Tags tabs', async () => {
 		render(Page);
-		await waitFor(() => screen.getByText('Alpha'));
-
-		const filterTags = screen.getByRole('group', { name: /tag filters/i });
-		await fireEvent.mouseEnter(filterTags);
-
-		expect(filterTags).toHaveClass('expanded');
+		await waitFor(() => {
+			expect(screen.getByRole('button', { name: /^all/i })).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: /^starred/i })).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: /^tags/i })).toBeInTheDocument();
+		});
 	});
 
-	it('does NOT add expanded class on mouseenter on mobile', async () => {
-		mockViewport(true); // mobile
+	it('clicking the Tags tab reveals the tag panel', async () => {
 		render(Page);
-		await waitFor(() => screen.getByText('Alpha'));
+		await waitFor(() => screen.getByRole('button', { name: /^tags/i }));
 
-		const filterTags = screen.getByRole('group', { name: /tag filters/i });
-		await fireEvent.mouseEnter(filterTags);
+		await fireEvent.click(screen.getByRole('button', { name: /^tags/i }));
 
-		expect(filterTags).not.toHaveClass('expanded');
+		await waitFor(() =>
+			expect(screen.getByRole('group', { name: /tag filters/i })).toBeInTheDocument()
+		);
+		expect(screen.getByRole('button', { name: /alpha/i })).toBeInTheDocument();
 	});
 
-	it('removes expanded class on mouseleave on desktop', async () => {
-		mockViewport(false); // desktop
+	it('clicking All tab hides the tag panel', async () => {
 		render(Page);
-		await waitFor(() => screen.getByText('Alpha'));
+		await waitFor(() => screen.getByRole('button', { name: /^tags/i }));
 
-		const filterTags = screen.getByRole('group', { name: /tag filters/i });
-		await fireEvent.mouseEnter(filterTags);
-		await fireEvent.mouseLeave(filterTags);
+		await fireEvent.click(screen.getByRole('button', { name: /^tags/i }));
+		await waitFor(() => screen.getByRole('group', { name: /tag filters/i }));
 
-		expect(filterTags).not.toHaveClass('expanded');
+		await fireEvent.click(screen.getByRole('button', { name: /^all/i }));
+
+		await waitFor(() =>
+			expect(screen.queryByRole('group', { name: /tag filters/i })).not.toBeInTheDocument()
+		);
 	});
 });
 
