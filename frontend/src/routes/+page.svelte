@@ -823,7 +823,7 @@
 			<button
 				class="pane-tab"
 				class:pane-tab-active={!starredOnly && !showTagsPanel}
-				onclick={() => { applyFilter(null, false); showTagsPanel = false; }}
+				onclick={() => { applyFilter(activeTagId, false); showTagsPanel = false; }}
 			>{tagsTabActive && !showTagsPanel ? 'Filtered' : 'All'}</button>
 			<button
 				class="pane-tab"
