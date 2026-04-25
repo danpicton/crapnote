@@ -586,6 +586,7 @@
 			noteTags = [...noteTags, tag];
 		}
 		newTagName = '';
+		showTagPopover = false;
 		allTags = await api.tags.list();
 	}
 
