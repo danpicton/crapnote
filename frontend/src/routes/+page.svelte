@@ -593,7 +593,6 @@
 		}
 		newTagName = '';
 		allTags = await api.tags.list();
-		showTagPopover = false;
 	}
 
 	function scheduleAutoSave(field: 'title' | 'body', value: string) {
@@ -1519,6 +1518,8 @@
 		color: var(--text-4);
 	}
 	.note-tag-chip {
+		position: relative;
+		z-index: 31;
 		display: inline-flex;
 		align-items: center;
 		gap: 0.3rem;
