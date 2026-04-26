@@ -29,6 +29,14 @@ beforeEach(() => {
 });
 
 describe('Setup page', () => {
+	it('renders a Crapnote corner mark linking to home', async () => {
+		mockApi.setup.get.mockResolvedValueOnce({ username: 'mallory', expires_at: '2030-01-01T00:00:00Z' });
+		render(SetupPage);
+		const link = screen.getByRole('link', { name: /crapnote/i });
+		expect(link).toBeInTheDocument();
+		expect(link).toHaveAttribute('href', '/');
+	});
+
 	it('fetches the token metadata on load and shows the username', async () => {
 		mockApi.setup.get.mockResolvedValueOnce({
 			username: 'mallory',
