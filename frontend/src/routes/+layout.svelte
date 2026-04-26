@@ -8,14 +8,16 @@
 
 	let { children } = $props();
 
-	const PUBLIC_PATHS = ['/login'];
+	function isPublicPath(path: string): boolean {
+		return path === '/login' || path.startsWith('/setup/');
+	}
 
 	onMount(async () => {
 		registerSW();
 		theme.init();
 		await auth.init();
 		const currentPath = $page.url.pathname;
-		if (!auth.user && !PUBLIC_PATHS.includes(currentPath)) {
+		if (!auth.user && !isPublicPath(currentPath)) {
 			// Replace the current history entry so "back" doesn't return to the
 			// protected page after being redirected to login.
 			goto('/login', { replaceState: true });
