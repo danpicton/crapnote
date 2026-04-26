@@ -1,17 +1,22 @@
 <script lang="ts">
 	import { onMount, onDestroy } from 'svelte';
-	import { Editor, rootCtx, defaultValueCtx, commandsCtx, type CmdKey } from '@milkdown/kit/core';
+	import { Editor, rootCtx, defaultValueCtx, commandsCtx, editorViewCtx, type CmdKey } from '@milkdown/kit/core';
 	import {
 		commonmark,
 	} from '@milkdown/kit/preset/commonmark';
+	import { gfm } from '@milkdown/kit/preset/gfm';
 	import { history } from '@milkdown/kit/plugin/history';
 	import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
+	import { TextSelection } from '@milkdown/kit/prose/state';
 	import { underlinePlugin } from '$lib/milkdown/underline';
 	import { imagePlugin } from '$lib/milkdown/image';
 	import { linkPlugin } from '$lib/milkdown/link';
+	import { taskListPlugin } from '$lib/milkdown/tasklist';
 
 	export interface EditorRef {
 		call: (key: string | CmdKey<unknown>, payload?: unknown) => void;
+		focusEnd: () => void;
+		blur: () => void;
 	}
 
 	interface Props {
@@ -36,6 +41,8 @@
 				});
 			})
 			.use(commonmark)
+			.use(gfm)
+			.use(taskListPlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(underlinePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(imagePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(linkPlugin as Parameters<typeof Editor.prototype.use>[0])
@@ -45,9 +52,33 @@
 
 		container.addEventListener('crapnote:insert-link', () => oninsertlink?.());
 
+		// Click in empty space below content → place cursor at end
+		container.addEventListener('click', (e) => {
+			if (!_editor) return;
+			if (!(e.target as Element).closest('.ProseMirror')) {
+				_editor.action((ctx) => {
+					const view = ctx.get(editorViewCtx);
+					view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
+					view.focus();
+				});
+			}
+		});
+
 		ref = {
 			call: (key, payload) => {
 				_editor?.action((ctx) => ctx.get(commandsCtx).call(key, payload));
+			},
+			focusEnd: () => {
+				_editor?.action((ctx) => {
+					const view = ctx.get(editorViewCtx);
+					view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
+					view.focus();
+				});
+			},
+			blur: () => {
+				_editor?.action((ctx) => {
+					ctx.get(editorViewCtx).dom.blur();
+				});
 			},
 		};
 	});
@@ -67,10 +98,12 @@
 		overflow-y: auto;
 		padding: 1rem 2rem;
 		min-height: 0;
+		cursor: text;
 	}
 
 	.editor-container :global(.milkdown) {
 		max-width: 720px;
+		min-height: 100%;
 	}
 
 	.editor-container :global(.ProseMirror) {
@@ -98,6 +131,30 @@
 		margin: 0.15em 0;
 		padding-left: 1.5em;
 		line-height: 1.5;
+	}
+
+	/* Task list items — text aligned with regular list item text, checkbox in margin */
+	.editor-container :global(.ProseMirror li[data-item-type="task"]) {
+		list-style: none;
+		display: flex;
+		align-items: center;
+		gap: 0.375em;
+		margin-left: -1.25em; /* pull into ul padding so text aligns with regular <li> text */
+	}
+	.editor-container :global(.ProseMirror li[data-item-type="task"] .task-checkbox) {
+		flex-shrink: 0;
+		width: 0.875em;
+		height: 0.875em;
+		accent-color: var(--accent);
+		cursor: pointer;
+	}
+	.editor-container :global(.ProseMirror li[data-item-type="task"] .task-content) {
+		flex: 1;
+		min-width: 0;
+	}
+	.editor-container :global(.ProseMirror li[data-item-type="task"][data-checked="true"] .task-content p) {
+		opacity: 0.5;
+		text-decoration: line-through;
 	}
 
 	.editor-container :global(.ProseMirror blockquote) {

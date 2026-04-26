@@ -10,11 +10,13 @@
 		wrapInOrderedListCommand,
 		insertHrCommand,
 		createCodeBlockCommand,
+		wrapInHeadingCommand,
+		toggleLinkCommand,
 	} from '@milkdown/kit/preset/commonmark';
 	import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 	import { toggleUnderlineCommand } from '$lib/milkdown/underline';
 	import { insertImageCommand } from '$lib/milkdown/image';
-	import { toggleLinkCommand } from '@milkdown/kit/preset/commonmark';
+	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, type Note, type Tag } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -37,7 +39,7 @@
 	// Lucide icons
 	import {
 		Bold, Italic, Underline, Quote, Code, FileCode2,
-		List, ListOrdered, Minus, Undo2, Redo2, Image, Link,
+		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Image, Link,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search,
 		CloudUpload, CheckCircle2, Lock, MoreHorizontal,
@@ -75,6 +77,10 @@
 	let showTagsPanel = $state(false);
 	// Note action menu
 	let showNoteMenu = $state(false);
+	// Editor focus state (used for Enter/Escape shortcuts)
+	let editorFocused = $state(false);
+	let showHeadingsMenu = $state(false);
+	let noteListEl = $state<HTMLUListElement | null>(null);
 
 	const PALETTE = [
 		// Reds / Pinks / Rose
@@ -368,7 +374,53 @@
 			void refreshSyncStatus();
 		};
 		const handleKeydown = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') { showTagPopover = false; }
+			const target = e.target as Element;
+			const inInput = !!target.closest('input, textarea, [contenteditable]');
+
+			if (e.key === 'Escape') {
+				// Priority: link dialog → tag popover → editor blur → filter tabs
+				if (showLinkDialog) { showLinkDialog = false; return; }
+				if (showTagPopover) { showTagPopover = false; (document.activeElement as HTMLElement)?.blur(); return; }
+				if (editorFocused) {
+					editorRef?.blur();
+					void tick().then(() => {
+						noteListEl?.focus();
+					});
+					return;
+				}
+				if (showTagsPanel || starredOnly || activeTagId !== null) {
+					showTagsPanel = false;
+					starredOnly = false;
+					activeTagId = null;
+					void loadNotes();
+					(document.activeElement as HTMLElement)?.blur();
+					return;
+				}
+				return;
+			}
+
+			// Arrow Up/Down: navigate note list when editor is not focused
+			if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !editorFocused && !inInput && selectedId !== null) {
+				e.preventDefault();
+				const idx = notes.findIndex(n => n.id === selectedId);
+				if (idx === -1) return;
+				const next = e.key === 'ArrowUp' ? Math.max(0, idx - 1) : Math.min(notes.length - 1, idx + 1);
+				if (next !== idx) {
+					void selectNote(notes[next].id);
+					void tick().then(() => {
+						noteListEl?.querySelector<HTMLElement>('.note-item.selected')?.scrollIntoView({ block: 'nearest' });
+					});
+				}
+				return;
+			}
+
+			// Enter: focus editor at end when a note is selected and editor is not active
+			if (e.key === 'Enter' && !editorFocused && !inInput && selectedId !== null) {
+				e.preventDefault();
+				editorRef?.focusEnd();
+				return;
+			}
+
 			const id = matchShortcut(e, { skipInInputs: true });
 			if (!id) return;
 			runShortcut(id, e);
@@ -521,6 +573,7 @@
 		selectedId = id;
 		showTagPopover = false;
 		showNoteMenu = false;
+		showHeadingsMenu = false;
 		noteTags = await api.tags.listForNote(id);
 	}
 
@@ -561,6 +614,22 @@
 
 	function toggleStarFilter() {
 		return applyFilter(activeTagId, !starredOnly);
+	}
+
+	async function goHome() {
+		search = '';
+		activeTagId = null;
+		starredOnly = false;
+		showTagsPanel = false;
+		editorFocused = false;
+		showHeadingsMenu = false;
+		selectedId = null;
+		await loadNotes();
+		if (!isMobile() && notes.length > 0) {
+			const initId = notes[0].id;
+			selectedId = initId;
+			noteTags = await api.tags.listForNote(initId).catch(() => []);
+		}
 	}
 
 	async function toggleTag(tag: Tag) {
@@ -788,7 +857,7 @@
 	<!-- ── Sidebar ── -->
 	<aside class="sidebar">
 		<header class="sidebar-header">
-			<a href="/" class="wordmark app-name">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
+			<a href="/" class="wordmark app-name" onclick={(e) => { e.preventDefault(); void goHome(); }}>Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
 			{#if !isOnline}
 				<span class="offline-badge" title="You are offline — changes will sync when reconnected">Offline</span>
 			{/if}
@@ -876,7 +945,7 @@
 			</div>
 		{:else}
 
-		<ul class="note-list" role="list" class:note-list-filtered={tagsTabActive}>
+		<ul bind:this={noteListEl} class="note-list" role="list" class:note-list-filtered={tagsTabActive} tabindex="-1">
 			{#each notes as note (note.id)}
 				<li class="note-item" class:selected={note.id === selectedId}>
 					<div class="note-btn" role="button" tabindex="0" onclick={() => selectNote(note.id)} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectNote(note.id)}>
@@ -941,70 +1010,93 @@
 	<!-- ── Editor pane ── -->
 	<main class="editor-pane">
 		{#if selectedNote}
-			<div class="toolbar" role="toolbar" aria-label="Formatting">
-				<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold"><Bold size={13} /></button>
-				<button class="tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic"><Italic size={13} /></button>
-				<button class="tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline"><Underline size={13} /></button>
-				<div class="link-btn-wrap">
-					<button class="tb-btn" onclick={openLinkDialog} title="Insert link (Ctrl+K)"><Link size={13} /></button>
-					{#if showLinkDialog}
-						<div class="link-dialog-backdrop" onclick={() => (showLinkDialog = false)} role="presentation"></div>
-						<div class="link-dialog" role="dialog" aria-label="Insert link">
-							<input class="link-dialog-input" type="url" placeholder="https://…" bind:value={linkDialogHref} onkeydown={linkInputKeydown} use:focusInput />
-							<button class="link-dialog-btn" onclick={applyLink}>Apply</button>
+			<div
+				class="editor-focus-zone"
+				data-testid="editor-focus-zone"
+				onfocusin={() => (editorFocused = true)}
+				onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editorFocused = false; showHeadingsMenu = false; } }}
+			>
+					<div class="toolbar" role="toolbar" aria-label="Formatting" tabindex="-1"
+					onmousedown={(e) => { if (!(e.target as Element).closest('input, textarea')) e.preventDefault(); }}
+				>
+						<!-- Headings expanding group -->
+						<div class="tb-heading-wrap">
+							<button class="tb-btn tb-h-toggle" onclick={() => (showHeadingsMenu = !showHeadingsMenu)} title="Headings" aria-label="Headings" aria-expanded={showHeadingsMenu}>H</button>
+							{#if showHeadingsMenu}
+								<div class="heading-menu-backdrop" onclick={() => (showHeadingsMenu = false)} role="presentation"></div>
+								<div class="heading-menu">
+									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 1); showHeadingsMenu = false; }} title="Heading 1">H1</button>
+									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 2); showHeadingsMenu = false; }} title="Heading 2">H2</button>
+									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 3); showHeadingsMenu = false; }} title="Heading 3">H3</button>
+								</div>
+							{/if}
 						</div>
-					{/if}
-				</div>
-				<span class="tb-sep"></span>
-				<button class="tb-btn" onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote"><Quote size={13} /></button>
-				<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code"><Code size={13} /></button>
-				<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={13} /></button>
-				<span class="tb-sep"></span>
-				<button class="tb-btn" onclick={() => cmd(wrapInBulletListCommand.key)} title="Bullet list"><List size={13} /></button>
-				<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list"><ListOrdered size={13} /></button>
-				<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={13} /></button>
-				<span class="tb-sep"></span>
-				<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={13} /></button>
-				<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo"><Redo2 size={13} /></button>
-				<span class="tb-sep"></span>
-				<button class="tb-btn" onclick={() => cmd(insertImageCommand.key)} title="Insert image"><Image size={13} /></button>
-				<span class="tb-spacer"></span>
-				<button class="tb-btn tb-star" class:tb-star-on={selectedNote.starred} onclick={() => toggleStar(selectedNote.id)} title={selectedNote.starred ? 'Unstar' : 'Star'}><Star size={13} /></button>
-				<div class="note-menu-wrap">
-					<button class="tb-btn" onclick={() => (showNoteMenu = !showNoteMenu)} title="More actions" aria-label="More actions"><MoreHorizontal size={13} /></button>
-					{#if showNoteMenu}
-						<div class="note-menu-backdrop" onclick={() => (showNoteMenu = false)} role="presentation"></div>
-						<div class="note-menu" role="menu">
-							<button class="note-menu-item" role="menuitem" onclick={() => { togglePin(selectedNote.id); showNoteMenu = false; }}>
-								<Pin size={13} />{selectedNote.pinned ? 'Unpin note' : 'Pin note'}
-							</button>
-							<button class="note-menu-item" role="menuitem" onclick={() => duplicateNote(selectedNote.id)}>
-								<Plus size={13} />Duplicate note
-							</button>
-							<button class="note-menu-item danger" role="menuitem" onclick={() => { deleteNote(selectedNote.id); showNoteMenu = false; }}>
-								<Trash2 size={13} />Move to trash
-							</button>
+						<span class="tb-sep"></span>
+						<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold"><Bold size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic"><Italic size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline"><Underline size={13} /></button>
+						<div class="link-btn-wrap">
+							<button class="tb-btn" onclick={openLinkDialog} title="Insert link (Ctrl+K)"><Link size={13} /></button>
+							{#if showLinkDialog}
+								<div class="link-dialog-backdrop" onclick={() => (showLinkDialog = false)} role="presentation"></div>
+								<div class="link-dialog" role="dialog" aria-label="Insert link">
+									<input class="link-dialog-input" type="url" placeholder="https://…" bind:value={linkDialogHref} onkeydown={linkInputKeydown} use:focusInput />
+									<button class="link-dialog-btn" onclick={applyLink}>Apply</button>
+								</div>
+							{/if}
 						</div>
-					{/if}
-				</div>
-			</div>
+						<span class="tb-sep"></span>
+						<button class="tb-btn" onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote"><Quote size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code"><Code size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={13} /></button>
+						<span class="tb-sep"></span>
+						<button class="tb-btn" onclick={() => cmd(wrapInBulletListCommand.key)} title="Bullet list"><List size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list"><ListOrdered size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(wrapInTaskListCommand.key)} title="Task list"><ListTodo size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={13} /></button>
+						<span class="tb-sep"></span>
+						<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo"><Redo2 size={13} /></button>
+						<span class="tb-sep"></span>
+						<button class="tb-btn" onclick={() => cmd(insertImageCommand.key)} title="Insert image"><Image size={13} /></button>
+						<span class="tb-spacer"></span>
+						<button class="tb-btn tb-star" class:tb-star-on={selectedNote.starred} onclick={() => toggleStar(selectedNote.id)} title={selectedNote.starred ? 'Unstar' : 'Star'}><Star size={13} /></button>
+						<div class="note-menu-wrap">
+							<button class="tb-btn" onclick={() => (showNoteMenu = !showNoteMenu)} title="More actions" aria-label="More actions"><MoreHorizontal size={13} /></button>
+							{#if showNoteMenu}
+								<div class="note-menu-backdrop" onclick={() => (showNoteMenu = false)} role="presentation"></div>
+								<div class="note-menu" role="menu">
+									<button class="note-menu-item" role="menuitem" onclick={() => { togglePin(selectedNote.id); showNoteMenu = false; }}>
+										<Pin size={13} />{selectedNote.pinned ? 'Unpin note' : 'Pin note'}
+									</button>
+									<button class="note-menu-item" role="menuitem" onclick={() => duplicateNote(selectedNote.id)}>
+										<Plus size={13} />Duplicate note
+									</button>
+									<button class="note-menu-item danger" role="menuitem" onclick={() => { deleteNote(selectedNote.id); showNoteMenu = false; }}>
+										<Trash2 size={13} />Move to trash
+									</button>
+								</div>
+							{/if}
+						</div>
+					</div>
 
-			<div class="editor-header">
-				<div class="editor-header-inner">
-					<input
-						bind:this={titleInput}
-						class="title-input"
-						type="text"
-						value={selectedNote.title}
-						oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
-						placeholder="Note title"
-					/>
+				<div class="editor-header">
+					<div class="editor-header-inner">
+						<input
+							bind:this={titleInput}
+							class="title-input"
+							type="text"
+							value={selectedNote.title}
+							oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
+							placeholder="Note title"
+						/>
+					</div>
 				</div>
-			</div>
 
-			{#key selectedId}
-				<Editor value={selectedNote.body} onchange={(md) => scheduleAutoSave('body', md)} bind:ref={editorRef} oninsertlink={openLinkDialog} />
-			{/key}
+				{#key selectedId}
+					<Editor value={selectedNote.body} onchange={(md) => scheduleAutoSave('body', md)} bind:ref={editorRef} oninsertlink={openLinkDialog} />
+				{/key}
+			</div>
 			{#if !isOnline && noteHasImages(selectedNote.body)}
 				<div class="offline-image-notice"><Lock size={13} /> Images aren't available offline</div>
 			{/if}
@@ -1344,6 +1436,7 @@
 	.note-list::-webkit-scrollbar-track { background: transparent; }
 	.note-list:hover { scrollbar-color: var(--border-md) transparent; }
 	.note-list:hover::-webkit-scrollbar-thumb { background: var(--border-md); }
+	.note-list:focus { outline: none; }
 
 	.note-item {
 		position: relative;
@@ -1484,6 +1577,15 @@
 		background: var(--bg);
 	}
 
+	/* ─── Editor focus zone ────────────────────────────── */
+	.editor-focus-zone {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		min-height: 0;
+		overflow: hidden;
+	}
+
 	/* ─── Toolbar ────────────────────────────────────────── */
 	.toolbar {
 		display: flex;
@@ -1518,6 +1620,40 @@
 		flex-shrink: 0;
 	}
 	.tb-spacer { flex: 1; }
+
+	/* ─── Headings group ─────────────────────────────────── */
+	.tb-heading-wrap { position: relative; display: inline-flex; }
+
+	.tb-h-toggle {
+		font-family: var(--serif);
+		font-weight: 700;
+		font-size: 0.8rem;
+		letter-spacing: -0.02em;
+		min-width: 1.6rem;
+	}
+
+	.heading-menu-backdrop { position: fixed; inset: 0; z-index: 49; }
+
+	.heading-menu {
+		position: absolute;
+		top: calc(100% + 4px);
+		left: 0;
+		background: var(--bg);
+		border: 1px solid var(--border);
+		box-shadow: var(--shadow);
+		display: flex;
+		gap: 1px;
+		z-index: 50;
+		padding: 0.2rem;
+	}
+
+	.tb-h-btn {
+		font-family: var(--serif);
+		font-weight: 700;
+		font-size: 0.75rem;
+		letter-spacing: -0.02em;
+		min-width: 1.8rem;
+	}
 
 	.link-btn-wrap { position: relative; display: inline-flex; }
 

@@ -13,9 +13,16 @@ vi.mock('@milkdown/kit/preset/commonmark', () => ({
 	insertHrCommand: { key: 'InsertHr' },
 	createCodeBlockCommand: { key: 'CreateCodeBlock' },
 	toggleLinkCommand: { key: 'ToggleLink' },
+	wrapInHeadingCommand: { key: 'WrapInHeading' },
 }));
 
 vi.mock('$lib/milkdown/link', () => ({ linkPlugin: [] }));
+vi.mock('$lib/milkdown/tasklist', () => ({
+	wrapInTaskListCommand: { key: 'WrapInTaskList' },
+	taskListItemView: {},
+	taskListPlugin: [],
+}));
+vi.mock('@milkdown/kit/preset/gfm', () => ({ gfm: [] }));
 vi.mock('@milkdown/kit/plugin/history', () => ({
 	undoCommand: { key: 'Undo' },
 	redoCommand: { key: 'Redo' },
@@ -118,6 +125,14 @@ beforeEach(() => {
 	vi.mocked(api.tags.list).mockResolvedValue([]);
 });
 
+async function focusEditor() {
+	// Wait for the title input — it's inside the focus zone and only rendered when a note is selected
+	const titleInput = await waitFor(() => screen.getByPlaceholderText(/note title/i));
+	// focusin on the title input bubbles up to the .editor-focus-zone parent
+	await fireEvent.focusIn(titleInput);
+	await waitFor(() => expect(screen.getByRole('toolbar', { name: /formatting/i })).toBeInTheDocument());
+}
+
 describe('Notes page', () => {
 	it('renders the app title', async () => {
 		render(Page);
@@ -175,8 +190,9 @@ describe('Notes page', () => {
 		await waitFor(() => expect(api.notes.archive).toHaveBeenCalledWith(1));
 	});
 
-	it('renders formatting toolbar', async () => {
+	it('toolbar is visible when a note is selected', async () => {
 		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
 		await waitFor(() => expect(screen.getByRole('toolbar', { name: /formatting/i })).toBeInTheDocument());
 	});
 });
@@ -241,14 +257,13 @@ describe('Mobile navigation', () => {
 describe('Link toolbar', () => {
 	it('shows the Insert link button in the toolbar', async () => {
 		render(Page);
-		await waitFor(() =>
-			expect(screen.getByTitle('Insert link (Ctrl+K)')).toBeInTheDocument()
-		);
+		await focusEditor();
+		expect(screen.getByTitle('Insert link (Ctrl+K)')).toBeInTheDocument();
 	});
 
 	it('clicking the link button shows the URL input dialog', async () => {
 		render(Page);
-		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
+		await focusEditor();
 
 		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
 
@@ -258,7 +273,7 @@ describe('Link toolbar', () => {
 
 	it('pressing Escape closes the dialog', async () => {
 		render(Page);
-		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
+		await focusEditor();
 
 		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
 		const input = screen.getByPlaceholderText(/https/i);
@@ -270,7 +285,7 @@ describe('Link toolbar', () => {
 
 	it('clicking the backdrop closes the dialog', async () => {
 		render(Page);
-		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
+		await focusEditor();
 
 		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
 		expect(screen.getByPlaceholderText(/https/i)).toBeInTheDocument();
@@ -282,7 +297,7 @@ describe('Link toolbar', () => {
 
 	it('pressing Enter in the URL input closes the dialog', async () => {
 		render(Page);
-		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
+		await focusEditor();
 
 		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
 		const input = screen.getByPlaceholderText(/https/i);
@@ -295,12 +310,70 @@ describe('Link toolbar', () => {
 
 	it('clicking Apply closes the dialog', async () => {
 		render(Page);
-		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
+		await focusEditor();
 
 		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
 		await fireEvent.click(screen.getByRole('button', { name: /apply/i }));
 
 		expect(screen.queryByPlaceholderText(/https/i)).not.toBeInTheDocument();
+	});
+});
+
+describe('Headings toolbar group', () => {
+	it('shows a Headings toggle button when editor is focused', async () => {
+		render(Page);
+		await focusEditor();
+		expect(screen.getByTitle('Headings')).toBeInTheDocument();
+	});
+
+	it('H1/H2/H3 buttons are hidden before toggling', async () => {
+		render(Page);
+		await focusEditor();
+		expect(screen.queryByTitle('Heading 1')).not.toBeInTheDocument();
+		expect(screen.queryByTitle('Heading 2')).not.toBeInTheDocument();
+		expect(screen.queryByTitle('Heading 3')).not.toBeInTheDocument();
+	});
+
+	it('clicking Headings toggle reveals H1, H2, H3 buttons', async () => {
+		render(Page);
+		await focusEditor();
+		await fireEvent.click(screen.getByTitle('Headings'));
+		expect(screen.getByTitle('Heading 1')).toBeInTheDocument();
+		expect(screen.getByTitle('Heading 2')).toBeInTheDocument();
+		expect(screen.getByTitle('Heading 3')).toBeInTheDocument();
+	});
+
+	it('clicking H1 closes the heading group', async () => {
+		render(Page);
+		await focusEditor();
+		await fireEvent.click(screen.getByTitle('Headings'));
+		await fireEvent.click(screen.getByTitle('Heading 1'));
+		await waitFor(() => expect(screen.queryByTitle('Heading 1')).not.toBeInTheDocument());
+	});
+});
+
+describe('Checklist toolbar button', () => {
+	it('shows a Task list button in the toolbar when editor is focused', async () => {
+		render(Page);
+		await focusEditor();
+		expect(screen.getByTitle('Task list')).toBeInTheDocument();
+	});
+
+	it('Task list button is clickable without error', async () => {
+		render(Page);
+		await focusEditor();
+		await fireEvent.click(screen.getByTitle('Task list'));
+	});
+});
+
+describe('Typemark (home link)', () => {
+	it('clicking the typemark resets the search term', async () => {
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+		const searchInput = screen.getByPlaceholderText(/search/i);
+		await fireEvent.input(searchInput, { target: { value: 'my search' } });
+		await fireEvent.click(screen.getByRole('link', { name: /crapnote/i }));
+		await waitFor(() => expect((searchInput as HTMLInputElement).value).toBe(''));
 	});
 });
 
