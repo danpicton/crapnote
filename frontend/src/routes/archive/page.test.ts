@@ -33,6 +33,20 @@ describe('Archive page', () => {
 		await waitFor(() => expect(screen.getByRole('heading', { name: /archive/i })).toBeInTheDocument());
 	});
 
+	it('renders the Crapnote wordmark linking to home', async () => {
+		render(ArchivePage);
+		const wordmark = screen.getByRole('link', { name: /crapnote/i });
+		expect(wordmark).toBeInTheDocument();
+		expect(wordmark).toHaveAttribute('href', '/');
+	});
+
+	it('navigates home on Escape key', async () => {
+		const { goto } = await import('$app/navigation');
+		render(ArchivePage);
+		await fireEvent.keyDown(window, { key: 'Escape' });
+		expect(goto).toHaveBeenCalledWith('/');
+	});
+
 	it('shows archived note titles', async () => {
 		render(ArchivePage);
 		await waitFor(() => expect(screen.getByText('Archived Note')).toBeInTheDocument());
