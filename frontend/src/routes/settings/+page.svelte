@@ -69,9 +69,9 @@
 </svelte:head>
 
 <div class="settings-page">
+	<a href="/" class="wordmark">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
 	<div class="settings-inner">
 		<header class="page-header">
-			<a href="/" class="wordmark">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
 			<a href="/" class="back-btn" title="Back to notes" aria-label="Back to notes">
 				<ChevronLeft size={20} />
 			</a>
@@ -244,6 +244,10 @@
 	.accent-dot { color: var(--accent); }
 
 	.wordmark {
+		position: fixed;
+		top: 1.25rem;
+		left: 1.25rem;
+		z-index: 10;
 		font-family: var(--serif);
 		font-weight: 800;
 		font-size: 1.5rem;
@@ -253,7 +257,6 @@
 		text-decoration: none;
 		display: inline-flex;
 		align-items: baseline;
-		flex-shrink: 0;
 	}
 	.wordmark:hover { opacity: 0.8; }
 	.wordmark-dot {
