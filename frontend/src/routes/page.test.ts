@@ -19,6 +19,7 @@ vi.mock('@milkdown/kit/preset/commonmark', () => ({
 vi.mock('$lib/milkdown/link', () => ({ linkPlugin: [] }));
 vi.mock('$lib/milkdown/tasklist', () => ({
 	wrapInTaskListCommand: { key: 'WrapInTaskList' },
+	taskListItemView: {},
 	taskListPlugin: [],
 }));
 vi.mock('@milkdown/kit/preset/gfm', () => ({ gfm: [] }));
