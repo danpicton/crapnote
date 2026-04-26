@@ -133,15 +133,18 @@
 		line-height: 1.5;
 	}
 
-	/* Task list items — checkbox vertically centred with text, at content edge */
+	/* Task list items — text aligned with regular list item text, checkbox in margin */
 	.editor-container :global(.ProseMirror li[data-item-type="task"]) {
 		list-style: none;
 		display: flex;
 		align-items: center;
-		gap: 0.5em;
+		gap: 0.375em;
+		margin-left: -1.25em; /* pull into ul padding so text aligns with regular <li> text */
 	}
 	.editor-container :global(.ProseMirror li[data-item-type="task"] .task-checkbox) {
 		flex-shrink: 0;
+		width: 0.875em;
+		height: 0.875em;
 		accent-color: var(--accent);
 		cursor: pointer;
 	}

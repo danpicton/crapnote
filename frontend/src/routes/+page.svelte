@@ -384,7 +384,7 @@
 				if (editorFocused) {
 					editorRef?.blur();
 					void tick().then(() => {
-						noteListEl?.querySelector<HTMLElement>('.note-item.selected .note-btn')?.focus();
+						noteListEl?.focus();
 					});
 					return;
 				}
@@ -945,7 +945,7 @@
 			</div>
 		{:else}
 
-		<ul bind:this={noteListEl} class="note-list" role="list" class:note-list-filtered={tagsTabActive}>
+		<ul bind:this={noteListEl} class="note-list" role="list" class:note-list-filtered={tagsTabActive} tabindex="-1">
 			{#each notes as note (note.id)}
 				<li class="note-item" class:selected={note.id === selectedId}>
 					<div class="note-btn" role="button" tabindex="0" onclick={() => selectNote(note.id)} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectNote(note.id)}>
@@ -1436,6 +1436,7 @@
 	.note-list::-webkit-scrollbar-track { background: transparent; }
 	.note-list:hover { scrollbar-color: var(--border-md) transparent; }
 	.note-list:hover::-webkit-scrollbar-thumb { background: var(--border-md); }
+	.note-list:focus { outline: none; }
 
 	.note-item {
 		position: relative;
