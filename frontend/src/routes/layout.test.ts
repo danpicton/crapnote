@@ -1,7 +1,12 @@
 import { render } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Snippet } from 'svelte';
 import Layout from './+layout.svelte';
 import { writable } from 'svelte/store';
+
+// Svelte 5 Snippet is a branded type — cast a no-op fn for tests that only
+// exercise redirect logic and never actually render children.
+const noopSnippet = (() => {}) as unknown as Snippet;
 
 const goto = vi.hoisted(() => vi.fn());
 vi.mock('$app/navigation', () => ({ goto }));
@@ -42,13 +47,13 @@ beforeEach(() => {
 describe('Layout auth guard', () => {
 	it('redirects unauthenticated users from protected routes to login', async () => {
 		setPath('/');
-		render(Layout, { children: () => null });
+		render(Layout, { children: noopSnippet });
 		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/login', { replaceState: true }));
 	});
 
 	it('does not redirect unauthenticated users on /login', async () => {
 		setPath('/login');
-		render(Layout, { children: () => null });
+		render(Layout, { children: noopSnippet });
 		// Wait for onMount to run
 		await new Promise(r => setTimeout(r, 50));
 		expect(goto).not.toHaveBeenCalledWith('/login', { replaceState: true });
@@ -56,7 +61,7 @@ describe('Layout auth guard', () => {
 
 	it('does not redirect unauthenticated users on /setup/* routes', async () => {
 		setPath('/setup/abc123token');
-		render(Layout, { children: () => null });
+		render(Layout, { children: noopSnippet });
 		await new Promise(r => setTimeout(r, 50));
 		expect(goto).not.toHaveBeenCalledWith('/login', { replaceState: true });
 	});
@@ -64,7 +69,7 @@ describe('Layout auth guard', () => {
 	it('redirects authenticated users away from /login to home', async () => {
 		mockAuth.user = { id: 1, username: 'alice', is_admin: false };
 		setPath('/login');
-		render(Layout, { children: () => null });
+		render(Layout, { children: noopSnippet });
 		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/', { replaceState: true }));
 	});
 });

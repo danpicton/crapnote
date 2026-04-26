@@ -29,7 +29,8 @@ export const wrapInTaskListCommand = $command('WrapInTaskList', (ctx) => () => {
 		if (!wrapIn(bulletListType)(state)) return false;
 
 		if (dispatch) {
-			let innerTr: Transaction | null = null;
+			// Use definite-assignment assertion — TypeScript loses narrowing through the callback
+			let innerTr!: Transaction;
 			wrapIn(bulletListType)(state, (tr) => { innerTr = tr; });
 			if (!innerTr) return false;
 

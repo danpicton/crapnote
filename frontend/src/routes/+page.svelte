@@ -1016,7 +1016,7 @@
 				onfocusin={() => (editorFocused = true)}
 				onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editorFocused = false; showHeadingsMenu = false; } }}
 			>
-					<div class="toolbar" role="toolbar" aria-label="Formatting"
+					<div class="toolbar" role="toolbar" aria-label="Formatting" tabindex="-1"
 					onmousedown={(e) => { if (!(e.target as Element).closest('input, textarea')) e.preventDefault(); }}
 				>
 						<!-- Headings expanding group -->
@@ -1025,9 +1025,9 @@
 							{#if showHeadingsMenu}
 								<div class="heading-menu-backdrop" onclick={() => (showHeadingsMenu = false)} role="presentation"></div>
 								<div class="heading-menu">
-									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key, 1); showHeadingsMenu = false; }} title="Heading 1">H1</button>
-									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key, 2); showHeadingsMenu = false; }} title="Heading 2">H2</button>
-									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key, 3); showHeadingsMenu = false; }} title="Heading 3">H3</button>
+									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 1); showHeadingsMenu = false; }} title="Heading 1">H1</button>
+									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 2); showHeadingsMenu = false; }} title="Heading 2">H2</button>
+									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 3); showHeadingsMenu = false; }} title="Heading 3">H3</button>
 								</div>
 							{/if}
 						</div>
