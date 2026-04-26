@@ -17,6 +17,11 @@ vi.mock('@milkdown/kit/preset/commonmark', () => ({
 }));
 
 vi.mock('$lib/milkdown/link', () => ({ linkPlugin: [] }));
+vi.mock('$lib/milkdown/tasklist', () => ({
+	wrapInTaskListCommand: { key: 'WrapInTaskList' },
+	taskListPlugin: [],
+}));
+vi.mock('@milkdown/kit/preset/gfm', () => ({ gfm: [] }));
 vi.mock('@milkdown/kit/plugin/history', () => ({
 	undoCommand: { key: 'Undo' },
 	redoCommand: { key: 'Redo' },
@@ -349,6 +354,20 @@ describe('Headings toolbar group', () => {
 		await fireEvent.click(screen.getByTitle('Headings'));
 		await fireEvent.click(screen.getByTitle('Heading 1'));
 		await waitFor(() => expect(screen.queryByTitle('Heading 1')).not.toBeInTheDocument());
+	});
+});
+
+describe('Checklist toolbar button', () => {
+	it('shows a Task list button in the toolbar when editor is focused', async () => {
+		render(Page);
+		await focusEditor();
+		expect(screen.getByTitle('Task list')).toBeInTheDocument();
+	});
+
+	it('Task list button is clickable without error', async () => {
+		render(Page);
+		await focusEditor();
+		await fireEvent.click(screen.getByTitle('Task list'));
 	});
 });
 

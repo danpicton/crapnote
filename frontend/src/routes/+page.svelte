@@ -16,6 +16,7 @@
 	import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 	import { toggleUnderlineCommand } from '$lib/milkdown/underline';
 	import { insertImageCommand } from '$lib/milkdown/image';
+	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, type Note, type Tag } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -38,7 +39,7 @@
 	// Lucide icons
 	import {
 		Bold, Italic, Underline, Quote, Code, FileCode2,
-		List, ListOrdered, Minus, Undo2, Redo2, Image, Link,
+		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Image, Link,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search,
 		CloudUpload, CheckCircle2, Lock, MoreHorizontal,
@@ -1004,6 +1005,7 @@
 						<span class="tb-sep"></span>
 						<button class="tb-btn" onclick={() => cmd(wrapInBulletListCommand.key)} title="Bullet list"><List size={13} /></button>
 						<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list"><ListOrdered size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(wrapInTaskListCommand.key)} title="Task list"><ListTodo size={13} /></button>
 						<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={13} /></button>
 						<span class="tb-sep"></span>
 						<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={13} /></button>

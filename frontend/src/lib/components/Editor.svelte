@@ -4,11 +4,13 @@
 	import {
 		commonmark,
 	} from '@milkdown/kit/preset/commonmark';
+	import { gfm } from '@milkdown/kit/preset/gfm';
 	import { history } from '@milkdown/kit/plugin/history';
 	import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
 	import { underlinePlugin } from '$lib/milkdown/underline';
 	import { imagePlugin } from '$lib/milkdown/image';
 	import { linkPlugin } from '$lib/milkdown/link';
+	import { taskListPlugin } from '$lib/milkdown/tasklist';
 
 	export interface EditorRef {
 		call: (key: string | CmdKey<unknown>, payload?: unknown) => void;
@@ -36,6 +38,8 @@
 				});
 			})
 			.use(commonmark)
+			.use(gfm)
+			.use(taskListPlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(underlinePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(imagePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(linkPlugin as Parameters<typeof Editor.prototype.use>[0])
