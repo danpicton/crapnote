@@ -104,6 +104,36 @@
 		line-height: 1.5;
 	}
 
+	/* Task list items */
+	.editor-container :global(.ProseMirror li[data-item-type="task"]) {
+		list-style: none;
+		position: relative;
+	}
+	.editor-container :global(.ProseMirror li[data-item-type="task"]::before) {
+		content: '';
+		position: absolute;
+		left: -1.25em;
+		top: 0.2em;
+		width: 0.875em;
+		height: 0.875em;
+		border: 1.5px solid #9ca3af;
+		border-radius: 2px;
+		box-sizing: border-box;
+		background-color: transparent;
+	}
+	.editor-container :global(.ProseMirror li[data-item-type="task"][data-checked="true"]::before) {
+		background-color: var(--accent);
+		border-color: var(--accent);
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 8'%3E%3Cpath d='M1 4l3 3 5-5' stroke='white' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+		background-size: 75%;
+		background-position: center;
+		background-repeat: no-repeat;
+	}
+	.editor-container :global(.ProseMirror li[data-item-type="task"][data-checked="true"] p) {
+		opacity: 0.5;
+		text-decoration: line-through;
+	}
+
 	.editor-container :global(.ProseMirror blockquote) {
 		margin: 0.4em 0;
 		padding-left: 1em;
