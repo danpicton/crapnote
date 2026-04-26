@@ -77,9 +77,10 @@
 	let showTagsPanel = $state(false);
 	// Note action menu
 	let showNoteMenu = $state(false);
-	// Editor focus / toolbar visibility
+	// Editor focus state (used for Enter/Escape shortcuts)
 	let editorFocused = $state(false);
 	let showHeadingsMenu = $state(false);
+	let noteListEl = $state<HTMLUListElement | null>(null);
 
 	const PALETTE = [
 		// Reds / Pinks / Rose
@@ -373,28 +374,53 @@
 			void refreshSyncStatus();
 		};
 		const handleKeydown = (e: KeyboardEvent) => {
+			const target = e.target as Element;
+			const inInput = !!target.closest('input, textarea, [contenteditable]');
+
 			if (e.key === 'Escape') {
-				// Priority order: link dialog → editor focus → filter → tag popover
+				// Priority: link dialog → tag popover → editor blur → filter tabs
 				if (showLinkDialog) { showLinkDialog = false; return; }
-				if (showTagPopover) { showTagPopover = false; return; }
-				if (editorFocused) { editorRef?.blur(); return; }
-				if (starredOnly || activeTagId !== null) {
+				if (showTagPopover) { showTagPopover = false; (document.activeElement as HTMLElement)?.blur(); return; }
+				if (editorFocused) {
+					editorRef?.blur();
+					void tick().then(() => {
+						noteListEl?.querySelector<HTMLElement>('.note-item.selected .note-btn')?.focus();
+					});
+					return;
+				}
+				if (showTagsPanel || starredOnly || activeTagId !== null) {
+					showTagsPanel = false;
 					starredOnly = false;
 					activeTagId = null;
 					void loadNotes();
+					(document.activeElement as HTMLElement)?.blur();
 					return;
 				}
 				return;
 			}
-			// Enter focuses the editor at end when the editor is not focused
-			if (e.key === 'Enter' && !editorFocused && selectedId !== null) {
-				const target = e.target as Element;
-				if (!target.closest('input, textarea, [contenteditable]')) {
-					e.preventDefault();
-					editorRef?.focusEnd();
-					return;
+
+			// Arrow Up/Down: navigate note list when editor is not focused
+			if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !editorFocused && !inInput && selectedId !== null) {
+				e.preventDefault();
+				const idx = notes.findIndex(n => n.id === selectedId);
+				if (idx === -1) return;
+				const next = e.key === 'ArrowUp' ? Math.max(0, idx - 1) : Math.min(notes.length - 1, idx + 1);
+				if (next !== idx) {
+					void selectNote(notes[next].id);
+					void tick().then(() => {
+						noteListEl?.querySelector<HTMLElement>('.note-item.selected')?.scrollIntoView({ block: 'nearest' });
+					});
 				}
+				return;
 			}
+
+			// Enter: focus editor at end when a note is selected and editor is not active
+			if (e.key === 'Enter' && !editorFocused && !inInput && selectedId !== null) {
+				e.preventDefault();
+				editorRef?.focusEnd();
+				return;
+			}
+
 			const id = matchShortcut(e, { skipInInputs: true });
 			if (!id) return;
 			runShortcut(id, e);
@@ -547,6 +573,7 @@
 		selectedId = id;
 		showTagPopover = false;
 		showNoteMenu = false;
+		showHeadingsMenu = false;
 		noteTags = await api.tags.listForNote(id);
 	}
 
@@ -918,7 +945,7 @@
 			</div>
 		{:else}
 
-		<ul class="note-list" role="list" class:note-list-filtered={tagsTabActive}>
+		<ul bind:this={noteListEl} class="note-list" role="list" class:note-list-filtered={tagsTabActive}>
 			{#each notes as note (note.id)}
 				<li class="note-item" class:selected={note.id === selectedId}>
 					<div class="note-btn" role="button" tabindex="0" onclick={() => selectNote(note.id)} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectNote(note.id)}>
@@ -989,10 +1016,9 @@
 				onfocusin={() => (editorFocused = true)}
 				onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editorFocused = false; showHeadingsMenu = false; } }}
 			>
-				{#if editorFocused}
 					<div class="toolbar" role="toolbar" aria-label="Formatting"
-						onmousedown={(e) => { if (!(e.target as Element).closest('input, textarea')) e.preventDefault(); }}
-					>
+					onmousedown={(e) => { if (!(e.target as Element).closest('input, textarea')) e.preventDefault(); }}
+				>
 						<!-- Headings expanding group -->
 						<div class="tb-heading-wrap">
 							<button class="tb-btn tb-h-toggle" onclick={() => (showHeadingsMenu = !showHeadingsMenu)} title="Headings" aria-label="Headings" aria-expanded={showHeadingsMenu}>H</button>
@@ -1053,7 +1079,6 @@
 							{/if}
 						</div>
 					</div>
-				{/if}
 
 				<div class="editor-header">
 					<div class="editor-header-inner">

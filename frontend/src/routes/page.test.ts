@@ -190,16 +190,10 @@ describe('Notes page', () => {
 		await waitFor(() => expect(api.notes.archive).toHaveBeenCalledWith(1));
 	});
 
-	it('toolbar is hidden when editor is not focused', async () => {
+	it('toolbar is visible when a note is selected', async () => {
 		render(Page);
 		await waitFor(() => screen.getByText('Test Note'));
-		expect(screen.queryByRole('toolbar', { name: /formatting/i })).not.toBeInTheDocument();
-	});
-
-	it('toolbar appears when editor focus zone receives focus', async () => {
-		render(Page);
-		await focusEditor();
-		expect(screen.getByRole('toolbar', { name: /formatting/i })).toBeInTheDocument();
+		await waitFor(() => expect(screen.getByRole('toolbar', { name: /formatting/i })).toBeInTheDocument());
 	});
 });
 
