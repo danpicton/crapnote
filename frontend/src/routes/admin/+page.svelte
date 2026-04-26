@@ -7,6 +7,15 @@
 	import PasswordPromptModal from '$lib/components/PasswordPromptModal.svelte';
 	import { api, ApiError, type InviteResult } from '$lib/api';
 
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape') {
+			const target = e.target as Element;
+			if (!target.closest('input, textarea, [contenteditable]')) {
+				void goto('/settings');
+			}
+		}
+	}
+
 	interface AdminUser {
 		id: number;
 		username: string;
@@ -199,6 +208,8 @@
 <svelte:head>
 	<title>User Management — Crapnote</title>
 </svelte:head>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="admin-page">
 	<a href="/" class="wordmark">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>

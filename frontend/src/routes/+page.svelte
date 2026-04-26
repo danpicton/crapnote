@@ -373,7 +373,28 @@
 			void refreshSyncStatus();
 		};
 		const handleKeydown = (e: KeyboardEvent) => {
-			if (e.key === 'Escape') { showTagPopover = false; }
+			if (e.key === 'Escape') {
+				// Priority order: link dialog → editor focus → filter → tag popover
+				if (showLinkDialog) { showLinkDialog = false; return; }
+				if (showTagPopover) { showTagPopover = false; return; }
+				if (editorFocused) { editorRef?.blur(); return; }
+				if (starredOnly || activeTagId !== null) {
+					starredOnly = false;
+					activeTagId = null;
+					void loadNotes();
+					return;
+				}
+				return;
+			}
+			// Enter focuses the editor at end when the editor is not focused
+			if (e.key === 'Enter' && !editorFocused && selectedId !== null) {
+				const target = e.target as Element;
+				if (!target.closest('input, textarea, [contenteditable]')) {
+					e.preventDefault();
+					editorRef?.focusEnd();
+					return;
+				}
+			}
 			const id = matchShortcut(e, { skipInInputs: true });
 			if (!id) return;
 			runShortcut(id, e);

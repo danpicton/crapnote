@@ -1,11 +1,21 @@
 <script lang="ts">
 	import { ChevronLeft } from 'lucide-svelte';
+	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import ApiTokens from '$lib/components/ApiTokens.svelte';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 	import ShortcutEditor from '$lib/components/ShortcutEditor.svelte';
 	import { api, ApiError } from '$lib/api';
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (e.key === 'Escape') {
+			const target = e.target as Element;
+			if (!target.closest('input, textarea, [contenteditable]')) {
+				void goto('/');
+			}
+		}
+	}
 
 	let exportPassword = $state('');
 
@@ -67,6 +77,8 @@
 <svelte:head>
 	<title>Settings — Crapnote</title>
 </svelte:head>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="settings-page">
 	<a href="/" class="wordmark">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
