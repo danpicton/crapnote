@@ -255,7 +255,6 @@ docker build -t crapnote .
 docker run -p 8080:8080 \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD=changeme \
-  -e SESSION_SECRET=change-this \
   -v $(pwd)/data:/data \
   crapnote
 ```
