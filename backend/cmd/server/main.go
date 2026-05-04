@@ -26,8 +26,7 @@ func main() {
 	slog.SetDefault(logger)
 
 	cfg := db.Config{
-		SQLitePath:  envOrDefault("DATABASE_PATH", "notes.db"),
-		PostgresURL: os.Getenv("DATABASE_URL"),
+		SQLitePath: envOrDefault("DATABASE_PATH", "notes.db"),
 	}
 
 	database, err := db.Open(cfg)

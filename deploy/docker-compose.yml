@@ -89,20 +89,8 @@ services:
       - prometheus
       - loki
 
-  # Optional: run with Postgres instead of SQLite
-  # Uncomment and set DATABASE_URL env var in app service to use
-  # postgres:
-  #   image: postgres:16-alpine
-  #   environment:
-  #     POSTGRES_DB: crapnote
-  #     POSTGRES_USER: crapnote
-  #     POSTGRES_PASSWORD: secret
-  #   volumes:
-  #     - pg-data:/var/lib/postgresql/data
-
 volumes:
   notes-data:
   prometheus-data:
   loki-data:
   grafana-data:
-  # pg-data:
