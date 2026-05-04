@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 )
 
@@ -20,47 +19,34 @@ type DB = sql.DB
 //go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// Config holds database connection settings. If PostgresURL is set it takes
-// precedence; otherwise SQLitePath is used (defaults to "notes.db").
+// Config holds database connection settings.
 type Config struct {
-	SQLitePath  string
-	PostgresURL string
+	SQLitePath string
 }
 
-// Open opens a database connection, runs any pending migrations, and returns
-// the ready-to-use *DB. The caller is responsible for calling Close().
+// Open opens a SQLite database connection, runs any pending migrations, and
+// returns the ready-to-use *DB. The caller is responsible for calling Close().
 func Open(cfg Config) (*DB, error) {
-	var (
-		driverName string
-		dsn        string
-	)
-
-	if cfg.PostgresURL != "" {
-		driverName = "postgres"
-		dsn = cfg.PostgresURL
-	} else {
-		path := cfg.SQLitePath
-		if path == "" {
-			path = "notes.db"
-		}
-		driverName = "sqlite3"
-		if path == ":memory:" {
-			// Each :memory: call gets a unique named DB so test runs don't share state.
-			dsn = fmt.Sprintf("file:memdb%d?mode=memory&cache=shared&_foreign_keys=on", rand.Int63())
-		} else {
-			dsn = fmt.Sprintf("file:%s?_foreign_keys=on&_journal_mode=WAL&cache=shared", path)
-		}
+	path := cfg.SQLitePath
+	if path == "" {
+		path = "notes.db"
 	}
 
-	sqlDB, err := sql.Open(driverName, dsn)
+	var dsn string
+	if path == ":memory:" {
+		// Each :memory: call gets a unique named DB so test runs don't share state.
+		dsn = fmt.Sprintf("file:memdb%d?mode=memory&cache=shared&_foreign_keys=on", rand.Int63())
+	} else {
+		dsn = fmt.Sprintf("file:%s?_foreign_keys=on&_journal_mode=WAL&cache=shared", path)
+	}
+
+	sqlDB, err := sql.Open("sqlite3", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
 
-	if driverName == "sqlite3" {
-		// SQLite requires a single writer; cap connections to avoid locking issues.
-		sqlDB.SetMaxOpenConns(1)
-	}
+	// SQLite requires a single writer; cap connections to avoid locking issues.
+	sqlDB.SetMaxOpenConns(1)
 
 	if err := sqlDB.Ping(); err != nil {
 		sqlDB.Close()

@@ -6,7 +6,7 @@ A full-stack progressive web app (PWA) notes application.
 |---|---|
 | Frontend | Svelte 5 (SvelteKit), Vitest |
 | Backend | Go 1.24, `net/http` stdlib router |
-| Database | SQLite (default) or PostgreSQL (via `DATABASE_URL`) |
+| Database | SQLite with FTS5 |
 | Deployment | Single Docker container; Go binary with Svelte output embedded via `go:embed` |
 
 ---
@@ -94,7 +94,6 @@ npm run lint      # eslint
 |---|---|---|
 | `PORT` | `8080` | HTTP listen port |
 | `DATABASE_PATH` | `notes.db` | Path to SQLite file |
-| `DATABASE_URL` | — | If set, use PostgreSQL instead of SQLite (e.g. `postgres://user:pass@host/db`) |
 | `ADMIN_USERNAME` | — | Seeded on first run if no users exist |
 | `ADMIN_PASSWORD` | — | Seeded on first run if no users exist |
 | `SESSION_TTL_DAYS` | `7` | Session lifetime in days; refreshed on activity |
@@ -120,10 +119,9 @@ Docker image.
 
 ## Database
 
-### Drivers
+### Driver
 
-- **SQLite** (default): `mattn/go-sqlite3` v1.14, CGO, FTS5 enabled via build tag
-- **PostgreSQL**: `lib/pq` v1.12
+`mattn/go-sqlite3` v1.14, CGO, FTS5 enabled via build tag.
 
 ### Migrations
 
@@ -262,7 +260,7 @@ docker run -p 8080:8080 \
   crapnote
 ```
 
-For local dev with optional Postgres:
+For local dev with observability stack (Prometheus, Loki, Grafana):
 
 ```bash
 cd deploy && docker compose up

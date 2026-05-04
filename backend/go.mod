@@ -2,10 +2,7 @@ module github.com/danpicton/crapnote
 
 go 1.24
 
-require (
-	github.com/lib/pq v1.12.3
-	github.com/mattn/go-sqlite3 v1.14.40
-)
+require github.com/mattn/go-sqlite3 v1.14.40
 
 require (
 	github.com/prometheus/client_golang v1.23.2
