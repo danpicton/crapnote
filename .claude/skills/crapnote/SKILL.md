@@ -278,7 +278,6 @@ DATABASE_PATH       # SQLite file path (default: /data/notes.db)
 DATABASE_URL        # PostgreSQL connection string (overrides SQLite if set)
 ADMIN_USERNAME      # Seeded on first run if no users exist
 ADMIN_PASSWORD      # Seeded on first run if no users exist
-SESSION_SECRET      # Secret for signing session tokens
 SESSION_TTL_DAYS    # Session lifetime (default: 7)
 PORT                # HTTP port (default: 8080)
 ```

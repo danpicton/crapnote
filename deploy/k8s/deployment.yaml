@@ -37,11 +37,6 @@ spec:
                 secretKeyRef:
                   name: crapnote-secrets
                   key: ADMIN_PASSWORD
-            - name: SESSION_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: crapnote-secrets
-                  key: SESSION_SECRET
           volumeMounts:
             - name: data
               mountPath: /data
