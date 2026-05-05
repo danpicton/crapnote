@@ -379,14 +379,11 @@
 		>
 			<Star size={20} aria-hidden="true" />
 		</button>
-		<button class="mob-topbar-btn" onclick={() => (showActionSheet = true)} aria-label="Note actions">
-			<MoreHorizontal size={20} aria-hidden="true" />
-		</button>
 	</div>
 
 	<!-- ── Editor header (title + tags) ─────────────────── -->
 	<div class="editor-header">
-		<!-- Mobile: title then tags below -->
+		<!-- Title -->
 		<input
 			bind:this={titleInput}
 			class="title-input"
@@ -395,15 +392,6 @@
 			oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
 			placeholder="Note title"
 		/>
-		<!-- Mobile tag chips -->
-		<div class="mob-tag-chips">
-			{#each noteTags as tag (tag.id)}
-				<span class="mob-tag-chip" aria-label={tag.name}>{tag.name}</span>
-			{/each}
-			<button class="mob-tag-add-chip" onclick={() => (showTagSheet = true)} aria-label="Add tag">
-				+ tag
-			</button>
-		</div>
 		<!-- Desktop tag popover -->
 		<div class="tag-popover-wrap">
 			<button
@@ -433,7 +421,7 @@
 				</div>
 			{/if}
 		</div>
-		<!-- Desktop tag chips row (above title) -->
+		<!-- Desktop tag chips row -->
 		{#if noteTags.length > 0}
 			<div class="note-tags-chips desk-only">
 				{#each noteTags as tag (tag.id)}
@@ -457,15 +445,27 @@
 			/>
 		{/key}
 
-		<!-- Mobile footer: date + word count -->
+		<!-- Mobile footer: date · time · wordcount | tags + ··· -->
 		<div class="mob-editor-footer">
-			<span>
+			<span class="mob-footer-meta">
 				{#if note.created_at}
-					{new Date(note.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} ·
-					{new Date(note.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+					{new Date(note.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+					· {new Date(note.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
 				{/if}
+				· {wordCount(note.body)}w
 			</span>
-			<span>{wordCount(note.body)} words · {saving ? 'saving…' : 'saved'}</span>
+			<div class="mob-footer-right">
+				{#each [...noteTags].sort((a, b) => a.name.localeCompare(b.name)).slice(0, 3) as tag (tag.id)}
+					<button class="mob-footer-tag" onclick={() => (showTagSheet = true)}>{tag.name}</button>
+				{/each}
+				<button class="mob-footer-tag-btn" onclick={() => (showTagSheet = true)} aria-label="Manage tags">
+					<TagIcon size={14} aria-hidden="true" />
+					{#if noteTags.length === 0}<span class="mob-footer-tag-label">tag</span>{/if}
+				</button>
+				<button class="mob-footer-action-btn" onclick={() => (showActionSheet = true)} aria-label="Note actions">
+					<MoreHorizontal size={18} aria-hidden="true" />
+				</button>
+			</div>
 		</div>
 	</div>
 
@@ -846,7 +846,6 @@
 
 	/* Hide mobile elements on desktop */
 	.mob-topbar { display: none; }
-	.mob-tag-chips { display: none; }
 	.mob-format-bar { display: none; }
 	.mob-editor-footer { display: none; }
 	.mob-sheet { display: none; }
@@ -909,34 +908,6 @@
 			width: 100%;
 		}
 
-		/* Mobile tag chips below title */
-		.mob-tag-chips {
-			display: flex;
-			flex-wrap: wrap;
-			gap: 8px;
-			margin-top: 8px;
-		}
-		.mob-tag-chip {
-			font-family: var(--sans);
-			font-size: 12px;
-			font-weight: 600;
-			padding: 4px 10px;
-			border-radius: 999px;
-			background: var(--accent-lt);
-			color: var(--accent);
-		}
-		.mob-tag-add-chip {
-			font-family: var(--sans);
-			font-size: 12px;
-			font-weight: 600;
-			padding: 4px 10px;
-			border-radius: 999px;
-			background: none;
-			border: 1px dashed var(--border);
-			color: var(--text-3);
-			cursor: pointer;
-		}
-		.mob-tag-add-chip:hover { border-color: var(--text-3); color: var(--text-2); }
 
 		/* Editor body — fill remaining space, hide scrollbar */
 		.editor-body {
@@ -963,14 +934,77 @@
 			display: flex;
 			align-items: center;
 			justify-content: space-between;
+			gap: 8px;
 			font-family: var(--sans);
 			font-size: 11px;
 			color: var(--text-3);
-			letter-spacing: 0.3px;
-			padding: 8px 22px;
+			letter-spacing: 0.2px;
+			padding: 0 8px 0 16px;
+			min-height: 52px;
 			border-top: 1px solid var(--border);
+			background: var(--bg-alt);
 			flex-shrink: 0;
 		}
+		.mob-footer-meta {
+			flex: 1;
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			font-variant-numeric: tabular-nums;
+		}
+		.mob-footer-right {
+			display: flex;
+			align-items: center;
+			gap: 2px;
+			flex-shrink: 0;
+		}
+		.mob-footer-tag {
+			display: inline-flex;
+			align-items: center;
+			padding: 4px 8px;
+			background: var(--accent-lt);
+			color: var(--accent);
+			border: none;
+			border-radius: 999px;
+			font-size: 11px;
+			font-weight: 600;
+			font-family: var(--sans);
+			cursor: pointer;
+			white-space: nowrap;
+			max-width: 72px;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		.mob-footer-tag-btn {
+			display: flex;
+			align-items: center;
+			gap: 3px;
+			width: 36px;
+			height: 44px;
+			justify-content: center;
+			background: none;
+			border: none;
+			cursor: pointer;
+			color: var(--text-3);
+		}
+		.mob-footer-tag-btn:hover { color: var(--text-2); }
+		.mob-footer-tag-label {
+			font-size: 11px;
+			font-family: var(--sans);
+		}
+		.mob-footer-action-btn {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 44px;
+			height: 44px;
+			background: none;
+			border: none;
+			cursor: pointer;
+			color: var(--text-2);
+			border-radius: 8px;
+		}
+		.mob-footer-action-btn:hover { background: var(--bg-hover); }
 
 		/* Mobile format toolbar */
 		.mob-format-bar {
