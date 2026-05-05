@@ -953,21 +953,18 @@
 			flex-shrink: 0;
 		}
 		.mob-footer-meta {
-			flex: 1;
+			flex: 0 0 auto;
 			display: flex;
 			flex-direction: column;
-			gap: 1px;
+			align-items: center;
 			overflow: hidden;
 			font-variant-numeric: tabular-nums;
 		}
 		.mob-footer-datetime {
 			white-space: nowrap;
-			overflow: hidden;
-			text-overflow: ellipsis;
 		}
 		.mob-footer-wordcount {
 			color: var(--text-4);
-			text-align: center;
 		}
 		.mob-footer-right {
 			display: flex;
