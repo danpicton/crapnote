@@ -6,6 +6,7 @@
 	import ApiTokens from '$lib/components/ApiTokens.svelte';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 	import ShortcutEditor from '$lib/components/ShortcutEditor.svelte';
+	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
 	import { api, ApiError } from '$lib/api';
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -89,6 +90,10 @@
 			</a>
 			<h1 class="page-title">Settings<span class="accent-dot" aria-hidden="true">.</span></h1>
 		</header>
+		<!-- Mobile page title (separate from desktop header layout) -->
+		<div class="mob-page-title-row" aria-hidden="true">
+			<h1 class="mob-page-title">Settings<span class="accent-dot">.</span></h1>
+		</div>
 
 		<!-- Export -->
 		<section class="section first-section">
@@ -149,8 +154,8 @@
 			</div>
 		</section>
 
-		<!-- Keyboard shortcuts -->
-		<section class="section">
+		<!-- Keyboard shortcuts (hidden on mobile) -->
+		<section class="section section-keyboard-shortcuts">
 			<div class="section-label">
 				<h2>Keyboard shortcuts</h2>
 				<p>Stored on this device. Press <kbd>?</kbd> anywhere to view the cheat sheet.</p>
@@ -205,7 +210,11 @@
 				</p>
 			</div>
 		</section>
+
+		<!-- Mobile footer -->
+		<p class="mob-settings-footer">Crapnote · {auth.user?.username ?? ''}</p>
 	</div>
+	<MobileTabBar activeTab="settings" />
 </div>
 
 <style>
@@ -430,9 +439,89 @@
 	.account-name { font-family: var(--serif); font-size: 1rem; font-weight: 600; }
 	.account-meta { color: var(--text-3); font-size: 0.8125rem; margin-left: 0.5rem; }
 
+	/* Desktop: hide mobile-only elements */
+	.mob-page-title-row { display: none; }
+	.mob-settings-footer { display: none; }
+
 	/* Responsive */
 	@media (max-width: 640px) {
-		.settings-inner { padding: 0 1rem; }
-		.section { grid-template-columns: 1fr; gap: 0.75rem; padding: 1.5rem 0; }
+		.settings-page {
+			display: flex;
+			flex-direction: column;
+			height: 100dvh;
+			overflow: hidden;
+		}
+
+		/* Scrollable content area */
+		.settings-inner {
+			padding: 0;
+			flex: 1;
+			overflow-y: auto;
+		}
+
+		/* Hide desktop wordmark (overlaps on mobile) */
+		.wordmark { display: none; }
+
+		/* Hide desktop page header layout (back btn + title in a row) */
+		.page-header { display: none; }
+
+		/* Mobile top bar: back chevron only */
+		.mob-page-title-row {
+			display: block;
+			padding: 54px 22px 2px;
+			background: var(--bg);
+			flex-shrink: 0;
+		}
+		.mob-page-title {
+			font-family: var(--serif);
+			font-size: 30px;
+			font-weight: 700;
+			color: var(--text);
+			margin: 0;
+			line-height: 1.1;
+		}
+
+		/* Sections: single column with side padding */
+		.section { grid-template-columns: 1fr; gap: 0.75rem; padding: 20px 22px 18px; }
+		.first-section { padding-top: 20px; }
+
+		/* Section headings smaller on mobile */
+		.section-label h2 { font-size: 19px; }
+
+		/* Keyboard shortcuts — hide entirely on mobile */
+		.section-keyboard-shortcuts { display: none; }
+
+		/* Buttons full-width on mobile */
+		.btn-primary { width: 100%; box-sizing: border-box; padding: 13px 16px; font-size: 16px; border-radius: 10px; }
+		.btn-default { width: 100%; box-sizing: border-box; padding: 14px 16px; font-size: 15px; border-radius: 12px; border: 1px solid var(--border); }
+		.field-input { width: 100%; border-radius: 10px; padding: 12px 14px; font-size: 16px; }
+
+		/* Override PasswordInput styling on mobile */
+		.section :global(.pw-wrap) { width: 100%; }
+		.section :global(.pw-wrap input) {
+			border-radius: 10px;
+			padding: 12px 2.5rem 12px 14px;
+			font-size: 16px;
+			box-sizing: border-box;
+		}
+
+		.export-row { flex-direction: column; gap: 0.75rem; }
+
+		/* Dark mode toggle: make it larger */
+		.toggle-track { width: 46px; height: 28px; border-radius: 14px; }
+		.toggle-thumb { width: 24px; height: 24px; top: 2px; left: 2px; }
+		.theme-toggle-row input:checked ~ .toggle-track .toggle-thumb { transform: translateX(18px); }
+		.toggle-text { font-size: 16px; }
+
+		/* Mobile footer */
+		.mob-settings-footer {
+			display: block;
+			text-align: center;
+			font-family: var(--sans);
+			font-size: 12px;
+			color: var(--text-3);
+			padding: 24px 22px 8px;
+			margin: 0;
+		}
 	}
 </style>
