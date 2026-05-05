@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { ArchiveRestore, Trash2, ChevronLeft } from 'lucide-svelte';
+	import { ArchiveRestore, Trash2, ChevronLeft, Archive as ArchiveIcon } from 'lucide-svelte';
 	import { api, type Note } from '$lib/api';
+	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
 
 	let notes = $state<Note[]>([]);
 	let loading = $state(true);
@@ -37,6 +38,48 @@
 	function toggleExpand(id: number) {
 		expandedId = expandedId === id ? null : id;
 	}
+
+	// Mobile swipe state (archive: left-swipe = Restore + Delete forever; right-swipe disabled)
+	let swipeX = $state<Record<number, number>>({});
+	let swipeActive = $state<number | null>(null);
+	let swipeBaseX = 0;
+	let swipeStartX = 0;
+	let swipeStartY = 0;
+	let swipeAxisLocked = false;
+
+	function onSwipeStart(e: TouchEvent, id: number) {
+		swipeStartX = e.touches[0].clientX;
+		swipeStartY = e.touches[0].clientY;
+		swipeBaseX = swipeX[id] ?? 0;
+		swipeActive = id;
+		swipeAxisLocked = false;
+	}
+
+	function onSwipeMove(e: TouchEvent, id: number) {
+		if (swipeActive !== id) return;
+		const rawDx = e.touches[0].clientX - swipeStartX;
+		const rawDy = e.touches[0].clientY - swipeStartY;
+		if (!swipeAxisLocked) {
+			if (Math.abs(rawDx) < 5 && Math.abs(rawDy) < 5) return;
+			if (Math.abs(rawDy) > Math.abs(rawDx)) { swipeActive = null; return; }
+			swipeAxisLocked = true;
+		}
+		e.preventDefault();
+		// Archive: only allow left-swipe (negative dx)
+		const newX = Math.min(0, Math.max(-180, swipeBaseX + rawDx));
+		swipeX = { ...swipeX, [id]: newX };
+	}
+
+	function onSwipeEnd(id: number) {
+		if (swipeActive !== id) return;
+		swipeActive = null;
+		const x = swipeX[id] ?? 0;
+		swipeX = { ...swipeX, [id]: x <= -60 ? -144 : 0 };
+	}
+
+	function resetSwipe(id: number) {
+		swipeX = { ...swipeX, [id]: 0 };
+	}
 </script>
 
 <svelte:head>
@@ -55,51 +98,92 @@
 			<h1 class="page-title">Archive<span class="accent-dot" aria-hidden="true">.</span></h1>
 		</header>
 
+		<!-- Mobile page title -->
+		<div class="mob-page-title-row" aria-hidden="true">
+			<h1 class="mob-page-title">Archive<span class="accent-dot">.</span></h1>
+		</div>
+
 		{#if loading}
 			<p class="status">Loading…</p>
 		{:else if notes.length === 0}
-			<p class="status">Archive is empty.</p>
+			<!-- Mobile empty state -->
+			<div class="mob-empty-state">
+				<div class="mob-empty-icon"><ArchiveIcon size={28} aria-hidden="true" /></div>
+				<p class="mob-empty-title">Nothing archived</p>
+				<p class="mob-empty-sub">Swipe a note left and tap Archive to tuck it away here.</p>
+			</div>
+			<p class="status desk-only">Archive is empty.</p>
 		{:else}
 			<ul class="note-list">
 				{#each notes as note (note.id)}
-					<li class="note-item" class:expanded={expandedId === note.id}>
-						<div class="note-row">
-							<button class="note-title-btn" onclick={() => toggleExpand(note.id)}>
-								<span class="note-title">{note.title || 'Untitled'}</span>
-								<span class="note-meta">
-									{new Date(note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-									· {new Date(note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-								</span>
+					<li class="note-item" class:expanded={expandedId === note.id} style="--swipe-x: {swipeX[note.id] ?? 0}px">
+						<!-- Mobile swipe actions (left-swipe only in archive) -->
+						<div class="mob-swipe-right" class:mob-swipe-visible={(swipeX[note.id] ?? 0) < -4}>
+							<button
+								class="mob-swipe-btn mob-swipe-restore"
+								onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void unarchive(note.id); }}
+								aria-label="Restore note"
+							>
+								<ArchiveRestore size={20} aria-hidden="true" />
+								<span>Restore</span>
 							</button>
-							<div class="note-actions">
-								<button
-									class="act-btn"
-									onclick={() => unarchive(note.id)}
-									title="Restore from archive"
-									aria-label="Restore from archive"
-								>
-									<ArchiveRestore size={14} />
-								</button>
-								<button
-									class="act-btn danger"
-									onclick={() => deleteNote(note.id)}
-									title="Delete permanently"
-									aria-label="Delete permanently"
-								>
-									<Trash2 size={14} />
-								</button>
-							</div>
+							<button
+								class="mob-swipe-btn mob-swipe-delete"
+								onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void deleteNote(note.id); }}
+								aria-label="Delete permanently"
+							>
+								<Trash2 size={20} aria-hidden="true" />
+								<span>Delete</span>
+							</button>
 						</div>
-						{#if expandedId === note.id}
-							<div class="note-body">
-								<pre class="body-text">{note.body || '(empty)'}</pre>
+
+						<!-- Row body -->
+						<div
+							class="note-row-body"
+							style="transition: {swipeActive === note.id ? 'none' : 'transform 250ms cubic-bezier(.2,.8,.2,1)'}"
+							ontouchstart={(e) => onSwipeStart(e, note.id)}
+							ontouchmove={(e) => onSwipeMove(e, note.id)}
+							ontouchend={() => onSwipeEnd(note.id)}
+						>
+							<div class="note-row">
+								<button class="note-title-btn" onclick={() => { if ((swipeX[note.id] ?? 0) !== 0) { resetSwipe(note.id); return; } toggleExpand(note.id); }}>
+									<span class="note-title">{note.title || 'Untitled'}</span>
+									<span class="note-meta">
+										{new Date(note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+										· {new Date(note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+									</span>
+								</button>
+								<div class="note-actions">
+									<button
+										class="act-btn"
+										onclick={() => unarchive(note.id)}
+										title="Restore from archive"
+										aria-label="Restore from archive"
+									>
+										<ArchiveRestore size={14} />
+									</button>
+									<button
+										class="act-btn danger"
+										onclick={() => deleteNote(note.id)}
+										title="Delete permanently"
+										aria-label="Delete permanently"
+									>
+										<Trash2 size={14} />
+									</button>
+								</div>
 							</div>
-						{/if}
+							{#if expandedId === note.id}
+								<div class="note-body">
+									<pre class="body-text">{note.body || '(empty)'}</pre>
+								</div>
+							{/if}
+						</div>
 					</li>
 				{/each}
 			</ul>
 		{/if}
 	</div>
+	<MobileTabBar activeTab="archive" />
 </div>
 
 <style>
@@ -261,7 +345,135 @@
 		line-height: 1.5;
 	}
 
+	/* ── Mobile-only elements (hidden on desktop) ── */
+	.mob-page-title-row,
+	.mob-empty-state,
+	.mob-swipe-right { display: none; }
+
 	@media (max-width: 640px) {
-		.archive-inner { padding: 0 1rem; }
+		.archive-inner { padding: 0 1rem; padding-bottom: 80px; }
+
+		/* Hide desktop-only elements */
+		.wordmark, .page-header, .desk-only { display: none !important; }
+
+		/* Mobile page title */
+		.mob-page-title-row {
+			display: flex;
+			align-items: baseline;
+			padding: 54px 0 0.25rem;
+		}
+		.mob-page-title {
+			font-family: var(--serif);
+			font-weight: 800;
+			font-size: 1.875rem;
+			letter-spacing: -0.04em;
+			line-height: 1;
+			color: var(--text);
+			margin: 0;
+		}
+
+		/* Mobile empty state */
+		.mob-empty-state {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			padding: 4rem 2rem;
+			text-align: center;
+			gap: 0.5rem;
+		}
+		.mob-empty-icon {
+			width: 64px;
+			height: 64px;
+			border-radius: 50%;
+			background: var(--bg-alt);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			color: var(--text-3);
+			margin-bottom: 0.75rem;
+		}
+		.mob-empty-title {
+			font-family: var(--serif);
+			font-size: 1.125rem;
+			font-weight: 700;
+			color: var(--text);
+			margin: 0;
+		}
+		.mob-empty-sub {
+			font-size: 0.875rem;
+			color: var(--text-3);
+			margin: 0;
+			max-width: 240px;
+		}
+
+		/* Swipeable note rows */
+		.note-item {
+			position: relative;
+			overflow: hidden;
+		}
+
+		.mob-swipe-right {
+			position: absolute;
+			top: 0; right: 0; bottom: 0;
+			display: flex;
+			align-items: stretch;
+			opacity: 0;
+			pointer-events: none;
+			transition: opacity 150ms;
+		}
+		.mob-swipe-right.mob-swipe-visible {
+			opacity: 1;
+			pointer-events: auto;
+		}
+
+		.mob-swipe-btn {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			gap: 4px;
+			width: 72px;
+			border: none;
+			cursor: pointer;
+			font-family: var(--sans);
+			font-size: 11px;
+			font-weight: 600;
+			color: white;
+			padding: 0;
+		}
+		.mob-swipe-restore { background: #5E8E6E; }
+		.mob-swipe-delete  { background: #C0432A; }
+
+		.note-row-body {
+			transform: translateX(var(--swipe-x));
+			background: var(--bg);
+		}
+
+		/* Hide desktop action buttons on mobile */
+		.note-actions { display: none; }
+
+		/* Larger tap targets for note title rows */
+		.note-row {
+			padding: 0.875rem 0;
+			min-height: 56px;
+		}
+		.note-title-btn {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: 0.2rem;
+		}
+		.note-title {
+			font-size: 1rem;
+		}
+		.note-meta {
+			font-size: 0.6875rem;
+		}
+	}
+
+	@media (min-width: 641px) {
+		.mob-page-title-row,
+		.mob-empty-state,
+		.mob-swipe-right { display: none !important; }
 	}
 </style>
