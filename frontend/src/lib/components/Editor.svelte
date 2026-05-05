@@ -109,7 +109,7 @@
 	.editor-container :global(.ProseMirror) {
 		outline: none;
 		min-height: 200px;
-		font-family: var(--serif);
+		font-family: var(--sans);
 		font-size: 1rem;
 	}
 

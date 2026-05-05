@@ -99,7 +99,8 @@
 		</header>
 
 		<!-- Mobile page title -->
-		<div class="mob-page-title-row" aria-hidden="true">
+		<div class="mob-page-title-row">
+			<a href="/" class="mob-back-btn" aria-label="Back to notes"><ChevronLeft size={22} /></a>
 			<h1 class="mob-page-title">Archive<span class="accent-dot">.</span></h1>
 		</div>
 
@@ -199,6 +200,8 @@
 		max-width: 1040px;
 		margin: 0 auto;
 		padding: 0 3rem;
+		flex: 1;
+		min-height: 0;
 	}
 
 	.wordmark {
@@ -352,7 +355,12 @@
 	.mob-swipe-right { display: none; }
 
 	@media (max-width: 640px) {
-		.archive-inner { padding: 0 1rem; padding-bottom: 80px; }
+		.archive-page {
+			display: flex;
+			flex-direction: column;
+			overflow: hidden;
+		}
+		.archive-inner { padding: 0 1rem 80px; overflow-y: auto; }
 
 		/* Hide desktop-only elements */
 		.wordmark, .page-header, .desk-only { display: none !important; }
@@ -360,9 +368,23 @@
 		/* Mobile page title */
 		.mob-page-title-row {
 			display: flex;
-			align-items: baseline;
-			padding: 54px 0 0.25rem;
+			align-items: center;
+			gap: 0.25rem;
+			padding: calc(env(safe-area-inset-top, 0px) + 12px) 0 0.25rem;
+			flex-shrink: 0;
 		}
+		.mob-back-btn {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 44px;
+			height: 44px;
+			color: var(--text-3);
+			text-decoration: none;
+			flex-shrink: 0;
+			margin-left: -10px;
+		}
+		.mob-back-btn:hover { color: var(--text); }
 		.mob-page-title {
 			font-family: var(--serif);
 			font-weight: 800;

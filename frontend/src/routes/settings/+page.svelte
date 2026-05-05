@@ -90,8 +90,9 @@
 			</a>
 			<h1 class="page-title">Settings<span class="accent-dot" aria-hidden="true">.</span></h1>
 		</header>
-		<!-- Mobile page title (separate from desktop header layout) -->
-		<div class="mob-page-title-row" aria-hidden="true">
+		<!-- Mobile page title -->
+		<div class="mob-page-title-row">
+			<a href="/" class="mob-back-btn" aria-label="Back to notes"><ChevronLeft size={22} /></a>
 			<h1 class="mob-page-title">Settings<span class="accent-dot">.</span></h1>
 		</div>
 
@@ -465,13 +466,27 @@
 		/* Hide desktop page header layout (back btn + title in a row) */
 		.page-header { display: none; }
 
-		/* Mobile top bar: back chevron only */
+		/* Mobile top bar: back chevron + title */
 		.mob-page-title-row {
-			display: block;
-			padding: 54px 22px 2px;
+			display: flex;
+			align-items: center;
+			gap: 0.25rem;
+			padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 2px;
 			background: var(--bg);
 			flex-shrink: 0;
 		}
+		.mob-back-btn {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 44px;
+			height: 44px;
+			color: var(--text-3);
+			text-decoration: none;
+			flex-shrink: 0;
+			margin-left: -10px;
+		}
+		.mob-back-btn:hover { color: var(--text); }
 		.mob-page-title {
 			font-family: var(--serif);
 			font-size: 30px;

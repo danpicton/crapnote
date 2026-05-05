@@ -2239,7 +2239,7 @@
 		.mob-header {
 			display: flex;
 			flex-direction: column;
-			padding: 54px 20px 0;
+			padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px 0;
 			background: var(--bg-alt);
 			flex-shrink: 0;
 		}
