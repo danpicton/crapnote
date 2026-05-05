@@ -957,6 +957,7 @@
 			display: flex;
 			flex-direction: column;
 			align-items: center;
+			gap: 3px;
 			overflow: hidden;
 			font-variant-numeric: tabular-nums;
 		}
@@ -964,7 +965,7 @@
 			white-space: nowrap;
 		}
 		.mob-footer-wordcount {
-			color: var(--text-4);
+			color: var(--text-3);
 		}
 		.mob-footer-right {
 			display: flex;
