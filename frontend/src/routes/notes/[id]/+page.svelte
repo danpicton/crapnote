@@ -470,7 +470,7 @@
 	</div>
 
 	<!-- ── Mobile format toolbar (above keyboard, shown when focused) ── -->
-	<div class="mob-format-bar" class:mob-format-bar-visible={editorFocused} role="toolbar" aria-label="Formatting" onmousedown={(e) => e.preventDefault()} onpointerdown={(e) => e.preventDefault()}>
+	<div class="mob-format-bar" class:mob-format-bar-visible={editorFocused} role="toolbar" tabindex="-1" aria-label="Formatting" onmousedown={(e) => e.preventDefault()} onpointerdown={(e) => e.preventDefault()}>
 		<div class="mob-toolbar-scroll">
 			<!-- Heading -->
 			<div class="mob-tb-wrap">

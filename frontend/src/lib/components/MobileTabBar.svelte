@@ -52,6 +52,10 @@
 		flex-shrink: 0;
 	}
 
+	@media (min-width: 641px) {
+		.mob-tab-bar { display: none !important; }
+	}
+
 	.tab {
 		flex: 1;
 		display: flex;

@@ -43,7 +43,7 @@
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search,
 		CloudUpload, CheckCircle2, Lock, MoreHorizontal,
-		RefreshCw, Wifi, WifiOff, X,
+		RefreshCw, WifiOff, X,
 	} from 'lucide-svelte';
 	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
 
@@ -70,7 +70,6 @@
 
 	// Pull-to-sync state
 	let pullY = $state(0);
-	let isPullingActive = $state(false);
 	let pullStartY = 0;
 	let pullAtTop = false;
 
@@ -120,20 +119,17 @@
 	function onListTouchMove(e: TouchEvent) {
 		if (!pullAtTop) return;
 		const dy = e.touches[0].clientY - pullStartY;
-		if (dy <= 0) { pullY = 0; isPullingActive = false; return; }
-		isPullingActive = true;
+		if (dy <= 0) { pullY = 0; return; }
 		// Apply resistance: drag / (1 + drag/80)
 		pullY = Math.min(80, dy / (1 + dy / 80));
 	}
 
 	async function onListTouchEnd() {
 		if (pullY >= 56) {
-			isPullingActive = false;
 			pullY = 0;
 			await heartbeatSync('manual');
 		} else {
 			pullY = 0;
-			isPullingActive = false;
 		}
 	}
 
@@ -1165,6 +1161,7 @@
 					<!-- Row body (shared desktop + mobile, translates on mobile swipe) -->
 					<div
 						class="note-row-body"
+						role="listitem"
 						style="transition: {swipeActive === note.id ? 'none' : 'transform 250ms cubic-bezier(.2,.8,.2,1)'}"
 						ontouchstart={(e) => onSwipeStart(e, note.id)}
 						ontouchmove={(e) => onSwipeMove(e, note.id)}
@@ -1770,8 +1767,6 @@
 		color: var(--text-4);
 		line-height: 1;
 	}
-	.meta-star { color: var(--accent); }
-
 	.note-date {
 		font-size: 0.6875rem;
 		color: var(--text-4);

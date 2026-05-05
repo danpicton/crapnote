@@ -140,6 +140,7 @@
 						<!-- Row body -->
 						<div
 							class="note-row-body"
+							role="listitem"
 							style="transition: {swipeActive === note.id ? 'none' : 'transform 250ms cubic-bezier(.2,.8,.2,1)'}"
 							ontouchstart={(e) => onSwipeStart(e, note.id)}
 							ontouchmove={(e) => onSwipeMove(e, note.id)}
