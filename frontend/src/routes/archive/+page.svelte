@@ -190,6 +190,14 @@
 							{#if expandedId === note.id}
 								<div class="note-body">
 									<pre class="body-text">{note.body || '(empty)'}</pre>
+									<div class="mob-note-actions">
+										<button class="mob-note-action-btn" onclick={() => { expandedId = null; void unarchive(note.id); }}>
+											<ArchiveRestore size={15} aria-hidden="true" /> Restore
+										</button>
+										<button class="mob-note-action-btn mob-note-action-danger" onclick={() => deleteNote(note.id)}>
+											<Trash2 size={15} aria-hidden="true" /> Delete permanently
+										</button>
+									</div>
 								</div>
 							{/if}
 						</div>
@@ -523,9 +531,38 @@
 		.note-meta {
 			font-size: 0.6875rem;
 		}
+
+		/* Suppress hover accent colour on touch devices */
+		.note-title-btn:hover .note-title { color: var(--text); }
+
+		/* Action buttons inside expanded note body */
+		.mob-note-actions {
+			display: flex;
+			gap: 8px;
+			padding: 10px 0 4px;
+			border-top: 1px solid var(--border);
+			margin-top: 10px;
+		}
+		.mob-note-action-btn {
+			display: inline-flex;
+			align-items: center;
+			gap: 6px;
+			padding: 8px 14px;
+			border: 1px solid var(--border);
+			border-radius: 8px;
+			background: var(--bg);
+			color: var(--text-2);
+			font-size: 13px;
+			font-family: var(--sans);
+			cursor: pointer;
+		}
+		.mob-note-action-btn:hover { background: var(--bg-hover); }
+		.mob-note-action-danger { color: var(--danger); border-color: var(--danger-bd); background: var(--danger-bg); }
+		.mob-note-action-danger:hover { background: var(--danger); color: white; }
 	}
 
 	@media (min-width: 641px) {
+		.mob-note-actions { display: none; }
 		.mob-page-title-row,
 		.mob-empty-state,
 		.mob-swipe-right { display: none !important; }
