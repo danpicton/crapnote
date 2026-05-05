@@ -873,7 +873,7 @@
 		.mob-topbar {
 			display: flex;
 			align-items: center;
-			padding: 54px 8px 10px;
+			padding: calc(env(safe-area-inset-top, 0px) + 10px) 8px 8px;
 			border-bottom: 1px solid var(--border);
 			flex-shrink: 0;
 		}
@@ -903,7 +903,8 @@
 		.title-input {
 			font-size: 28px;
 			font-weight: 700;
-			letter-spacing: -0.4px;
+			font-family: var(--serif);
+			letter-spacing: -0.04em;
 			line-height: 1.15;
 			width: 100%;
 		}
