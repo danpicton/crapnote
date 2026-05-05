@@ -918,14 +918,15 @@
 			flex-direction: column;
 		}
 		.editor-body :global(.milkdown),
-		.editor-body :global(.milkdown-root),
-		.editor-body :global(.ProseMirror) {
-			overflow-y: auto;
-			scrollbar-width: none;
+		.editor-body :global(.milkdown-root) {
 			flex: 1;
-			padding: 4px 22px 24px;
+			min-height: 0;
+		}
+		.editor-body :global(.ProseMirror) {
+			padding: 16px 22px 24px;
 			font-size: 17px;
 			line-height: 1.55;
+			text-align: left;
 		}
 		.editor-body :global(*::-webkit-scrollbar) { display: none; }
 

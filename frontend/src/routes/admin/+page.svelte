@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { ChevronLeft, UserPlus, Trash2, Lock, LockOpen, KeyRound, Mail, Copy, Check } from 'lucide-svelte';
+	import { ChevronLeft, ChevronRight, UserPlus, Trash2, Lock, LockOpen, KeyRound, Mail, Copy, Check } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 	import PasswordPromptModal from '$lib/components/PasswordPromptModal.svelte';
@@ -42,6 +42,8 @@
 	let passwordModalUser = $state<AdminUser | null>(null);
 	let passwordModalSubmitting = $state(false);
 	let passwordModalError = $state('');
+
+	let expandedUser = $state<number | null>(null);
 
 	// Result of the most recent invite issuance, so the admin can copy the URL.
 	let lastInvite = $state<InviteResult | null>(null);
@@ -412,81 +414,58 @@
 						</tbody>
 					</table>
 
-					<!-- Mobile user cards -->
+					<!-- Mobile user cards (redesigned to match wireframe) -->
 					<ul class="mob-user-list">
 						{#each users as user (user.id)}
-							<li class="mob-user-card" class:mob-card-locked={user.locked}>
-								<div class="mob-card-header">
-									<span class="mob-card-username">{user.username}</span>
-									<div class="mob-card-pills">
-										<span class="mob-role-pill">{user.is_admin ? 'Admin' : 'User'}</span>
-										{#if user.locked}
-											<span class="status-pill locked-pill">Locked</span>
-										{:else if user.pending_setup}
-											<span class="status-pill pending-pill">Pending</span>
-										{:else}
-											<span class="status-pill active-pill">Active</span>
+							<li class="mob-user-item" class:mob-user-expanded={expandedUser === user.id}>
+								<button
+									class="mob-user-row"
+									onclick={() => expandedUser = expandedUser === user.id ? null : user.id}
+									aria-expanded={expandedUser === user.id}
+								>
+									<div class="mob-user-avatar" aria-hidden="true">{user.username.charAt(0).toUpperCase()}</div>
+									<div class="mob-user-info">
+										<div class="mob-user-name-row">
+											<span class="mob-user-name">{user.username}</span>
+											{#if user.locked}
+												<span class="mob-status-pill mob-status-locked">Locked</span>
+											{:else if user.pending_setup}
+												<span class="mob-status-pill mob-status-invited">Invited</span>
+											{:else}
+												<span class="mob-status-pill mob-status-active">Active</span>
+											{/if}
+										</div>
+										<span class="mob-user-sub">
+											{user.is_admin ? 'Admin' : 'User'}
+											· {user.is_admin ? 'Always' : (user.api_tokens_enabled ? 'API on' : '—')}
+											· {new Date(user.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+										</span>
+									</div>
+									<ChevronRight size={16} class="mob-user-chevron" aria-hidden="true" />
+								</button>
+								{#if expandedUser === user.id}
+									<div class="mob-user-actions">
+										<button class="mob-user-action-btn" onclick={() => openPasswordModal(user)}>
+											<KeyRound size={15} /> Set password
+										</button>
+										<button class="mob-user-action-btn" onclick={() => resendInvite(user)}>
+											<Mail size={15} /> {user.pending_setup ? 'Resend invite' : 'Send setup link'}
+										</button>
+										{#if !user.is_admin}
+											<button class="mob-user-action-btn" onclick={() => toggleApiTokens(user, !user.api_tokens_enabled)}>
+												{user.api_tokens_enabled ? 'Disable API' : 'Enable API'}
+											</button>
+										{/if}
+										{#if user.id !== auth.user?.id}
+											<button class="mob-user-action-btn" onclick={() => toggleLock(user)}>
+												{#if user.locked}<LockOpen size={15} /> Unlock{:else}<Lock size={15} /> Lock{/if}
+											</button>
+											<button class="mob-user-action-btn mob-user-action-danger" onclick={() => deleteUser(user.id)}>
+												<Trash2 size={15} /> Delete
+											</button>
 										{/if}
 									</div>
-								</div>
-
-								<div class="mob-card-meta">
-									{#if !user.is_admin}
-										<span class="mob-api-label">API tokens:</span>
-										<label class="toggle-label">
-											<input
-												type="checkbox"
-												checked={user.api_tokens_enabled}
-												onchange={(e) => toggleApiTokens(user, (e.currentTarget as HTMLInputElement).checked)}
-											/>
-											{user.api_tokens_enabled ? 'Enabled' : 'Disabled'}
-										</label>
-									{:else}
-										<span class="muted">API tokens: Always enabled</span>
-									{/if}
-								</div>
-
-								<div class="mob-card-actions">
-									<button
-										class="mob-card-btn"
-										onclick={() => openPasswordModal(user)}
-										aria-label="Set password for {user.username}"
-									>
-										<KeyRound size={15} />
-										<span>Password</span>
-									</button>
-									<button
-										class="mob-card-btn"
-										onclick={() => resendInvite(user)}
-										aria-label="Send setup link to {user.username}"
-									>
-										<Mail size={15} />
-										<span>Setup link</span>
-									</button>
-									{#if user.id !== auth.user?.id}
-										<button
-											class="mob-card-btn"
-											onclick={() => toggleLock(user)}
-											aria-label={user.locked ? `Unlock ${user.username}` : `Lock ${user.username}`}
-										>
-											{#if user.locked}
-												<LockOpen size={15} />
-												<span>Unlock</span>
-											{:else}
-												<Lock size={15} />
-												<span>Lock</span>
-											{/if}
-										</button>
-										<button
-											class="mob-card-btn mob-card-btn-danger"
-											onclick={() => deleteUser(user.id)}
-											aria-label="Delete user"
-										>
-											<Trash2 size={15} />
-											<span>Delete</span>
-										</button>
-									{/if}
-								</div>
+								{/if}
 							</li>
 						{/each}
 					</ul>
@@ -847,92 +826,161 @@
 		}
 
 		/* Sections become single column */
-		.section { grid-template-columns: 1fr; gap: 0.5rem; padding: 1.5rem 0; }
-		.first-section { padding-top: 0; }
-		.section-label h2 { font-size: 1.125rem; }
-		.section-label p { display: none; }
+		.section { grid-template-columns: 1fr; gap: 0.5rem; padding: 14px 16px 12px; border-top: 1px solid var(--border); }
+		.first-section { padding-top: 14px; border-top: none; }
+		.section-label h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); margin-bottom: 6px; font-family: var(--sans); }
+		.section-label p { font-size: 13px; color: var(--text-3); margin: 2px 0 10px; display: block; }
+
+		/* Section body: card appearance */
+		.section-body {
+			background: var(--bg-alt);
+			border-radius: 14px;
+			padding: 2px 0;
+			overflow: hidden;
+		}
 
 		/* Create form full width */
-		.create-form { max-width: none; }
+		.create-form { max-width: none; padding: 12px 16px 14px; }
 		.btn-primary { width: 100%; justify-content: center; padding: 0.75rem; border-radius: 10px; font-size: 1rem; }
+		.form-actions { flex-direction: column; gap: 0.625rem; }
+		.checkbox-label { font-size: 15px; }
 
-		/* Mobile user cards */
+		/* Segmented radio control for mode-toggle */
+		.mode-toggle {
+			display: flex;
+			gap: 0;
+			border: 1px solid var(--border);
+			border-radius: 10px;
+			overflow: hidden;
+			padding: 0;
+			margin: 0 0 16px;
+		}
+		.radio-label {
+			flex: 1;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			padding: 10px 8px;
+			font-size: 14px;
+			cursor: pointer;
+			background: none;
+			border-right: 1px solid var(--border);
+			text-align: center;
+		}
+		.radio-label:last-child { border-right: none; }
+		.radio-label:has(input:checked) {
+			background: var(--accent);
+			color: white;
+			font-weight: 600;
+		}
+		.radio-label input { display: none; }
+
+		/* Mobile user list (new card design) */
 		.mob-user-list {
 			display: flex;
 			flex-direction: column;
-			gap: 0.75rem;
 			list-style: none;
 			margin: 0;
 			padding: 0;
-		}
-
-		.mob-user-card {
 			background: var(--bg-alt);
-			border: 1px solid var(--border);
-			border-radius: 12px;
-			padding: 0.875rem 1rem;
-			display: flex;
-			flex-direction: column;
-			gap: 0.625rem;
+			border-radius: 14px;
+			overflow: hidden;
 		}
-		.mob-card-locked { opacity: 0.7; }
-
-		.mob-card-header {
+		.mob-user-item {
+			border-bottom: 1px solid var(--border);
+		}
+		.mob-user-item:last-child { border-bottom: none; }
+		.mob-user-row {
 			display: flex;
 			align-items: center;
-			justify-content: space-between;
-			gap: 0.5rem;
+			gap: 12px;
+			padding: 12px 16px;
+			width: 100%;
+			background: none;
+			border: none;
+			cursor: pointer;
+			text-align: left;
+			min-height: 64px;
+			box-sizing: border-box;
 		}
-		.mob-card-username {
+		.mob-user-avatar {
+			width: 40px;
+			height: 40px;
+			border-radius: 50%;
+			background: var(--bg-hover);
+			color: var(--text-2);
+			display: flex;
+			align-items: center;
+			justify-content: center;
 			font-family: var(--serif);
-			font-weight: 600;
-			font-size: 1.0625rem;
-			color: var(--text);
-		}
-		.mob-card-pills {
-			display: flex;
-			gap: 0.375rem;
-			align-items: center;
+			font-weight: 700;
+			font-size: 18px;
 			flex-shrink: 0;
 		}
-		.mob-role-pill {
-			font-size: 0.6875rem;
-			font-weight: 600;
-			text-transform: uppercase;
-			letter-spacing: 0.05em;
-			color: var(--text-3);
+		.mob-user-info {
+			flex: 1;
+			min-width: 0;
+			display: flex;
+			flex-direction: column;
+			gap: 2px;
 		}
-
-		.mob-card-meta {
+		.mob-user-name-row {
 			display: flex;
 			align-items: center;
-			gap: 0.375rem;
-			font-size: 0.8125rem;
-			color: var(--text-3);
+			gap: 6px;
+			flex-wrap: nowrap;
 		}
-		.mob-api-label { color: var(--text-4); }
-
-		.mob-card-actions {
-			display: flex;
-			gap: 0.5rem;
-			flex-wrap: wrap;
-		}
-		.mob-card-btn {
-			display: inline-flex;
-			align-items: center;
-			gap: 0.3rem;
-			padding: 0.4rem 0.75rem;
-			background: var(--bg-hover);
-			border: 1px solid var(--border);
-			border-radius: 8px;
-			color: var(--text-2);
-			font-size: 0.8125rem;
+		.mob-user-name {
 			font-family: var(--sans);
-			cursor: pointer;
+			font-weight: 600;
+			font-size: 15px;
+			color: var(--text);
 		}
-		.mob-card-btn:hover { background: var(--bg); color: var(--text); }
-		.mob-card-btn-danger { color: var(--danger); border-color: var(--danger-bd); background: var(--danger-bg); }
-		.mob-card-btn-danger:hover { background: var(--danger); color: white; }
+		.mob-status-pill {
+			font-size: 10px;
+			font-weight: 700;
+			text-transform: uppercase;
+			letter-spacing: 0.06em;
+			padding: 2px 7px;
+			border-radius: 999px;
+			flex-shrink: 0;
+		}
+		.mob-status-active { background: var(--bg-hover); color: var(--text-3); }
+		.mob-status-invited { background: var(--accent-lt); color: var(--accent); border: 1px solid var(--accent); }
+		.mob-status-locked { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-bd); }
+		.mob-user-sub {
+			font-size: 12px;
+			color: var(--text-3);
+			font-family: var(--sans);
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		.mob-user-actions {
+			display: flex;
+			flex-direction: column;
+			background: var(--bg);
+			border-top: 1px solid var(--border);
+		}
+		.mob-user-action-btn {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			padding: 13px 20px;
+			background: none;
+			border: none;
+			border-bottom: 1px solid var(--border);
+			font-size: 15px;
+			font-family: var(--sans);
+			color: var(--text);
+			cursor: pointer;
+			text-align: left;
+			min-height: 48px;
+			box-sizing: border-box;
+		}
+		.mob-user-action-btn:last-child { border-bottom: none; }
+		.mob-user-action-btn:hover { background: var(--bg-hover); }
+		.mob-user-action-danger { color: var(--danger); }
 
 		/* Invite result */
 		.invite-result { font-size: 0.8125rem; }

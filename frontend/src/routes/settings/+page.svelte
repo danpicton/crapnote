@@ -497,19 +497,71 @@
 		}
 
 		/* Sections: single column with side padding */
-		.section { grid-template-columns: 1fr; gap: 0.75rem; padding: 20px 22px 18px; }
-		.first-section { padding-top: 20px; }
+		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 16px 12px; }
+		.first-section { padding-top: 14px; border-top: none; }
 
-		/* Section headings smaller on mobile */
-		.section-label h2 { font-size: 19px; }
+		/* Section label */
+		.section-label p { display: none; }
+		.section-label h2 {
+			font-size: 13px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.06em;
+			color: var(--text-3);
+			margin-bottom: 6px;
+			font-family: var(--sans);
+		}
+
+		/* Section body: card appearance */
+		.section-body {
+			background: var(--bg-alt);
+			border-radius: 14px;
+			padding: 2px 0;
+			overflow: hidden;
+		}
 
 		/* Keyboard shortcuts — hide entirely on mobile */
 		.section-keyboard-shortcuts { display: none; }
 
+		/* Export row */
+		.export-row { flex-direction: column; gap: 0.75rem; padding: 14px 16px; }
+		.hint { padding: 0 16px 14px; }
+
 		/* Buttons full-width on mobile */
 		.btn-primary { width: 100%; box-sizing: border-box; padding: 13px 16px; font-size: 16px; border-radius: 10px; }
-		.btn-default { width: 100%; box-sizing: border-box; padding: 14px 16px; font-size: 15px; border-radius: 12px; border: 1px solid var(--border); }
+		.btn-default {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			width: 100%;
+			box-sizing: border-box;
+			padding: 14px 16px;
+			background: none;
+			border: none;
+			font-size: 16px;
+			color: var(--text);
+			min-height: 48px;
+			text-decoration: none;
+			border-radius: 0;
+		}
 		.field-input { width: 100%; border-radius: 10px; padding: 12px 14px; font-size: 16px; }
+
+		/* Theme toggle row: full-width list item */
+		.theme-toggle-row {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 14px 16px;
+			min-height: 48px;
+			width: 100%;
+			box-sizing: border-box;
+		}
+
+		/* Dark mode toggle: make it larger */
+		.toggle-track { width: 46px; height: 28px; border-radius: 14px; }
+		.toggle-thumb { width: 24px; height: 24px; top: 2px; left: 2px; }
+		.theme-toggle-row input:checked ~ .toggle-track .toggle-thumb { transform: translateX(18px); }
+		.toggle-text { font-size: 16px; }
 
 		/* Override PasswordInput styling on mobile */
 		.section :global(.pw-wrap) { width: 100%; }
@@ -520,13 +572,17 @@
 			box-sizing: border-box;
 		}
 
-		.export-row { flex-direction: column; gap: 0.75rem; }
-
-		/* Dark mode toggle: make it larger */
-		.toggle-track { width: 46px; height: 28px; border-radius: 14px; }
-		.toggle-thumb { width: 24px; height: 24px; top: 2px; left: 2px; }
-		.theme-toggle-row input:checked ~ .toggle-track .toggle-thumb { transform: translateX(18px); }
-		.toggle-text { font-size: 16px; }
+		/* Password fields */
+		.pw-form { max-width: none; gap: 0; }
+		.pw-field {
+			display: flex;
+			flex-direction: column;
+			gap: 4px;
+			padding: 0 16px 0;
+			border-bottom: 1px solid var(--border);
+		}
+		.field-label { font-size: 13px; color: var(--text-3); margin-bottom: 4px; display: block; padding-top: 12px; }
+		.pw-form .btn-primary { margin: 16px 16px 0; width: calc(100% - 32px); border-radius: 10px; }
 
 		/* Mobile footer */
 		.mob-settings-footer {

@@ -80,6 +80,16 @@
 	function resetSwipe(id: number) {
 		swipeX = { ...swipeX, [id]: 0 };
 	}
+
+	function notePreview(body: string): string {
+		return body
+			.replace(/^#+\s+/gm, '')
+			.replace(/[*_`~]/g, '')
+			.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+			.replace(/\n+/g, ' ')
+			.trim()
+			.slice(0, 120);
+	}
 </script>
 
 <svelte:head>
@@ -150,6 +160,9 @@
 							<div class="note-row">
 								<button class="note-title-btn" onclick={() => { if ((swipeX[note.id] ?? 0) !== 0) { resetSwipe(note.id); return; } toggleExpand(note.id); }}>
 									<span class="note-title">{note.title || 'Untitled'}</span>
+									{#if note.body}
+										<span class="note-preview">{notePreview(note.body)}</span>
+									{/if}
 									<span class="note-meta">
 										{new Date(note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
 										· {new Date(note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
@@ -349,6 +362,9 @@
 		line-height: 1.5;
 	}
 
+	/* Hide preview on desktop */
+	.note-preview { display: none; }
+
 	/* ── Mobile-only elements (hidden on desktop) ── */
 	.mob-page-title-row,
 	.mob-empty-state,
@@ -484,10 +500,25 @@
 		.note-title-btn {
 			flex-direction: column;
 			align-items: flex-start;
-			gap: 0.2rem;
+			gap: 0.15rem;
+			width: 100%;
+			text-align: left;
 		}
 		.note-title {
 			font-size: 1rem;
+		}
+		.note-preview {
+			display: block;
+			font-size: 0.8125rem;
+			color: var(--text-3);
+			font-family: var(--sans);
+			line-height: 1.4;
+			display: -webkit-box;
+			-webkit-box-orient: vertical;
+			-webkit-line-clamp: 1;
+			line-clamp: 1;
+			overflow: hidden;
+			width: 100%;
 		}
 		.note-meta {
 			font-size: 0.6875rem;
