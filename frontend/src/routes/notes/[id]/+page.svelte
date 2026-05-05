@@ -917,6 +917,10 @@
 			display: flex;
 			flex-direction: column;
 		}
+		/* Strip Editor.svelte's 1rem 2rem padding so we control it at ProseMirror level */
+		.editor-body :global(.editor-container) {
+			padding: 0;
+		}
 		.editor-body :global(.milkdown),
 		.editor-body :global(.milkdown-root) {
 			flex: 1;
