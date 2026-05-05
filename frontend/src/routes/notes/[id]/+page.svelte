@@ -449,10 +449,12 @@
 		<div class="mob-editor-footer">
 			<span class="mob-footer-meta">
 				{#if note.created_at}
-					{new Date(note.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-					· {new Date(note.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+					<span class="mob-footer-datetime">
+						{new Date(note.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
+						· {new Date(note.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+					</span>
 				{/if}
-				· {wordCount(note.body)}w
+				<span class="mob-footer-wordcount">{wordCount(note.body)}w · {saving ? 'saving…' : 'saved'}</span>
 			</span>
 			<div class="mob-footer-right">
 				{#each [...noteTags].sort((a, b) => a.name.localeCompare(b.name)).slice(0, 3) as tag (tag.id)}
@@ -952,10 +954,19 @@
 		}
 		.mob-footer-meta {
 			flex: 1;
+			display: flex;
+			flex-direction: column;
+			gap: 1px;
+			overflow: hidden;
+			font-variant-numeric: tabular-nums;
+		}
+		.mob-footer-datetime {
 			white-space: nowrap;
 			overflow: hidden;
 			text-overflow: ellipsis;
-			font-variant-numeric: tabular-nums;
+		}
+		.mob-footer-wordcount {
+			color: var(--text-4);
 		}
 		.mob-footer-right {
 			display: flex;
