@@ -982,6 +982,15 @@
 		.mob-user-action-btn:hover { background: var(--bg-hover); }
 		.mob-user-action-danger { color: var(--danger); }
 
+		:global(.mob-user-chevron) {
+			color: var(--text-4);
+			flex-shrink: 0;
+			transition: transform 200ms;
+		}
+		.mob-user-expanded :global(.mob-user-chevron) {
+			transform: rotate(90deg);
+		}
+
 		/* Invite result */
 		.invite-result { font-size: 0.8125rem; }
 		.invite-url { flex-wrap: wrap; }
