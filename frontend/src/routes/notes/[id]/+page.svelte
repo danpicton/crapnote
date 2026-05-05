@@ -454,7 +454,7 @@
 						· {new Date(note.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
 					</span>
 				{/if}
-				<span class="mob-footer-wordcount">{wordCount(note.body)}w · {saving ? 'saving…' : 'saved'}</span>
+				<span class="mob-footer-wordcount">{wordCount(note.body)} words</span>
 			</span>
 			<div class="mob-footer-right">
 				{#each [...noteTags].sort((a, b) => a.name.localeCompare(b.name)).slice(0, 3) as tag (tag.id)}
@@ -967,6 +967,7 @@
 		}
 		.mob-footer-wordcount {
 			color: var(--text-4);
+			text-align: center;
 		}
 		.mob-footer-right {
 			display: flex;
