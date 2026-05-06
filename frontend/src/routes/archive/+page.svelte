@@ -82,13 +82,21 @@
 	}
 
 	function notePreview(body: string): string {
+		if (!body?.trim()) return '';
 		return body
-			.replace(/^#+\s+/gm, '')
-			.replace(/[*_`~]/g, '')
+			.replace(/<br\s*\/?>/gi, '\n')
+			.replace(/!\[[^\]]*\]\([^)]*\)/g, '<image content>')
 			.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-			.replace(/\n+/g, ' ')
+			.replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
+			.replace(/\*\*([^*]+)\*\*/g, '$1')
+			.replace(/__([^_]+)__/g, '$1')
+			.replace(/\*([^*\n]+)\*/g, '$1')
+			.replace(/_([^_\n]+)_/g, '$1')
+			.replace(/^>\s?/gm, '')
+			.replace(/^[-*_]{3,}\s*$/gm, '')
+			.replace(/\n{3,}/g, '\n\n')
 			.trim()
-			.slice(0, 120);
+			.slice(0, 300);
 	}
 </script>
 
@@ -516,17 +524,17 @@
 			font-size: 1rem;
 		}
 		.note-preview {
-			display: block;
 			font-size: 0.8125rem;
 			color: var(--text-3);
 			font-family: var(--sans);
 			line-height: 1.4;
 			display: -webkit-box;
 			-webkit-box-orient: vertical;
-			-webkit-line-clamp: 1;
-			line-clamp: 1;
+			-webkit-line-clamp: 2;
+			line-clamp: 2;
 			overflow: hidden;
 			width: 100%;
+			white-space: pre-line;
 		}
 		.note-meta {
 			font-size: 0.6875rem;

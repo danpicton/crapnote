@@ -137,16 +137,26 @@
 	function notePreview(body: string): string {
 		if (!body?.trim()) return '';
 		return body
-			.replace(/```[\s\S]*?```/gm, '')
-			.replace(/^#+\s+/gm, '')
-			.replace(/[*_]{1,2}([^*_]+)[*_]{1,2}/g, '$1')
-			.replace(/`[^`]+`/g, '')
-			.replace(/!\[.*?\]\(.*?\)/g, '')
+			// HTML line breaks → newline
+			.replace(/<br\s*\/?>/gi, '\n')
+			// Images → placeholder
+			.replace(/!\[[^\]]*\]\([^)]*\)/g, '<image content>')
+			// Links → text only
 			.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-			.replace(/^[-*>]\s+/gm, '')
-			.replace(/\n+/g, ' ')
+			// Bold & italic → plain text
+			.replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
+			.replace(/\*\*([^*]+)\*\*/g, '$1')
+			.replace(/__([^_]+)__/g, '$1')
+			.replace(/\*([^*\n]+)\*/g, '$1')
+			.replace(/_([^_\n]+)_/g, '$1')
+			// Blockquotes → strip marker
+			.replace(/^>\s?/gm, '')
+			// Horizontal rules → remove line
+			.replace(/^[-*_]{3,}\s*$/gm, '')
+			// Collapse 3+ blank lines to 2
+			.replace(/\n{3,}/g, '\n\n')
 			.trim()
-			.slice(0, 140);
+			.slice(0, 300);
 	}
 
 	// Derived sync status for the mobile sync status row
@@ -2426,6 +2436,7 @@
 			color: var(--text-3);
 			line-height: 1.4;
 			margin: 4px 0 6px;
+			white-space: pre-line;
 		}
 		.note-date { font-size: 12px; margin-top: 0; letter-spacing: 0.1px; }
 
