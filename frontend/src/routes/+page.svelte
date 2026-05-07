@@ -2442,10 +2442,10 @@
 		.note-preview::after {
 			content: '';
 			position: absolute;
+			top: 1.4em;
 			bottom: 0;
 			left: 0;
 			right: 0;
-			height: 1.4em;
 			background: linear-gradient(to bottom, transparent, var(--bg));
 			pointer-events: none;
 		}
