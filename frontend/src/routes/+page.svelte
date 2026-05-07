@@ -153,8 +153,7 @@
 			.replace(/^>\s?/gm, '')
 			// Horizontal rules → remove line
 			.replace(/^[-*_]{3,}\s*$/gm, '')
-			// Collapse 3+ blank lines to 2
-			.replace(/\n{3,}/g, '\n\n')
+			.replace(/\n{2,}/g, '\n')
 			.trim()
 			.slice(0, 300);
 	}
@@ -2436,8 +2435,7 @@
 			line-height: 1.4;
 			margin: 4px 0 6px;
 			white-space: pre-line;
-			overflow-wrap: break-word;
-			word-break: break-word;
+			overflow-wrap: anywhere;
 		}
 		.note-preview::after {
 			content: '';

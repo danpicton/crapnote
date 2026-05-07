@@ -94,7 +94,7 @@
 			.replace(/_([^_\n]+)_/g, '$1')
 			.replace(/^>\s?/gm, '')
 			.replace(/^[-*_]{3,}\s*$/gm, '')
-			.replace(/\n{3,}/g, '\n\n')
+			.replace(/\n{2,}/g, '\n')
 			.trim()
 			.slice(0, 300);
 	}
@@ -534,8 +534,7 @@
 			line-height: 1.4;
 			width: 100%;
 			white-space: pre-line;
-			overflow-wrap: break-word;
-			word-break: break-word;
+			overflow-wrap: anywhere;
 		}
 		.note-preview::after {
 			content: '';
