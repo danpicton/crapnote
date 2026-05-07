@@ -524,6 +524,7 @@
 			font-size: 1rem;
 		}
 		.note-preview {
+			display: block;
 			position: relative;
 			max-height: 2.8em;
 			overflow: hidden;
