@@ -946,8 +946,8 @@
 			font-size: 11px;
 			color: var(--text-3);
 			letter-spacing: 0.2px;
-			padding: 0 8px 0 16px;
-			min-height: 52px;
+			padding: 0 4px 0 12px;
+			min-height: 36px;
 			border-top: 1px solid var(--border);
 			background: var(--bg-alt);
 			flex-shrink: 0;
