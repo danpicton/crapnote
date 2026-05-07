@@ -140,7 +140,7 @@
 			// HTML line breaks → newline
 			.replace(/<br\s*\/?>/gi, '\n')
 			// Images → placeholder
-			.replace(/!\[[^\]]*\]\([^)]*\)/g, '<image content>')
+			.replace(/!\[[^\]]*\]\([^)]*\)/g, '<image content>\n')
 			// Links → text only
 			.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
 			// Bold & italic → plain text
@@ -2426,10 +2426,8 @@
 
 		/* Preview text (hidden desktop, shown mobile) */
 		.note-preview {
-			display: -webkit-box;
-			-webkit-line-clamp: 2;
-			line-clamp: 2;
-			-webkit-box-orient: vertical;
+			position: relative;
+			max-height: 2.8em;
 			overflow: hidden;
 			font-family: var(--sans);
 			font-size: 14px;
@@ -2437,6 +2435,18 @@
 			line-height: 1.4;
 			margin: 4px 0 6px;
 			white-space: pre-line;
+			overflow-wrap: break-word;
+			word-break: break-word;
+		}
+		.note-preview::after {
+			content: '';
+			position: absolute;
+			bottom: 0;
+			left: 0;
+			right: 0;
+			height: 1.4em;
+			background: linear-gradient(to bottom, transparent, var(--bg));
+			pointer-events: none;
 		}
 		.note-date { font-size: 12px; margin-top: 0; letter-spacing: 0.1px; }
 

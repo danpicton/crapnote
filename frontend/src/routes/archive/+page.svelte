@@ -85,7 +85,7 @@
 		if (!body?.trim()) return '';
 		return body
 			.replace(/<br\s*\/?>/gi, '\n')
-			.replace(/!\[[^\]]*\]\([^)]*\)/g, '<image content>')
+			.replace(/!\[[^\]]*\]\([^)]*\)/g, '<image content>\n')
 			.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
 			.replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
 			.replace(/\*\*([^*]+)\*\*/g, '$1')
@@ -524,17 +524,27 @@
 			font-size: 1rem;
 		}
 		.note-preview {
+			position: relative;
+			max-height: 2.8em;
+			overflow: hidden;
 			font-size: 0.8125rem;
 			color: var(--text-3);
 			font-family: var(--sans);
 			line-height: 1.4;
-			display: -webkit-box;
-			-webkit-box-orient: vertical;
-			-webkit-line-clamp: 2;
-			line-clamp: 2;
-			overflow: hidden;
 			width: 100%;
 			white-space: pre-line;
+			overflow-wrap: break-word;
+			word-break: break-word;
+		}
+		.note-preview::after {
+			content: '';
+			position: absolute;
+			bottom: 0;
+			left: 0;
+			right: 0;
+			height: 1.4em;
+			background: linear-gradient(to bottom, transparent, var(--bg));
+			pointer-events: none;
 		}
 		.note-meta {
 			font-size: 0.6875rem;
