@@ -102,6 +102,27 @@
 			@media (max-width: 640px) {
 				* { scrollbar-width: none; -ms-overflow-style: none; }
 				*::-webkit-scrollbar { display: none !important; }
+
+				/* Admin + settings: flat card-row inputs (global so SW cache can't hide it) */
+				.fields-row input,
+				.fields-row .pw-wrap input {
+					border: none !important;
+					border-bottom: 1px solid var(--border) !important;
+					border-radius: 0 !important;
+					background: transparent !important;
+					-webkit-appearance: none !important;
+					appearance: none !important;
+					box-shadow: none !important;
+				}
+				.fields-row .pw-wrap {
+					border-bottom: 1px solid var(--border);
+					border-top: none;
+					border-left: none;
+					border-right: none;
+				}
+				.fields-row .pw-wrap input {
+					border-bottom: none !important;
+				}
 			}
 
 			/* Milkdown / ProseMirror editor ─ ensure it follows the theme */
