@@ -83,6 +83,11 @@
 
 <div class="settings-page">
 	<a href="/" class="wordmark">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
+	<!-- Mobile page title (outside scrollable inner so it stays fixed at top) -->
+	<div class="mob-page-title-row">
+		<a href="/" class="mob-back-btn" aria-label="Back to notes"><ChevronLeft size={22} /></a>
+		<h1 class="mob-page-title">Settings<span class="accent-dot">.</span></h1>
+	</div>
 	<div class="settings-inner">
 		<header class="page-header">
 			<a href="/" class="back-btn" title="Back to notes" aria-label="Back to notes">
@@ -90,11 +95,6 @@
 			</a>
 			<h1 class="page-title">Settings<span class="accent-dot" aria-hidden="true">.</span></h1>
 		</header>
-		<!-- Mobile page title -->
-		<div class="mob-page-title-row">
-			<a href="/" class="mob-back-btn" aria-label="Back to notes"><ChevronLeft size={22} /></a>
-			<h1 class="mob-page-title">Settings<span class="accent-dot">.</span></h1>
-		</div>
 
 		<!-- Export -->
 		<section class="section first-section">
@@ -471,29 +471,30 @@
 			display: flex;
 			align-items: center;
 			gap: 0.25rem;
-			padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 2px;
-			background: var(--bg);
+			padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px 12px;
+			background: var(--bg-alt);
 			flex-shrink: 0;
 		}
 		.mob-back-btn {
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			width: 44px;
-			height: 44px;
+			width: 36px;
+			height: 36px;
 			color: var(--text-3);
 			text-decoration: none;
 			flex-shrink: 0;
-			margin-left: -10px;
+			margin-left: -8px;
+			margin-right: 2px;
 		}
 		.mob-back-btn:hover { color: var(--text); }
 		.mob-page-title {
 			font-family: var(--serif);
-			font-size: 30px;
+			font-size: 26px;
 			font-weight: 700;
 			color: var(--text);
 			margin: 0;
-			line-height: 1.1;
+			line-height: 1;
 		}
 
 		/* Sections: single column with side padding */

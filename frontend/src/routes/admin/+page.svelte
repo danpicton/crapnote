@@ -216,6 +216,13 @@
 
 <div class="admin-page">
 	<a href="/" class="wordmark">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
+	<!-- Mobile page title (outside scrollable inner so it stays fixed at top) -->
+	<div class="mob-page-title-row">
+		<a href="/settings" class="mob-back-btn" aria-label="Back to settings">
+			<ChevronLeft size={22} />
+		</a>
+		<h1 class="mob-page-title">Users<span class="accent-dot">.</span></h1>
+	</div>
 	<div class="admin-inner">
 		<header class="page-header">
 			<a href="/settings" class="back-btn" title="Back to settings" aria-label="Back to settings">
@@ -223,14 +230,6 @@
 			</a>
 			<h1 class="page-title">User management<span class="accent-dot" aria-hidden="true">.</span></h1>
 		</header>
-
-		<!-- Mobile page title -->
-		<div class="mob-page-title-row" aria-hidden="true">
-			<a href="/settings" class="mob-back-btn" aria-label="Back to settings">
-				<ChevronLeft size={22} />
-			</a>
-			<h1 class="mob-page-title">Users<span class="accent-dot">.</span></h1>
-		</div>
 
 		<!-- Create user -->
 		<section class="section first-section">
@@ -789,8 +788,8 @@
 	.mob-user-list { display: none; }
 
 	@media (max-width: 640px) {
-		.admin-page { display: flex; flex-direction: column; }
-		.admin-inner { padding: 0 1rem; padding-bottom: 80px; flex: 1; }
+		.admin-page { display: flex; flex-direction: column; overflow: hidden; }
+		.admin-inner { padding: 0; padding-bottom: 80px; flex: 1; overflow-y: auto; }
 
 		/* Hide desktop-only elements */
 		.wordmark, .page-header { display: none !important; }
@@ -801,25 +800,27 @@
 			display: flex;
 			align-items: center;
 			gap: 0.25rem;
-			padding: calc(env(safe-area-inset-top, 0px) + 12px) 0 0.25rem;
+			padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px 12px;
+			background: var(--bg-alt);
+			flex-shrink: 0;
 		}
 		.mob-back-btn {
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			width: 44px;
-			height: 44px;
+			width: 36px;
+			height: 36px;
 			color: var(--text-3);
 			text-decoration: none;
 			flex-shrink: 0;
-			margin-left: -10px;
+			margin-left: -8px;
+			margin-right: 2px;
 		}
 		.mob-back-btn:hover { color: var(--text); }
 		.mob-page-title {
 			font-family: var(--serif);
-			font-weight: 800;
-			font-size: 1.875rem;
-			letter-spacing: -0.04em;
+			font-weight: 700;
+			font-size: 26px;
 			line-height: 1;
 			color: var(--text);
 			margin: 0;
