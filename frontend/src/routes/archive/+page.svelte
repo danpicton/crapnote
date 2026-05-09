@@ -39,7 +39,16 @@
 		expandedId = expandedId === id ? null : id;
 	}
 
-	// Mobile swipe state (archive: left-swipe = Restore + Delete forever; right-swipe disabled)
+	function onNoteClick(id: number) {
+		if ((swipeX[id] ?? 0) !== 0) { resetSwipe(id); return; }
+		if (window.matchMedia('(max-width: 640px)').matches) {
+			goto(`/archive/${id}`);
+		} else {
+			toggleExpand(id);
+		}
+	}
+
+	// Swipe state (left-swipe only: reveals Restore + Delete)
 	let swipeX = $state<Record<number, number>>({});
 	let swipeActive = $state<number | null>(null);
 	let swipeBaseX = 0;
@@ -65,7 +74,6 @@
 			swipeAxisLocked = true;
 		}
 		e.preventDefault();
-		// Archive: only allow left-swipe (negative dx)
 		const newX = Math.min(0, Math.max(-180, swipeBaseX + rawDx));
 		swipeX = { ...swipeX, [id]: newX };
 	}
@@ -107,8 +115,19 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="archive-page">
+	<!-- Desktop wordmark -->
 	<a href="/" class="wordmark">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
+
+	<!-- Mobile header (shaded, matches note list style) -->
+	<div class="mob-header">
+		<div class="mob-header-row">
+			<a href="/" class="mob-back-btn" aria-label="Back to notes"><ChevronLeft size={22} /></a>
+			<span class="mob-wordmark">Archive<span class="mob-wordmark-dot" aria-hidden="true">.</span></span>
+		</div>
+	</div>
+
 	<div class="archive-inner">
+		<!-- Desktop header -->
 		<header class="page-header">
 			<a href="/" class="back-btn" title="Back to notes" aria-label="Back to notes">
 				<ChevronLeft size={20} />
@@ -116,16 +135,9 @@
 			<h1 class="page-title">Archive<span class="accent-dot" aria-hidden="true">.</span></h1>
 		</header>
 
-		<!-- Mobile page title -->
-		<div class="mob-page-title-row">
-			<a href="/" class="mob-back-btn" aria-label="Back to notes"><ChevronLeft size={22} /></a>
-			<h1 class="mob-page-title">Archive<span class="accent-dot">.</span></h1>
-		</div>
-
 		{#if loading}
 			<p class="status">Loading…</p>
 		{:else if notes.length === 0}
-			<!-- Mobile empty state -->
 			<div class="mob-empty-state">
 				<div class="mob-empty-icon"><ArchiveIcon size={28} aria-hidden="true" /></div>
 				<p class="mob-empty-title">Nothing archived</p>
@@ -133,10 +145,10 @@
 			</div>
 			<p class="status desk-only">Archive is empty.</p>
 		{:else}
-			<ul class="note-list">
+			<ul class="note-list" role="list">
 				{#each notes as note (note.id)}
-					<li class="note-item" class:expanded={expandedId === note.id} style="--swipe-x: {swipeX[note.id] ?? 0}px">
-						<!-- Mobile swipe actions (left-swipe only in archive) -->
+					<li class="note-item" style="--swipe-x: {swipeX[note.id] ?? 0}px">
+						<!-- Swipe panel (left-swipe = restore + delete) -->
 						<div class="mob-swipe-right" class:mob-swipe-visible={(swipeX[note.id] ?? 0) < -4}>
 							<button
 								class="mob-swipe-btn mob-swipe-restore"
@@ -156,7 +168,6 @@
 							</button>
 						</div>
 
-						<!-- Row body -->
 						<div
 							class="note-row-body"
 							role="listitem"
@@ -165,50 +176,40 @@
 							ontouchmove={(e) => onSwipeMove(e, note.id)}
 							ontouchend={() => onSwipeEnd(note.id)}
 						>
-							<div class="note-row">
-								<button class="note-title-btn" onclick={() => { if ((swipeX[note.id] ?? 0) !== 0) { resetSwipe(note.id); return; } if (window.matchMedia('(max-width: 640px)').matches) { goto(`/archive/${note.id}`); } else { toggleExpand(note.id); } }}>
+							<div
+								class="note-btn"
+								role="button"
+								tabindex="0"
+								onclick={() => onNoteClick(note.id)}
+								onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && onNoteClick(note.id)}
+							>
+								<div class="note-row-top">
 									<span class="note-title">{note.title || 'Untitled'}</span>
-									{#if note.body}
-										<span class="note-preview">{notePreview(note.body)}</span>
-									{/if}
-									<span class="note-meta">
-										{new Date(note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
-										· {new Date(note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-									</span>
-								</button>
-								<div class="note-actions">
-									<button
-										class="act-btn"
-										onclick={() => unarchive(note.id)}
-										title="Restore from archive"
-										aria-label="Restore from archive"
-									>
-										<ArchiveRestore size={14} />
-									</button>
-									<button
-										class="act-btn danger"
-										onclick={() => deleteNote(note.id)}
-										title="Delete permanently"
-										aria-label="Delete permanently"
-									>
-										<Trash2 size={14} />
-									</button>
 								</div>
+								{#if notePreview(note.body)}
+									<span class="note-preview">{notePreview(note.body)}</span>
+								{/if}
+								<span class="note-date">
+									{new Date(note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+								</span>
 							</div>
-							{#if expandedId === note.id}
-								<div class="note-body">
-									<pre class="body-text">{note.body || '(empty)'}</pre>
-									<div class="mob-note-actions">
-										<button class="mob-note-action-btn" onclick={() => { expandedId = null; void unarchive(note.id); }}>
-											<ArchiveRestore size={15} aria-hidden="true" /> Restore
-										</button>
-										<button class="mob-note-action-btn mob-note-action-danger" onclick={() => deleteNote(note.id)}>
-											<Trash2 size={15} aria-hidden="true" /> Delete permanently
-										</button>
-									</div>
-								</div>
-							{/if}
+							<!-- Desktop action buttons -->
+							<div class="note-hover-actions">
+								<button class="act-btn" onclick={() => unarchive(note.id)} title="Restore from archive" aria-label="Restore from archive">
+									<ArchiveRestore size={14} />
+								</button>
+								<button class="act-btn danger" onclick={() => deleteNote(note.id)} title="Delete permanently" aria-label="Delete permanently">
+									<Trash2 size={14} />
+								</button>
+							</div>
 						</div>
+
+						<!-- Desktop expanded body -->
+						{#if expandedId === note.id}
+							<div class="note-body">
+								<pre class="body-text">{note.body || '(empty)'}</pre>
+							</div>
+						{/if}
 					</li>
 				{/each}
 			</ul>
@@ -218,6 +219,7 @@
 </div>
 
 <style>
+	/* ── Base ── */
 	.archive-page {
 		height: 100dvh;
 		overflow-y: auto;
@@ -225,18 +227,10 @@
 		font-family: var(--sans);
 	}
 
-	.archive-inner {
-		max-width: 1040px;
-		margin: 0 auto;
-		padding: 0 3rem;
-		flex: 1;
-		min-height: 0;
-	}
-
+	/* ── Desktop wordmark ── */
 	.wordmark {
 		position: fixed;
-		top: 1.25rem;
-		left: 1.25rem;
+		top: 1.25rem; left: 1.25rem;
 		z-index: 10;
 		font-family: var(--serif);
 		font-weight: 800;
@@ -251,23 +245,27 @@
 	.wordmark:hover { opacity: 0.8; }
 	.wordmark-dot {
 		display: inline-block;
-		width: 7px;
-		height: 7px;
+		width: 7px; height: 7px;
 		border-radius: 50%;
 		background: var(--accent);
-		margin-left: 3px;
-		margin-bottom: 1px;
+		margin-left: 3px; margin-bottom: 1px;
 	}
 
+	/* ── Desktop inner ── */
+	.archive-inner {
+		max-width: 1040px;
+		margin: 0 auto;
+		padding: 0 3rem;
+	}
+
+	/* ── Desktop page header ── */
 	.page-header {
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
 		padding: 2rem 0 1.5rem;
 		border-bottom: 1px solid var(--border);
-		margin-bottom: 0;
 	}
-
 	.back-btn {
 		display: flex;
 		align-items: center;
@@ -275,10 +273,8 @@
 		padding: 0.25rem;
 		color: var(--text-3);
 		text-decoration: none;
-		flex-shrink: 0;
 	}
 	.back-btn:hover { color: var(--text); }
-
 	.page-title {
 		font-family: var(--serif);
 		font-weight: 700;
@@ -287,68 +283,51 @@
 		line-height: 1;
 		color: var(--text);
 		margin: 0;
-		flex: 1;
 	}
 	.accent-dot { color: var(--accent); }
 
-	.status {
-		color: var(--text-4);
-		padding: 2rem 0;
-		font-size: 0.875rem;
-		font-family: var(--sans);
-	}
+	.status { color: var(--text-4); padding: 2rem 0; font-size: 0.875rem; }
 
-	.note-list {
-		list-style: none;
-		margin: 0;
-		padding: 0;
-	}
+	/* ── Note list (shared desktop/mobile) ── */
+	.note-list { list-style: none; margin: 0; padding: 0; }
 
-	.note-item {
-		border-bottom: 1px solid var(--border);
-	}
-	.note-item:first-child {
-		border-top: 1px solid var(--border);
-	}
+	.note-item { border-bottom: 1px solid var(--border); }
+	.note-item:first-child { border-top: 1px solid var(--border); }
 
-	.note-row {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		padding: 0.75rem 0;
-	}
-
-	.note-title-btn {
-		flex: 1;
+	/* Desktop note button */
+	.note-btn {
 		display: flex;
 		align-items: baseline;
 		gap: 0.75rem;
+		padding: 0.75rem 0;
 		background: none;
 		border: none;
 		cursor: pointer;
 		text-align: left;
-		padding: 0;
+		width: 100%;
 		font-family: var(--sans);
 	}
-	.note-title-btn:hover .note-title { color: var(--accent); }
+	.note-btn:hover .note-title { color: var(--accent); }
+
+	.note-row-top { display: contents; }
 
 	.note-title {
 		font-family: var(--serif);
 		font-weight: 600;
 		font-size: 1rem;
 		color: var(--text);
+		flex-shrink: 0;
 	}
-
-	.note-meta {
+	.note-date {
 		font-size: 0.6875rem;
 		color: var(--text-4);
 		white-space: nowrap;
-		font-family: var(--sans);
 		font-variant-numeric: tabular-nums;
 	}
 
-	.note-actions { display: flex; gap: 1px; flex-shrink: 0; }
-
+	/* Desktop hover actions */
+	.note-row-body { display: flex; align-items: center; gap: 0.5rem; }
+	.note-hover-actions { display: flex; gap: 1px; flex-shrink: 0; margin-left: auto; }
 	.act-btn {
 		display: flex;
 		align-items: center;
@@ -358,16 +337,18 @@
 		border-radius: 2px;
 		cursor: pointer;
 		color: var(--text-3);
+		opacity: 0;
 	}
+	.note-row-body:hover .act-btn { opacity: 1; }
 	.act-btn:hover { background: var(--bg-hover); color: var(--text-2); }
 	.act-btn.danger:hover { background: var(--danger-bg); color: var(--danger); }
 
+	/* Desktop expanded body */
 	.note-body {
 		border-top: 1px solid var(--border);
 		background: var(--bg-alt);
 		padding: 0.75rem 0 1rem;
 	}
-
 	.body-text {
 		margin: 0;
 		font-family: var(--mono);
@@ -378,55 +359,60 @@
 		line-height: 1.5;
 	}
 
-	/* Hide preview on desktop */
+	/* Hide preview and mobile elements on desktop */
 	.note-preview { display: none; }
+	.mob-header, .mob-empty-state, .mob-swipe-right { display: none; }
 
-	/* ── Mobile-only elements (hidden on desktop) ── */
-	.mob-page-title-row,
-	.mob-empty-state,
-	.mob-swipe-right { display: none; }
-
+	/* ── Mobile ── */
 	@media (max-width: 640px) {
 		.archive-page {
 			display: flex;
 			flex-direction: column;
 			overflow: hidden;
 		}
-		.archive-inner { padding: 0 0 80px; overflow-y: auto; }
 
 		/* Hide desktop-only elements */
 		.wordmark, .page-header, .desk-only { display: none !important; }
 
-		/* Mobile page title */
-		.mob-page-title-row {
+		/* Mobile shaded header — matches note list mob-header */
+		.mob-header {
+			display: flex;
+			flex-direction: column;
+			padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px 12px;
+			background: var(--bg-alt);
+			flex-shrink: 0;
+		}
+		.mob-header-row {
 			display: flex;
 			align-items: center;
-			gap: 0.25rem;
-			padding: calc(env(safe-area-inset-top, 0px) + 12px) 8px 0.25rem;
-			flex-shrink: 0;
+			height: 36px;
 		}
 		.mob-back-btn {
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			width: 44px;
-			height: 44px;
+			width: 36px;
+			height: 36px;
 			color: var(--text-3);
 			text-decoration: none;
 			flex-shrink: 0;
+			margin-left: -8px;
+			margin-right: 2px;
 		}
 		.mob-back-btn:hover { color: var(--text); }
-		.mob-page-title {
+		.mob-wordmark {
 			font-family: var(--serif);
-			font-weight: 800;
-			font-size: 1.875rem;
-			letter-spacing: -0.04em;
+			font-size: 26px;
+			font-weight: 700;
 			line-height: 1;
 			color: var(--text);
-			margin: 0;
 		}
+		.mob-wordmark-dot { color: var(--accent); }
 
-		/* Mobile empty state */
+		/* Scrollable inner */
+		.archive-inner { padding: 0; flex: 1; overflow-y: auto; min-height: 0; }
+
+		/* Empty state */
 		.mob-empty-state {
 			display: flex;
 			flex-direction: column;
@@ -437,8 +423,7 @@
 			gap: 0.5rem;
 		}
 		.mob-empty-icon {
-			width: 64px;
-			height: 64px;
+			width: 64px; height: 64px;
 			border-radius: 50%;
 			background: var(--bg-alt);
 			display: flex;
@@ -447,141 +432,102 @@
 			color: var(--text-3);
 			margin-bottom: 0.75rem;
 		}
-		.mob-empty-title {
-			font-family: var(--serif);
-			font-size: 1.125rem;
-			font-weight: 700;
-			color: var(--text);
-			margin: 0;
-		}
-		.mob-empty-sub {
-			font-size: 0.875rem;
-			color: var(--text-3);
-			margin: 0;
-			max-width: 240px;
-		}
+		.mob-empty-title { font-family: var(--serif); font-size: 1.125rem; font-weight: 700; color: var(--text); margin: 0; }
+		.mob-empty-sub { font-size: 0.875rem; color: var(--text-3); margin: 0; max-width: 240px; }
 
-		/* Swipeable note rows */
-		.note-item {
-			position: relative;
-			overflow: hidden;
-		}
+		/* Note items — swipeable */
+		.note-item { position: relative; overflow: hidden; }
 
 		.mob-swipe-right {
+			display: flex;
 			position: absolute;
 			top: 0; right: 0; bottom: 0;
-			display: flex;
 			align-items: stretch;
-			opacity: 0;
 			pointer-events: none;
+			opacity: 0;
 			transition: opacity 150ms;
 		}
-		.mob-swipe-right.mob-swipe-visible {
-			opacity: 1;
-			pointer-events: auto;
-		}
+		.mob-swipe-visible { pointer-events: auto; opacity: 1; }
 
 		.mob-swipe-btn {
 			display: flex;
 			flex-direction: column;
 			align-items: center;
 			justify-content: center;
-			gap: 4px;
 			width: 72px;
+			gap: 4px;
 			border: none;
 			cursor: pointer;
+			color: #FBF7F0;
 			font-family: var(--sans);
 			font-size: 11px;
 			font-weight: 600;
-			color: white;
-			padding: 0;
+			letter-spacing: 0.3px;
 		}
-		.mob-swipe-restore { background: #5E8E6E; }
-		.mob-swipe-delete  { background: #C0432A; }
+		.mob-swipe-restore { background: var(--gesture-archive); }
+		.mob-swipe-delete  { background: var(--gesture-delete); }
 
+		/* Row body translates on swipe */
 		.note-row-body {
-			transform: translateX(var(--swipe-x));
+			display: block;
 			background: var(--bg);
+			transform: translateX(var(--swipe-x, 0));
+			will-change: transform;
+			position: relative;
+			z-index: 1;
 		}
 
-		/* Hide desktop action buttons on mobile */
-		.note-actions { display: none; }
-
-		/* Larger tap targets for note title rows */
-		.note-row {
-			padding: 0.875rem 20px;
-			min-height: 56px;
-		}
-		.note-title-btn {
+		/* Note button — exactly matches note list */
+		.note-btn {
+			display: flex;
 			flex-direction: column;
 			align-items: flex-start;
-			gap: 0.15rem;
-			width: 100%;
-			text-align: left;
+			padding: 16px 20px 12px;
+			gap: 0;
 		}
+		.note-btn:hover .note-title { color: var(--text); }
+
+		.note-row-top { display: flex; width: 100%; }
+
 		.note-title {
-			font-size: 1rem;
+			font-family: var(--sans);
+			font-weight: 700;
+			font-size: 18px;
+			letter-spacing: -0.1px;
+			line-height: 1.25;
+			color: var(--text);
+			flex: 1;
 		}
+
 		.note-preview {
 			display: block;
 			position: relative;
 			max-height: 2.8em;
 			overflow: hidden;
-			font-size: 0.8125rem;
-			color: var(--text-3);
 			font-family: var(--sans);
+			font-size: 14px;
+			color: var(--text-3);
 			line-height: 1.4;
-			width: 100%;
+			margin: 4px 0 6px;
 			white-space: pre-line;
 			overflow-wrap: anywhere;
+			width: 100%;
 		}
 		.note-preview::after {
 			content: '';
 			position: absolute;
-			top: 1.4em;
-			bottom: 0;
-			left: 0;
-			right: 0;
+			top: 1.4em; bottom: 0; left: 0; right: 0;
 			background: linear-gradient(to bottom, transparent, var(--bg));
 			pointer-events: none;
 		}
-		.note-meta {
-			font-size: 0.6875rem;
-		}
 
-		/* Suppress hover accent colour on touch devices */
-		.note-title-btn:hover .note-title { color: var(--text); }
+		.note-date { font-size: 12px; letter-spacing: 0.1px; color: var(--text-4); }
 
-		/* Action buttons inside expanded note body */
-		.mob-note-actions {
-			display: flex;
-			gap: 8px;
-			padding: 10px 0 4px;
-			border-top: 1px solid var(--border);
-			margin-top: 10px;
-		}
-		.mob-note-action-btn {
-			display: inline-flex;
-			align-items: center;
-			gap: 6px;
-			padding: 8px 14px;
-			border: 1px solid var(--border);
-			border-radius: 8px;
-			background: var(--bg);
-			color: var(--text-2);
-			font-size: 13px;
-			font-family: var(--sans);
-			cursor: pointer;
-		}
-		.mob-note-action-btn:hover { background: var(--bg-hover); }
-		.mob-note-action-danger { color: var(--danger); border-color: var(--danger-bd); background: var(--danger-bg); }
-		.mob-note-action-danger:hover { background: var(--danger); color: white; }
+		.note-hover-actions { display: none; }
+		.note-body { display: none; }
 	}
 
 	@media (min-width: 641px) {
-		.mob-note-actions { display: none; }
-		.mob-page-title-row,
-		.mob-empty-state,
-		.mob-swipe-right { display: none !important; }
+		.mob-header, .mob-empty-state, .mob-swipe-right { display: none !important; }
 	}
 </style>
