@@ -27,6 +27,10 @@ vi.mock('$lib/stores/auth.svelte', () => ({
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
+vi.mock('$lib/components/MobileTabBar.svelte', () => ({
+	default: (anchor: unknown, props: unknown) => { void anchor; void props; },
+}));
+
 // Admin uses a separate fetch-based API not in api.ts (admin endpoints)
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -56,7 +60,7 @@ describe('Admin page', () => {
 	it('lists users', async () => {
 		render(AdminPage);
 		await waitFor(() => {
-			expect(screen.getByText('alice')).toBeInTheDocument();
+			expect(screen.getAllByText('alice').length).toBeGreaterThan(0);
 		});
 	});
 
@@ -76,7 +80,7 @@ describe('Admin page', () => {
 		);
 		render(AdminPage);
 		await waitFor(() => {
-			expect(screen.getByText('alice')).toBeInTheDocument();
+			expect(screen.getAllByText('alice').length).toBeGreaterThan(0);
 		});
 		expect(screen.getByRole('button', { name: /unlock/i })).toBeInTheDocument();
 	});
@@ -88,7 +92,7 @@ describe('Admin page', () => {
 			.mockResolvedValueOnce(ok([mockUsers[0], { id: 2, username: 'alice', is_admin: false, locked: true, created_at: '' }]));
 
 		render(AdminPage);
-		await waitFor(() => screen.getByText('alice'));
+		await waitFor(() => screen.getAllByText('alice'));
 		await fireEvent.click(screen.getByRole('button', { name: /lock alice/i }));
 
 		await waitFor(() => {
@@ -103,7 +107,7 @@ describe('Admin page', () => {
 			.mockResolvedValueOnce({ ok: true, status: 204, json: () => Promise.resolve(null), text: () => Promise.resolve('') });
 
 		render(AdminPage);
-		await waitFor(() => screen.getByText('alice'));
+		await waitFor(() => screen.getAllByText('alice'));
 		await fireEvent.click(screen.getByRole('button', { name: /set password for alice/i }));
 
 		// Modal renders with two password fields.
@@ -129,7 +133,7 @@ describe('Admin page', () => {
 		mockFetch.mockResolvedValueOnce(ok(mockUsers));
 
 		render(AdminPage);
-		await waitFor(() => screen.getByText('alice'));
+		await waitFor(() => screen.getAllByText('alice'));
 		await fireEvent.click(screen.getByRole('button', { name: /set password for alice/i }));
 
 		await screen.findByRole('dialog');

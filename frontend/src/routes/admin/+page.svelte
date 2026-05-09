@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { ChevronLeft, UserPlus, Trash2, Lock, LockOpen, KeyRound, Mail, Copy, Check } from 'lucide-svelte';
+	import { ChevronLeft, ChevronRight, UserPlus, Trash2, Lock, LockOpen, KeyRound, Mail, Copy, Check } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 	import PasswordPromptModal from '$lib/components/PasswordPromptModal.svelte';
+	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
 	import { api, ApiError, type InviteResult } from '$lib/api';
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -41,6 +42,8 @@
 	let passwordModalUser = $state<AdminUser | null>(null);
 	let passwordModalSubmitting = $state(false);
 	let passwordModalError = $state('');
+
+	let expandedUser = $state<number | null>(null);
 
 	// Result of the most recent invite issuance, so the admin can copy the URL.
 	let lastInvite = $state<InviteResult | null>(null);
@@ -213,6 +216,13 @@
 
 <div class="admin-page">
 	<a href="/" class="wordmark">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
+	<!-- Mobile page title (outside scrollable inner so it stays fixed at top) -->
+	<div class="mob-page-title-row">
+		<a href="/settings" class="mob-back-btn" aria-label="Back to settings">
+			<ChevronLeft size={22} />
+		</a>
+		<h1 class="mob-page-title">Users<span class="accent-dot">.</span></h1>
+	</div>
 	<div class="admin-inner">
 		<header class="page-header">
 			<a href="/settings" class="back-btn" title="Back to settings" aria-label="Back to settings">
@@ -317,7 +327,8 @@
 				{#if loading}
 					<p class="loading-msg">Loading…</p>
 				{:else}
-					<table class="users-table">
+					<!-- Desktop table -->
+					<table class="users-table desk-table">
 						<thead>
 							<tr>
 								<th>Username</th>
@@ -401,10 +412,67 @@
 							{/each}
 						</tbody>
 					</table>
+
+					<!-- Mobile user cards (redesigned to match wireframe) -->
+					<ul class="mob-user-list">
+						{#each users as user (user.id)}
+							<li class="mob-user-item" class:mob-user-expanded={expandedUser === user.id}>
+								<button
+									class="mob-user-row"
+									onclick={() => expandedUser = expandedUser === user.id ? null : user.id}
+									aria-expanded={expandedUser === user.id}
+								>
+									<div class="mob-user-avatar" aria-hidden="true">{user.username.charAt(0).toUpperCase()}</div>
+									<div class="mob-user-info">
+										<div class="mob-user-name-row">
+											<span class="mob-user-name">{user.username}</span>
+											{#if user.locked}
+												<span class="mob-status-pill mob-status-locked">Locked</span>
+											{:else if user.pending_setup}
+												<span class="mob-status-pill mob-status-invited">Invited</span>
+											{:else}
+												<span class="mob-status-pill mob-status-active">Active</span>
+											{/if}
+										</div>
+										<span class="mob-user-sub">
+											{user.is_admin ? 'Admin' : 'User'}
+											· {user.is_admin ? 'Always' : (user.api_tokens_enabled ? 'API on' : '—')}
+											· {new Date(user.created_at).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+										</span>
+									</div>
+									<ChevronRight size={16} class="mob-user-chevron" aria-hidden="true" />
+								</button>
+								{#if expandedUser === user.id}
+									<div class="mob-user-actions">
+										<button class="mob-user-action-btn" onclick={() => openPasswordModal(user)}>
+											<KeyRound size={15} /> Set password
+										</button>
+										<button class="mob-user-action-btn" onclick={() => resendInvite(user)}>
+											<Mail size={15} /> {user.pending_setup ? 'Resend invite' : 'Send setup link'}
+										</button>
+										{#if !user.is_admin}
+											<button class="mob-user-action-btn" onclick={() => toggleApiTokens(user, !user.api_tokens_enabled)}>
+												{user.api_tokens_enabled ? 'Disable API' : 'Enable API'}
+											</button>
+										{/if}
+										{#if user.id !== auth.user?.id}
+											<button class="mob-user-action-btn" onclick={() => toggleLock(user)}>
+												{#if user.locked}<LockOpen size={15} /> Unlock{:else}<Lock size={15} /> Lock{/if}
+											</button>
+											<button class="mob-user-action-btn mob-user-action-danger" onclick={() => deleteUser(user.id)}>
+												<Trash2 size={15} /> Delete
+											</button>
+										{/if}
+									</div>
+								{/if}
+							</li>
+						{/each}
+					</ul>
 				{/if}
 			</div>
 		</section>
 	</div>
+	<MobileTabBar activeTab="settings" />
 </div>
 
 <PasswordPromptModal
@@ -715,9 +783,252 @@
 	.icon-delete { color: var(--danger); }
 	.icon-delete:hover { background: var(--danger-bg); }
 
+	/* ── Mobile-only elements (hidden on desktop) ── */
+	.mob-page-title-row,
+	.mob-user-list { display: none; }
+
 	@media (max-width: 640px) {
-		.admin-inner { padding: 0 1rem; }
-		.section { grid-template-columns: 1fr; gap: 0.75rem; padding: 1.5rem 0; }
-		.users-table { font-size: 0.75rem; }
+		.admin-page { display: flex; flex-direction: column; overflow: hidden; }
+		.admin-inner { padding: 0; padding-bottom: 80px; flex: 1; overflow-y: scroll; }
+
+		/* Hide desktop-only elements */
+		.wordmark, .page-header { display: none !important; }
+		.desk-table { display: none !important; }
+
+		/* Mobile page title */
+		.mob-page-title-row {
+			display: flex;
+			align-items: center;
+			gap: 0.25rem;
+			padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px 12px;
+			background: var(--bg-alt);
+			flex-shrink: 0;
+		}
+		.mob-back-btn {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 36px;
+			height: 36px;
+			color: var(--text-3);
+			text-decoration: none;
+			flex-shrink: 0;
+			margin-left: -8px;
+			margin-right: 2px;
+		}
+		.mob-back-btn:hover { color: var(--text); }
+		.mob-page-title {
+			font-family: var(--serif);
+			font-weight: 700;
+			font-size: 26px;
+			line-height: 1;
+			color: var(--text);
+			margin: 0;
+		}
+
+		/* Sections: match settings layout exactly */
+		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 16px 12px; border-top: 1px solid var(--border); }
+		.first-section { padding-top: 14px; border-top: none; }
+		.section-label h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); margin-bottom: 6px; font-family: var(--sans); }
+		.section-label p { display: none; }
+
+		/* Section body: card appearance */
+		.section-body {
+			background: var(--bg-alt);
+			border-radius: 14px;
+			padding: 2px 0;
+			overflow: hidden;
+		}
+
+		/* Create form: flat rows inside card */
+		.create-form { max-width: none; padding: 0; }
+		.fields-row { gap: 0; }
+		.fields-row .field-input {
+			border: none !important;
+			border-bottom: 1px solid var(--border) !important;
+			border-radius: 0 !important;
+			background: transparent !important;
+			-webkit-appearance: none;
+			appearance: none;
+			padding: 14px 16px;
+			font-size: 16px;
+			width: 100%;
+			box-sizing: border-box;
+			outline: none;
+		}
+		/* PasswordInput inside create form: flat rows */
+		.fields-row :global(.pw-wrap) { width: 100%; border-bottom: 1px solid var(--border); }
+		.fields-row :global(.pw-wrap input) {
+			border: none !important;
+			border-radius: 0 !important;
+			background: transparent !important;
+			-webkit-appearance: none;
+			appearance: none;
+			padding: 14px 2.75rem 14px 16px;
+			font-size: 16px;
+			width: 100%;
+			box-sizing: border-box;
+			outline: none;
+		}
+		.fields-row :global(.pw-wrap .toggle) { right: 12px; }
+
+		.form-actions { flex-direction: column; gap: 0; padding: 12px 16px; }
+		.checkbox-label { font-size: 15px; padding: 4px 0 12px; }
+		.btn-primary { width: 100%; justify-content: center; padding: 13px; border-radius: 10px; font-size: 16px; }
+
+		/* Segmented radio control for mode-toggle */
+		.mode-toggle {
+			display: flex;
+			gap: 0;
+			border: 1px solid var(--border);
+			border-radius: 10px;
+			overflow: hidden;
+			padding: 0;
+			margin: 12px 16px;
+		}
+		.radio-label {
+			flex: 1;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			padding: 10px 8px;
+			font-size: 12px;
+			cursor: pointer;
+			background: none;
+			border-right: 1px solid var(--border);
+			text-align: center;
+		}
+		.radio-label:last-child { border-right: none; }
+		.radio-label:has(input:checked) {
+			background: var(--accent);
+			color: white;
+			font-weight: 600;
+		}
+		.radio-label input { display: none; }
+
+		/* Mobile user list (new card design) */
+		.mob-user-list {
+			display: flex;
+			flex-direction: column;
+			list-style: none;
+			margin: 0;
+			padding: 0;
+			background: var(--bg-alt);
+			border-radius: 14px;
+			overflow: hidden;
+		}
+		.mob-user-item {
+			border-bottom: 1px solid var(--border);
+		}
+		.mob-user-item:last-child { border-bottom: none; }
+		.mob-user-row {
+			display: flex;
+			align-items: center;
+			gap: 12px;
+			padding: 12px 16px;
+			width: 100%;
+			background: none;
+			border: none;
+			cursor: pointer;
+			text-align: left;
+			min-height: 64px;
+			box-sizing: border-box;
+		}
+		.mob-user-avatar {
+			width: 40px;
+			height: 40px;
+			border-radius: 50%;
+			background: var(--bg-hover);
+			color: var(--text-2);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			font-family: var(--serif);
+			font-weight: 700;
+			font-size: 18px;
+			flex-shrink: 0;
+		}
+		.mob-user-info {
+			flex: 1;
+			min-width: 0;
+			display: flex;
+			flex-direction: column;
+			gap: 2px;
+		}
+		.mob-user-name-row {
+			display: flex;
+			align-items: center;
+			gap: 6px;
+			flex-wrap: nowrap;
+		}
+		.mob-user-name {
+			font-family: var(--sans);
+			font-weight: 600;
+			font-size: 15px;
+			color: var(--text);
+		}
+		.mob-status-pill {
+			font-size: 10px;
+			font-weight: 700;
+			text-transform: uppercase;
+			letter-spacing: 0.06em;
+			padding: 2px 7px;
+			border-radius: 999px;
+			flex-shrink: 0;
+		}
+		.mob-status-active { background: var(--bg-hover); color: var(--text-3); }
+		.mob-status-invited { background: var(--accent-lt); color: var(--accent); border: 1px solid var(--accent); }
+		.mob-status-locked { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-bd); }
+		.mob-user-sub {
+			font-size: 12px;
+			color: var(--text-3);
+			font-family: var(--sans);
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+		}
+		.mob-user-actions {
+			display: flex;
+			flex-direction: column;
+			background: var(--bg);
+			border-top: 1px solid var(--border);
+		}
+		.mob-user-action-btn {
+			display: flex;
+			align-items: center;
+			gap: 10px;
+			padding: 13px 20px;
+			background: none;
+			border: none;
+			border-bottom: 1px solid var(--border);
+			font-size: 15px;
+			font-family: var(--sans);
+			color: var(--text);
+			cursor: pointer;
+			text-align: left;
+			min-height: 48px;
+			box-sizing: border-box;
+		}
+		.mob-user-action-btn:last-child { border-bottom: none; }
+		.mob-user-action-btn:hover { background: var(--bg-hover); }
+		.mob-user-action-danger { color: var(--danger); }
+
+		:global(.mob-user-chevron) {
+			color: var(--text-4);
+			flex-shrink: 0;
+			transition: transform 200ms;
+		}
+		.mob-user-expanded :global(.mob-user-chevron) {
+			transform: rotate(90deg);
+		}
+
+		/* Invite result */
+		.invite-result { font-size: 0.8125rem; }
+		.invite-url { flex-wrap: wrap; }
+	}
+
+	@media (min-width: 641px) {
+		.mob-page-title-row,
+		.mob-user-list { display: none !important; }
 	}
 </style>

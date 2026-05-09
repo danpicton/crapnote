@@ -6,6 +6,7 @@
 	import ApiTokens from '$lib/components/ApiTokens.svelte';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 	import ShortcutEditor from '$lib/components/ShortcutEditor.svelte';
+	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
 	import { api, ApiError } from '$lib/api';
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -82,6 +83,11 @@
 
 <div class="settings-page">
 	<a href="/" class="wordmark">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
+	<!-- Mobile page title (outside scrollable inner so it stays fixed at top) -->
+	<div class="mob-page-title-row">
+		<a href="/" class="mob-back-btn" aria-label="Back to notes"><ChevronLeft size={22} /></a>
+		<h1 class="mob-page-title">Settings<span class="accent-dot">.</span></h1>
+	</div>
 	<div class="settings-inner">
 		<header class="page-header">
 			<a href="/" class="back-btn" title="Back to notes" aria-label="Back to notes">
@@ -149,8 +155,8 @@
 			</div>
 		</section>
 
-		<!-- Keyboard shortcuts -->
-		<section class="section">
+		<!-- Keyboard shortcuts (hidden on mobile) -->
+		<section class="section section-keyboard-shortcuts">
 			<div class="section-label">
 				<h2>Keyboard shortcuts</h2>
 				<p>Stored on this device. Press <kbd>?</kbd> anywhere to view the cheat sheet.</p>
@@ -182,7 +188,7 @@
 		</section>
 
 		<!-- Developer -->
-		<section class="section">
+		<section class="section section-developer">
 			<div class="section-label">
 				<h2>Developer</h2>
 				<p>API tokens for CLIs, scripts, and backups.</p>
@@ -205,7 +211,11 @@
 				</p>
 			</div>
 		</section>
+
+		<!-- Mobile footer -->
+		<p class="mob-settings-footer">Crapnote · {auth.user?.username ?? ''}</p>
 	</div>
+	<MobileTabBar activeTab="settings" />
 </div>
 
 <style>
@@ -430,9 +440,182 @@
 	.account-name { font-family: var(--serif); font-size: 1rem; font-weight: 600; }
 	.account-meta { color: var(--text-3); font-size: 0.8125rem; margin-left: 0.5rem; }
 
+	/* Desktop: hide mobile-only elements */
+	.mob-page-title-row { display: none; }
+	.mob-settings-footer { display: none; }
+
 	/* Responsive */
 	@media (max-width: 640px) {
-		.settings-inner { padding: 0 1rem; }
-		.section { grid-template-columns: 1fr; gap: 0.75rem; padding: 1.5rem 0; }
+		.settings-page {
+			display: flex;
+			flex-direction: column;
+			height: 100dvh;
+			overflow: hidden;
+		}
+
+		/* Scrollable content area */
+		.settings-inner {
+			padding: 0;
+			flex: 1;
+			overflow-y: scroll;
+		}
+
+		/* Hide desktop wordmark (overlaps on mobile) */
+		.wordmark { display: none; }
+
+		/* Hide desktop page header layout (back btn + title in a row) */
+		.page-header { display: none; }
+
+		/* Mobile top bar: back chevron + title */
+		.mob-page-title-row {
+			display: flex;
+			align-items: center;
+			gap: 0.25rem;
+			padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px 12px;
+			background: var(--bg-alt);
+			flex-shrink: 0;
+		}
+		.mob-back-btn {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 36px;
+			height: 36px;
+			color: var(--text-3);
+			text-decoration: none;
+			flex-shrink: 0;
+			margin-left: -8px;
+			margin-right: 2px;
+		}
+		.mob-back-btn:hover { color: var(--text); }
+		.mob-page-title {
+			font-family: var(--serif);
+			font-size: 26px;
+			font-weight: 700;
+			color: var(--text);
+			margin: 0;
+			line-height: 1;
+		}
+
+		/* Sections: single column with side padding */
+		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 16px 12px; }
+		.first-section { padding-top: 14px; border-top: none; }
+
+		/* Section label */
+		.section-label p { display: none; }
+		.section-label h2 {
+			font-size: 13px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.06em;
+			color: var(--text-3);
+			margin-bottom: 6px;
+			font-family: var(--sans);
+		}
+
+		/* Section body: card appearance */
+		.section-body {
+			background: var(--bg-alt);
+			border-radius: 14px;
+			padding: 2px 0;
+			overflow: hidden;
+		}
+
+		/* Keyboard shortcuts and developer section — hide on mobile (desktop-only content) */
+		.section-keyboard-shortcuts { display: none; }
+		.section-developer { display: none; }
+
+		/* Account info: add touch-friendly padding inside card */
+		.account-info { padding: 14px 16px; font-size: 15px; }
+
+		/* Export row: flat input row, then button with breathing room */
+		.export-row { flex-direction: column; gap: 0; padding: 0; }
+		.export-row .field-input {
+			border: none;
+			border-bottom: 1px solid var(--border);
+			border-radius: 0;
+			background: transparent;
+			padding: 14px 16px;
+			font-size: 16px;
+			width: 100%;
+			box-sizing: border-box;
+			outline: none;
+		}
+		.export-row .btn-primary { margin: 12px 16px 0; width: calc(100% - 32px); box-sizing: border-box; }
+		.hint { padding: 8px 16px 14px; }
+
+		/* Buttons full-width on mobile */
+		.btn-primary { width: 100%; box-sizing: border-box; padding: 13px 16px; font-size: 16px; border-radius: 10px; }
+		.btn-default {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			width: 100%;
+			box-sizing: border-box;
+			padding: 14px 16px;
+			background: none;
+			border: none;
+			font-size: 16px;
+			color: var(--text);
+			min-height: 48px;
+			text-decoration: none;
+			border-radius: 0;
+		}
+		.field-input { width: 100%; border-radius: 0; padding: 14px 16px; font-size: 16px; border: none; border-bottom: 1px solid var(--border); background: transparent; outline: none; box-sizing: border-box; }
+		.field-input:focus { border-bottom-color: var(--accent); }
+
+		/* Theme toggle row: full-width list item */
+		.theme-toggle-row {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			padding: 14px 16px;
+			min-height: 48px;
+			width: 100%;
+			box-sizing: border-box;
+		}
+
+		/* Dark mode toggle: make it larger */
+		.toggle-track { width: 46px; height: 28px; border-radius: 14px; }
+		.toggle-thumb { width: 24px; height: 24px; top: 2px; left: 2px; }
+		.theme-toggle-row input:checked ~ .toggle-track .toggle-thumb { transform: translateX(18px); }
+		.toggle-text { font-size: 16px; }
+
+		/* PasswordInput: flat borderless rows inside card */
+		.section :global(.pw-wrap) { width: 100%; }
+		.section :global(.pw-wrap input) {
+			border: none;
+			border-radius: 0;
+			background: transparent;
+			padding: 6px 2.75rem 12px 16px;
+			font-size: 16px;
+			box-sizing: border-box;
+			width: 100%;
+			outline: none;
+		}
+		.section :global(.pw-wrap .toggle) { right: 12px; }
+
+		/* Password fields: flat rows with bottom separator */
+		.pw-form { max-width: none; gap: 0; }
+		.pw-field {
+			display: flex;
+			flex-direction: column;
+			gap: 0;
+			padding: 0;
+			border-bottom: 1px solid var(--border);
+		}
+		.field-label { font-size: 11px; color: var(--text-4); margin-bottom: 0; display: block; padding: 12px 16px 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+		.pw-form .btn-primary { margin: 12px 16px; width: calc(100% - 32px); box-sizing: border-box; }
+
+		/* Mobile footer */
+		.mob-settings-footer {
+			display: block;
+			text-align: center;
+			font-family: var(--sans);
+			font-size: 12px;
+			color: var(--text-3);
+			padding: 24px 22px 8px;
+			margin: 0;
+		}
 	}
 </style>

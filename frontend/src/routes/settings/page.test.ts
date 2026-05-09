@@ -20,6 +20,10 @@ vi.mock('$lib/stores/auth.svelte', () => ({
 }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
+vi.mock('$lib/components/MobileTabBar.svelte', () => ({
+	default: (anchor: unknown, props: unknown) => { void anchor; void props; },
+}));
+
 // vi.mock is hoisted; use vi.hoisted so mockTheme is available inside the factory.
 const mockTheme = vi.hoisted(() => ({
 	current: 'light' as 'light' | 'dark',
@@ -31,7 +35,7 @@ vi.mock('$lib/stores/theme.svelte', () => ({ theme: mockTheme }));
 describe('Settings page', () => {
 	it('renders heading', () => {
 		render(SettingsPage);
-		expect(screen.getByRole('heading', { name: /settings/i })).toBeInTheDocument();
+		expect(screen.getAllByRole('heading', { name: /settings/i }).length).toBeGreaterThan(0);
 	});
 
 	it('shows export notes button', () => {
@@ -41,7 +45,7 @@ describe('Settings page', () => {
 
 	it('shows back link to notes', () => {
 		render(SettingsPage);
-		expect(screen.getByRole('link', { name: /back to notes/i })).toBeInTheDocument();
+		expect(screen.getAllByRole('link', { name: /back to notes/i }).length).toBeGreaterThan(0);
 	});
 });
 

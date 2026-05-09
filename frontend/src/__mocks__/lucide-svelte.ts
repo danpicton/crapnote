@@ -7,6 +7,7 @@ export {
 	noop as Archive,
 	noop as ArchiveRestore,
 	noop as Bold,
+	noop as BookOpen,
 	noop as Check,
 	noop as CheckCircle2,
 	noop as Copy,
@@ -59,5 +60,6 @@ export {
 	noop as User,
 	noop as UserPlus,
 	noop as Users,
+	noop as WifiOff,
 	noop as X,
 };

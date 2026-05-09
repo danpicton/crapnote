@@ -43,7 +43,9 @@
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search,
 		CloudUpload, CheckCircle2, Lock, MoreHorizontal,
+		RefreshCw, WifiOff, X,
 	} from 'lucide-svelte';
+	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
 
 	let notes = $state<Note[]>([]);
 	let isOnline = $state(typeof navigator !== 'undefined' ? navigator.onLine : true);
@@ -56,7 +58,129 @@
 	let saving = $state(false);
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
 	// Helpers for detecting mobile viewport
-	function isMobile() { return window.matchMedia('(max-width: 767px)').matches; }
+	function isMobile() { return window.matchMedia('(max-width: 640px)').matches; }
+
+	// Reactive mobile state: used to conditionally render mobile-only DOM (avoids
+	// duplicate elements that confuse Playwright's attribute-based locators).
+	let isMobileLayout = $state(typeof window !== 'undefined' ? window.matchMedia('(max-width: 640px)').matches : false);
+	$effect(() => {
+		const mq = window.matchMedia('(max-width: 640px)');
+		isMobileLayout = mq.matches;
+		const handler = (e: MediaQueryListEvent) => { isMobileLayout = e.matches; };
+		mq.addEventListener('change', handler);
+		return () => mq.removeEventListener('change', handler);
+	});
+
+	// ── Mobile swipe state ───────────────────────────────────────────
+	let swipeX = $state<Record<number, number>>({});
+	let swipeActive = $state<number | null>(null);
+	let swipeBaseX = 0;
+	let swipeStartX = 0;
+	let swipeStartY = 0;
+	let swipeAxisLocked = false;
+
+	// Pull-to-sync state
+	let pullY = $state(0);
+	let pullStartY = 0;
+	let pullAtTop = false;
+
+	function onSwipeStart(e: TouchEvent, noteId: number) {
+		swipeStartX = e.touches[0].clientX;
+		swipeStartY = e.touches[0].clientY;
+		swipeBaseX = swipeX[noteId] ?? 0;
+		swipeActive = noteId;
+		swipeAxisLocked = false;
+	}
+
+	function onSwipeMove(e: TouchEvent, noteId: number) {
+		if (swipeActive !== noteId) return;
+		const rawDx = e.touches[0].clientX - swipeStartX;
+		const rawDy = e.touches[0].clientY - swipeStartY;
+		if (!swipeAxisLocked) {
+			if (Math.abs(rawDx) < 5 && Math.abs(rawDy) < 5) return;
+			if (Math.abs(rawDy) > Math.abs(rawDx)) { swipeActive = null; return; }
+			swipeAxisLocked = true;
+		}
+		e.preventDefault();
+		swipeX = { ...swipeX, [noteId]: Math.max(-180, Math.min(180, swipeBaseX + rawDx)) };
+	}
+
+	function onSwipeEnd(noteId: number) {
+		if (swipeActive !== noteId) return;
+		swipeActive = null;
+		const x = swipeX[noteId] ?? 0;
+		swipeX = { ...swipeX, [noteId]: x >= 60 ? 140 : x <= -60 ? -140 : 0 };
+	}
+
+	function resetSwipe(noteId: number) {
+		swipeX = { ...swipeX, [noteId]: 0 };
+	}
+
+	function onNoteRowClick(noteId: number) {
+		if ((swipeX[noteId] ?? 0) !== 0) { resetSwipe(noteId); return; }
+		void selectNote(noteId);
+	}
+
+	// Pull-to-sync touch handlers
+	function onListTouchStart(e: TouchEvent) {
+		pullStartY = e.touches[0].clientY;
+		pullAtTop = (noteListEl?.scrollTop ?? 0) === 0;
+	}
+
+	function onListTouchMove(e: TouchEvent) {
+		if (!pullAtTop) return;
+		const dy = e.touches[0].clientY - pullStartY;
+		if (dy <= 0) { pullY = 0; return; }
+		// Apply resistance: drag / (1 + drag/80)
+		pullY = Math.min(80, dy / (1 + dy / 80));
+	}
+
+	async function onListTouchEnd() {
+		if (pullY >= 56) {
+			pullY = 0;
+			await heartbeatSync('manual');
+		} else {
+			pullY = 0;
+		}
+	}
+
+	// Strip markdown for note preview text
+	function notePreview(body: string): string {
+		if (!body?.trim()) return '';
+		return body
+			// HTML line breaks → newline
+			.replace(/<br\s*\/?>/gi, '\n')
+			// Images → placeholder
+			.replace(/!\[[^\]]*\]\([^)]*\)/g, '<image content>\n')
+			// Links → text only
+			.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+			// Bold & italic → plain text
+			.replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
+			.replace(/\*\*([^*]+)\*\*/g, '$1')
+			.replace(/__([^_]+)__/g, '$1')
+			.replace(/\*([^*\n]+)\*/g, '$1')
+			.replace(/_([^_\n]+)_/g, '$1')
+			// Blockquotes → strip marker
+			.replace(/^>\s?/gm, '')
+			// Horizontal rules → remove line
+			.replace(/^[-*_]{3,}\s*$/gm, '')
+			.replace(/\n{2,}/g, '\n')
+			.trim()
+			.slice(0, 300);
+	}
+
+	// Derived sync status for the mobile sync status row
+	let mobileSyncState = $derived.by((): 'synced' | 'syncing' | 'pending' | 'offline' => {
+		if (!isOnline) return 'offline';
+		if (syncStatus === 'syncing') return 'syncing';
+		if (syncStatus === 'unsynced') return 'pending';
+		return 'synced';
+	});
+
+	function formatSyncTime(d: Date | null): string {
+		if (!d) return '';
+		return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+	}
 	// Platform-aware modifier key label (⌘ on Mac, Ctrl on everything else)
 	const modKey = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl+';
 	// Editor command ref
@@ -856,6 +980,7 @@
 <div class="app">
 	<!-- ── Sidebar ── -->
 	<aside class="sidebar">
+		<!-- Desktop header -->
 		<header class="sidebar-header">
 			<a href="/" class="wordmark app-name" onclick={(e) => { e.preventDefault(); void goHome(); }}>Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
 			{#if !isOnline}
@@ -871,6 +996,54 @@
 			</button>
 		</header>
 
+		<!-- Mobile header (wordmark row + search + tabs) — only rendered on mobile -->
+		{#if isMobileLayout}
+		<div class="mob-header">
+			<div class="mob-header-row">
+				<a href="/" class="mob-wordmark" onclick={(e) => { e.preventDefault(); void goHome(); }}>
+					Crapnote<span class="mob-wordmark-dot" aria-hidden="true">.</span>
+				</a>
+				<button class="mob-new-btn" onclick={newNote} aria-label="New note">
+					<Plus size={20} />
+				</button>
+			</div>
+			<div class="mob-search-bar">
+				<Search size={16} class="mob-search-icon" aria-hidden="true" />
+				<input
+					type="search"
+					class="mob-search-input"
+					placeholder="Search {notes.length} notes"
+					bind:this={searchInput}
+					bind:value={search}
+					oninput={handleSearch}
+				/>
+				{#if search}
+					<button class="mob-search-clear" onclick={() => { search = ''; void handleSearch(); }} aria-label="Clear search">
+						<X size={14} />
+					</button>
+				{/if}
+			</div>
+			<div class="mob-tabs" role="group" aria-label="Filter notes">
+				<button
+					class="mob-tab"
+					class:mob-tab-active={!starredOnly && !showTagsPanel}
+					onclick={() => { applyFilter(activeTagId !== null ? null : null, false); showTagsPanel = false; }}
+				>ALL</button>
+				<button
+					class="mob-tab"
+					class:mob-tab-active={starredOnly}
+					onclick={() => { toggleStarFilter(); showTagsPanel = false; }}
+				>STARRED</button>
+				<button
+					class="mob-tab"
+					class:mob-tab-active={showTagsPanel}
+					onclick={toggleTagsTab}
+				>TAGS</button>
+			</div>
+		</div>
+		{/if}
+
+		<!-- Desktop search -->
 		<div class="search-box">
 			<Search size={13} />
 			<input
@@ -883,6 +1056,7 @@
 			<span class="search-shortcut" aria-hidden="true">{modKey}K</span>
 		</div>
 
+		<!-- Desktop pane switcher -->
 		<div class="pane-switcher" role="group" aria-label="Filter notes">
 			<button
 				class="pane-tab"
@@ -918,6 +1092,7 @@
 		{/if}
 
 		{#if showTagsPanel}
+			<!-- Tags panel — shared desktop + mobile but styled differently -->
 			<div class="tag-panel" role="group" aria-label="Tag filters">
 				<p class="tag-panel-header">Filter by tag</p>
 				{#each visibleTags as tag (tag.id)}
@@ -945,46 +1120,161 @@
 			</div>
 		{:else}
 
-		<ul bind:this={noteListEl} class="note-list" role="list" class:note-list-filtered={tagsTabActive} tabindex="-1">
+		<!-- Pull-to-sync indicator (mobile only) -->
+		<div class="mob-pull-indicator" aria-hidden="true" style="height: {pullY}px; opacity: {pullY > 10 ? 1 : 0}">
+			<RefreshCw size={16} class={syncStatus === 'syncing' ? 'mob-spin' : ''} />
+			<span>{pullY >= 56 ? 'Release to sync…' : syncStatus === 'syncing' ? 'Syncing…' : 'Pull to sync'}</span>
+		</div>
+
+		<ul
+			bind:this={noteListEl}
+			class="note-list"
+			role="list"
+			class:note-list-filtered={tagsTabActive}
+			tabindex="-1"
+			ontouchstart={onListTouchStart}
+			ontouchmove={onListTouchMove}
+			ontouchend={onListTouchEnd}
+		>
 			{#each notes as note (note.id)}
-				<li class="note-item" class:selected={note.id === selectedId}>
-					<div class="note-btn" role="button" tabindex="0" onclick={() => selectNote(note.id)} onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && selectNote(note.id)}>
-						<div class="note-row-top">
-							<span class="note-title" class:untitled={!note.title}>{note.title || 'Untitled'}</span>
-							<span class="note-meta-icons">
-								{#if note.pinned}
-									<button class="meta-icon-btn" onclick={(e) => { e.stopPropagation(); togglePin(note.id); }} title="Unpin" aria-label="Unpin"><Pin size={11} /></button>
-								{/if}
-								{#if note.starred}
-									<button class="meta-icon-btn meta-star" onclick={(e) => { e.stopPropagation(); toggleStar(note.id); }} title="Unstar" aria-label="Unstar"><Star size={11} /></button>
-								{/if}
-								{#if !isOnline && noteHasImages(note.body)}
-									<span title="Images unavailable offline"><Lock size={11} /></span>
-								{/if}
+				<li
+					class="note-item"
+					class:selected={note.id === selectedId}
+					style="--swipe-x: {swipeX[note.id] ?? 0}px"
+				>
+					<!-- Mobile swipe action panels -->
+					<div class="mob-swipe-left" class:mob-swipe-visible={(swipeX[note.id] ?? 0) > 4}>
+						<button
+							class="mob-swipe-btn mob-swipe-pin"
+							onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void togglePin(note.id); }}
+							aria-label="{note.pinned ? 'Unpin' : 'Pin'} note"
+						>
+							<Pin size={20} aria-hidden="true" />
+							<span>{note.pinned ? 'Unpin' : 'Pin'}</span>
+						</button>
+						<button
+							class="mob-swipe-btn mob-swipe-star"
+							onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void toggleStar(note.id); }}
+							aria-label="{note.starred ? 'Unstar' : 'Star'} note"
+						>
+							<Star size={20} aria-hidden="true" />
+							<span>{note.starred ? 'Unstar' : 'Star'}</span>
+						</button>
+					</div>
+					<div class="mob-swipe-right" class:mob-swipe-visible={(swipeX[note.id] ?? 0) < -4}>
+						<button
+							class="mob-swipe-btn mob-swipe-archive"
+							onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void archiveNote(note.id); }}
+							aria-label="Archive note"
+						>
+							<Archive size={20} aria-hidden="true" />
+							<span>Archive</span>
+						</button>
+						<button
+							class="mob-swipe-btn mob-swipe-delete"
+							onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void deleteNote(note.id); }}
+							aria-label="Delete note"
+						>
+							<Trash2 size={20} aria-hidden="true" />
+							<span>Delete</span>
+						</button>
+					</div>
+
+					<!-- Row body (shared desktop + mobile, translates on mobile swipe) -->
+					<div
+						class="note-row-body"
+						role="listitem"
+						style="transition: {swipeActive === note.id ? 'none' : 'transform 250ms cubic-bezier(.2,.8,.2,1)'}"
+						ontouchstart={(e) => onSwipeStart(e, note.id)}
+						ontouchmove={(e) => onSwipeMove(e, note.id)}
+						ontouchend={() => onSwipeEnd(note.id)}
+					>
+						<div
+							class="note-btn"
+							role="button"
+							tabindex="0"
+							onclick={() => onNoteRowClick(note.id)}
+							onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && void selectNote(note.id)}
+						>
+							<div class="note-row-top">
+								<span class="note-title" class:untitled={!note.title}>{note.title || 'Untitled'}</span>
+								<span class="note-meta-icons">
+									{#if note.pinned}
+										<button class="meta-icon-btn" onclick={(e) => { e.stopPropagation(); void togglePin(note.id); }} title="Unpin" aria-label="Unpin"><Pin size={11} /></button>
+									{/if}
+									{#if note.starred}
+										<button class="meta-icon-btn" onclick={(e) => { e.stopPropagation(); void toggleStar(note.id); }} title="Unstar" aria-label="Unstar"><Star size={11} /></button>
+									{/if}
+									{#if !isOnline && noteHasImages(note.body)}
+										<span title="Images unavailable offline"><Lock size={11} /></span>
+									{/if}
+								</span>
+							</div>
+							<!-- Desktop: just date. Mobile: preview + date -->
+							{#if notePreview(note.body)}
+								<span class="note-preview">{notePreview(note.body)}</span>
+							{/if}
+							<span class="note-date">
+								{new Date(note.created_at ?? note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(note.created_at ?? note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
 							</span>
 						</div>
-						<span class="note-date">
-							{new Date(note.created_at ?? note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(note.created_at ?? note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-						</span>
-					</div>
-					<div class="note-hover-actions">
-						{#if !note.starred}
-							<button class="act-btn" onclick={() => toggleStar(note.id)} title="Star"><Star size={12} /></button>
-						{/if}
-						{#if !note.pinned}
-							<button class="act-btn" onclick={() => togglePin(note.id)} title="Pin"><Pin size={12} /></button>
-						{/if}
-						<button class="act-btn" onclick={() => archiveNote(note.id)} title="Move to archive" aria-label="Move to archive"><Archive size={12} /></button>
-						<button class="act-btn danger" onclick={() => deleteNote(note.id)} title="Delete"><Trash2 size={12} /></button>
+						<div class="note-hover-actions">
+							{#if !note.starred}
+								<button class="act-btn" onclick={() => void toggleStar(note.id)} title="Star"><Star size={12} /></button>
+							{/if}
+							{#if !note.pinned}
+								<button class="act-btn" onclick={() => void togglePin(note.id)} title="Pin"><Pin size={12} /></button>
+							{/if}
+							<button class="act-btn" onclick={() => void archiveNote(note.id)} title="Move to archive" aria-label="Move to archive"><Archive size={12} /></button>
+							<button class="act-btn danger" onclick={() => void deleteNote(note.id)} title="Delete"><Trash2 size={12} /></button>
+						</div>
 					</div>
 				</li>
 			{/each}
 			{#if notes.length === 0}
-				<li class="empty">No notes yet.</li>
+				{#if starredOnly}
+					<li class="mob-empty-state">
+						<div class="mob-empty-icon"><Star size={28} aria-hidden="true" /></div>
+						<p class="mob-empty-title">No starred notes yet</p>
+						<p class="mob-empty-sub">Star a note to find it here quickly.</p>
+					</li>
+				{:else}
+					<li class="empty">No notes yet.</li>
+				{/if}
 			{/if}
 		</ul>
 		{/if}
 
+		<!-- Mobile sync status row (above tab bar, note list only) -->
+		<button
+			class="mob-sync-row"
+			class:mob-sync-synced={mobileSyncState === 'synced'}
+			class:mob-sync-offline={mobileSyncState === 'offline'}
+			onclick={manualSync}
+			aria-label="Sync status — tap to sync"
+			disabled={mobileSyncState === 'syncing' || !isOnline}
+		>
+			<span class="mob-sync-dot" aria-hidden="true"></span>
+			{#if mobileSyncState === 'synced'}
+				<CheckCircle2 size={13} aria-hidden="true" />
+				<span>SYNCED</span>
+				<span class="mob-sync-spacer"></span>
+				{#if lastSyncAt}<span class="mob-sync-time">just now</span>{/if}
+			{:else if mobileSyncState === 'syncing'}
+				<RefreshCw size={13} class="mob-spin" aria-hidden="true" />
+				<span>SYNCING…</span>
+			{:else if mobileSyncState === 'pending'}
+				<CloudUpload size={13} aria-hidden="true" />
+				<span>NOT SYNCED</span>
+				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
+			{:else}
+				<WifiOff size={13} aria-hidden="true" />
+				<span>OFFLINE</span>
+				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
+			{/if}
+		</button>
+
+		<!-- Desktop sidebar bottom -->
 		<div class="sidebar-bottom">
 			<span class="sidebar-user">{auth.user?.username ?? ''}</span>
 			<div class="bottom-actions">
@@ -1006,6 +1296,9 @@
 			</div>
 		</div>
 	</aside>
+
+	<!-- Mobile tab bar -->
+	<MobileTabBar activeTab="notes" />
 
 	<!-- ── Editor pane ── -->
 	<main class="editor-pane">
@@ -1496,8 +1789,6 @@
 		color: var(--text-4);
 		line-height: 1;
 	}
-	.meta-star { color: var(--accent); }
-
 	.note-date {
 		font-size: 0.6875rem;
 		color: var(--text-4);
@@ -1940,16 +2231,339 @@
 		font-family: var(--sans);
 	}
 
-	/* ─── Mobile (<= 767px) ──────────────────────────────── */
-	@media (max-width: 767px) {
+	/* ─── Note row body wrapper (transparent on desktop) ──── */
+	.note-row-body { display: contents; }
+	.note-preview { display: none; }
+
+	/* ─── Mobile (<= 640px) ─────────────────────────────── */
+	@media (max-width: 640px) {
 		.app { flex-direction: column; height: 100dvh; }
-		.sidebar { width: 100%; min-width: unset; flex: 1; border-right: none; overflow: hidden; }
+
+		/* Sidebar becomes the full-height scrollable list column */
+		.sidebar {
+			width: 100%;
+			min-width: unset;
+			flex: 1;
+			border-right: none;
+			overflow: hidden;
+			background: var(--bg);
+			display: flex;
+			flex-direction: column;
+		}
+
+		/* Hide desktop header/search/tabs */
+		.sidebar-header { display: none; }
+		.search-box { display: none; }
+		.pane-switcher { display: none; }
+		.sidebar-bottom { display: none; }
+
+		/* Show mobile header */
+		.mob-header {
+			display: flex;
+			flex-direction: column;
+			padding: calc(env(safe-area-inset-top, 0px) + 14px) 20px 0;
+			background: var(--bg-alt);
+			flex-shrink: 0;
+		}
+
+		.mob-header-row {
+			display: flex;
+			align-items: center;
+			justify-content: space-between;
+			height: 36px;
+			margin-bottom: 10px;
+		}
+
+		.mob-wordmark {
+			font-family: var(--serif);
+			font-size: 26px;
+			font-weight: 700;
+			line-height: 1;
+			color: var(--text);
+			text-decoration: none;
+		}
+		.mob-wordmark-dot { color: var(--accent); }
+
+		.mob-new-btn {
+			width: 40px;
+			height: 40px;
+			border-radius: 22px;
+			border: 1px solid var(--border);
+			background: transparent;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			color: var(--text-3);
+			cursor: pointer;
+			padding: 0;
+		}
+		.mob-new-btn:hover { color: var(--text); border-color: var(--text-3); }
+
+		.mob-search-bar {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			background: var(--bg-hover);
+			border: 1px solid var(--border);
+			border-radius: 12px;
+			padding: 11px 14px;
+			margin-bottom: 0;
+			color: var(--text-3);
+		}
+		.mob-search-input {
+			flex: 1;
+			border: none;
+			background: none;
+			font-size: 16px;
+			font-family: var(--sans);
+			color: var(--text);
+			outline: none;
+			min-width: 0;
+		}
+		.mob-search-input::placeholder { color: var(--text-3); }
+		.mob-search-clear {
+			background: none;
+			border: none;
+			cursor: pointer;
+			color: var(--text-3);
+			display: flex;
+			align-items: center;
+			padding: 0;
+		}
+
+		.mob-tabs {
+			display: flex;
+			align-items: center;
+			gap: 24px;
+			padding: 12px 0 14px;
+			border-bottom: 1px solid var(--border);
+			margin-top: 6px;
+		}
+		.mob-tab {
+			font-family: var(--sans);
+			font-size: 13px;
+			font-weight: 700;
+			letter-spacing: 1.2px;
+			text-transform: uppercase;
+			color: var(--text-3);
+			background: none;
+			border: none;
+			border-bottom: 2px solid transparent;
+			padding: 0 0 2px;
+			cursor: pointer;
+			line-height: 1;
+		}
+		.mob-tab-active {
+			color: var(--text) !important;
+			border-bottom-color: var(--accent);
+		}
+
+		/* Note list scrollable area */
+		.note-list {
+			padding: 0;
+			scrollbar-width: none;
+		}
+		.note-list::-webkit-scrollbar { display: none; }
+
+		/* Note items: swipeable on mobile */
+		.note-item {
+			position: relative;
+			overflow: hidden;
+			margin: 0;
+		}
+		.note-item.selected {
+			background: transparent;
+			box-shadow: none;
+		}
+
+		/* Swipe action panels */
+		.mob-swipe-left,
+		.mob-swipe-right {
+			position: absolute;
+			top: 0;
+			bottom: 0;
+			display: flex;
+			align-items: stretch;
+			pointer-events: none;
+			opacity: 0;
+		}
+		.mob-swipe-left { left: 0; }
+		.mob-swipe-right { right: 0; }
+		.mob-swipe-visible { pointer-events: auto; opacity: 1; }
+
+		.mob-swipe-btn {
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			justify-content: center;
+			width: 72px;
+			gap: 4px;
+			border: none;
+			cursor: pointer;
+			color: #FBF7F0;
+			font-family: var(--sans);
+			font-size: 11px;
+			font-weight: 600;
+			letter-spacing: 0.3px;
+		}
+		.mob-swipe-pin    { background: var(--gesture-pin); }
+		.mob-swipe-star   { background: var(--gesture-star); }
+		.mob-swipe-archive { background: var(--gesture-archive); }
+		.mob-swipe-delete  { background: var(--gesture-delete); }
+
+		/* Row body translates on swipe */
+		.note-row-body {
+			display: block;
+			background: var(--bg);
+			transform: translateX(var(--swipe-x, 0));
+			transition: transform 250ms cubic-bezier(.2,.8,.2,1);
+			will-change: transform;
+			position: relative;
+			z-index: 1;
+		}
+		/* Disable transition while actively dragging (set by swipeActive logic via inline) */
+
+		/* Redesigned note row for mobile */
+		.note-btn {
+			padding: 16px 20px 12px;
+			flex-direction: column;
+		}
+		.note-title {
+			font-size: 18px;
+			font-weight: 700;
+			letter-spacing: -0.1px;
+			line-height: 1.25;
+		}
+		.note-meta-icons { margin-top: 2px; }
+
+		/* Preview text (hidden desktop, shown mobile) */
+		.note-preview {
+			display: block;
+			position: relative;
+			max-height: 2.8em;
+			overflow: hidden;
+			font-family: var(--sans);
+			font-size: 14px;
+			color: var(--text-3);
+			line-height: 1.4;
+			margin: 4px 0 6px;
+			white-space: pre-line;
+			overflow-wrap: anywhere;
+		}
+		.note-preview::after {
+			content: '';
+			position: absolute;
+			top: 1.4em;
+			bottom: 0;
+			left: 0;
+			right: 0;
+			background: linear-gradient(to bottom, transparent, var(--bg));
+			pointer-events: none;
+		}
+		.note-date { font-size: 12px; margin-top: 0; letter-spacing: 0.1px; }
+
+		/* Hide desktop hover-actions on mobile (swipe replaces them) */
+		.note-hover-actions { display: none; }
+
+		/* Pull-to-sync indicator */
+		.mob-pull-indicator {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 8px;
+			overflow: hidden;
+			transition: height 0.1s, opacity 0.1s;
+			font-family: var(--sans);
+			font-size: 12px;
+			color: var(--text-3);
+			background: var(--bg-alt);
+			flex-shrink: 0;
+		}
+
+		/* Mobile sync status row */
+		.mob-sync-row {
+			display: flex;
+			align-items: center;
+			gap: 5px;
+			height: 28px;
+			padding: 0 18px;
+			border-top: 1px solid var(--border);
+			font-family: var(--sans);
+			font-size: 11px;
+			font-weight: 600;
+			letter-spacing: 0.4px;
+			color: var(--text-3);
+			background: none;
+			border-bottom: none;
+			cursor: pointer;
+			width: 100%;
+			flex-shrink: 0;
+		}
+		.mob-sync-row:disabled { cursor: default; }
+		.mob-sync-dot {
+			width: 8px;
+			height: 8px;
+			border-radius: 50%;
+			background: var(--text-4);
+			flex-shrink: 0;
+		}
+		.mob-sync-synced .mob-sync-dot { background: var(--sync-synced); }
+		.mob-sync-synced { color: var(--sync-synced); }
+		.mob-sync-offline .mob-sync-dot { background: var(--sync-offline); }
+		.mob-sync-offline { color: var(--sync-offline); }
+		.mob-sync-spacer { flex: 1; }
+		.mob-sync-time { color: var(--text-3); font-weight: 400; }
+
+		/* Filter capsule shown above list on mobile */
+		.filter-capsule-row { padding: 8px 20px 0; }
+
+		/* Tags panel mobile tweaks */
+		.tag-panel-header { padding: 12px 22px 8px; font-size: 11px; letter-spacing: 1.4px; }
+		.tag-panel-item { padding: 0.5rem 22px; font-size: 16px; border-bottom: 1px solid var(--border); }
+		.tag-dot { width: 8px; height: 8px; }
+
+		/* Mobile empty states */
+		.mob-empty-state {
+			list-style: none;
+			display: flex;
+			flex-direction: column;
+			align-items: center;
+			gap: 12px;
+			padding: 32px 20px;
+			text-align: center;
+		}
+		.mob-empty-icon {
+			width: 64px;
+			height: 64px;
+			border-radius: 50%;
+			background: var(--bg-hover);
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			color: var(--text-3);
+		}
+		.mob-empty-title { font-family: var(--serif); font-size: 20px; color: var(--text); margin: 0; }
+		.mob-empty-sub { font-family: var(--sans); font-size: 14px; color: var(--text-3); margin: 0; max-width: 240px; line-height: 1.4; }
+
+		/* Hide editor pane on mobile */
 		.editor-pane { display: none; }
 		.mobile-show-editor { display: flex; }
-		.sidebar-header { padding: 0.875rem 1rem 0.5rem; }
-		.note-item { margin: 0 0 1px; }
-		.note-hover-actions { opacity: 1; }
-		.act-btn { padding: 0.375rem 0.5rem; }
-		.note-btn { padding: 0.75rem 1.25rem 0.375rem; }
+	}
+
+	/* ─── Desktop: hide mobile-only elements ─────────────── */
+	@media (min-width: 641px) {
+		.mob-header { display: none; }
+		.mob-sync-row { display: none; }
+		.mob-pull-indicator { display: none; }
+		.mob-swipe-left { display: none; }
+		.mob-swipe-right { display: none; }
+	}
+
+	/* ─── Spin animation for sync icon ────────────────────── */
+	:global(.mob-spin) {
+		animation: mobspin 1s linear infinite;
+	}
+	@keyframes mobspin {
+		to { transform: rotate(360deg); }
 	}
 </style>

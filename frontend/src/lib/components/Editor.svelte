@@ -24,9 +24,10 @@
 		onchange?: (markdown: string) => void;
 		ref?: EditorRef | null;
 		oninsertlink?: () => void;
+		readonly?: boolean;
 	}
 
-	let { value = '', onchange, ref = $bindable<EditorRef | null>(null), oninsertlink }: Props = $props();
+	let { value = '', onchange, ref = $bindable<EditorRef | null>(null), oninsertlink, readonly = false }: Props = $props();
 
 	let container: HTMLDivElement;
 	let _editor: Editor | null = null;
@@ -49,6 +50,13 @@
 			.use(history)
 			.use(listener)
 			.create();
+
+		if (readonly) {
+			_editor.action((ctx) => {
+				const view = ctx.get(editorViewCtx);
+				view.setProps({ editable: () => false });
+			});
+		}
 
 		container.addEventListener('crapnote:insert-link', () => oninsertlink?.());
 
@@ -90,7 +98,7 @@
 	});
 </script>
 
-<div bind:this={container} class="editor-container"></div>
+<div bind:this={container} class="editor-container" class:readonly></div>
 
 <style>
 	.editor-container {
@@ -100,6 +108,8 @@
 		min-height: 0;
 		cursor: text;
 	}
+	.editor-container.readonly { cursor: default; }
+	.editor-container.readonly :global(.ProseMirror) { cursor: default; caret-color: transparent; }
 
 	.editor-container :global(.milkdown) {
 		max-width: 720px;
@@ -109,8 +119,9 @@
 	.editor-container :global(.ProseMirror) {
 		outline: none;
 		min-height: 200px;
-		font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+		font-family: var(--sans);
 		font-size: 1rem;
+		text-align: left;
 	}
 
 	/* Tight paragraph spacing */
@@ -160,25 +171,26 @@
 	.editor-container :global(.ProseMirror blockquote) {
 		margin: 0.4em 0;
 		padding-left: 1em;
-		border-left: 3px solid #d1d5db;
-		color: #6b7280;
+		border-left: 3px solid var(--border-md);
+		color: var(--text-3);
 	}
 
 	.editor-container :global(.ProseMirror hr) {
 		border: none;
-		border-top: 1px solid #e5e7eb;
+		border-top: 1px solid var(--border);
 		margin: 0.75em 0;
 	}
 
 	.editor-container :global(.ProseMirror code) {
-		background: #f3f4f6;
+		background: var(--bg-alt);
 		padding: 0.1em 0.3em;
 		border-radius: 0.2em;
 		font-size: 0.875em;
+		font-family: var(--mono);
 	}
 
 	.editor-container :global(.ProseMirror pre) {
-		background: #f3f4f6;
+		background: var(--bg-alt);
 		padding: 0.75em 1em;
 		border-radius: 0.375em;
 		overflow-x: auto;
@@ -196,13 +208,13 @@
 	}
 
 	.editor-container :global(.ProseMirror a) {
-		color: #4f46e5;
+		color: var(--accent);
 		text-decoration: underline;
 		cursor: pointer;
 	}
 
 	.editor-container :global(.ProseMirror a:hover) {
-		color: #3730a3;
+		color: var(--accent-dk);
 	}
 
 	/* ── Image blocks ── */
@@ -229,7 +241,7 @@
 		transform: translateY(-50%);
 		width: 10px;
 		height: 36px;
-		background: #6366f1;
+		background: var(--accent);
 		border-radius: 4px;
 		cursor: ew-resize;
 		opacity: 0;
