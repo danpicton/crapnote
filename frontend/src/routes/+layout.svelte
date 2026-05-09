@@ -5,6 +5,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { registerSW } from '$lib/sw-register';
+	import { installPrompt } from '$lib/stores/install.svelte';
 
 	let { children } = $props();
 
@@ -14,6 +15,10 @@
 
 	onMount(async () => {
 		registerSW();
+		window.addEventListener('beforeinstallprompt', (e) => {
+			e.preventDefault();
+			installPrompt.capture(e as Parameters<typeof installPrompt.capture>[0]);
+		});
 		theme.init();
 		await auth.init();
 		const currentPath = $page.url.pathname;
