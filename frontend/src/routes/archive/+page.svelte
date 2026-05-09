@@ -490,7 +490,6 @@
 		.note-row-top { display: flex; width: 100%; }
 
 		.note-title {
-			font-family: var(--sans);
 			font-weight: 700;
 			font-size: 18px;
 			letter-spacing: -0.1px;
