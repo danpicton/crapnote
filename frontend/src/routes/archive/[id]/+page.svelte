@@ -105,8 +105,8 @@
 		flex: 1;
 		font-family: var(--serif);
 		font-weight: 700;
-		font-size: 1.1rem;
-		letter-spacing: -0.03em;
+		font-size: 1.5rem;
+		letter-spacing: -0.04em;
 		line-height: 1.2;
 		color: var(--text);
 		margin: 0;
