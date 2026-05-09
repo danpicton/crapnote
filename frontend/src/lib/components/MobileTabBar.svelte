@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
-	import { installPrompt } from '$lib/stores/install.svelte';
-	import { BookOpen, Archive, Settings, LogOut, Download } from 'lucide-svelte';
+	import { BookOpen, Archive, Settings, LogOut } from 'lucide-svelte';
 
 	let { activeTab }: { activeTab: 'notes' | 'archive' | 'settings' } = $props();
 
@@ -28,12 +27,6 @@
 		<Settings size={22} aria-hidden="true" />
 		<span class="tab-label">Settings</span>
 	</a>
-	{#if installPrompt.prompt && !installPrompt.installed}
-		<button class="tab tab-install" onclick={() => installPrompt.install()} aria-label="Install app">
-			<Download size={22} aria-hidden="true" />
-			<span class="tab-label">Install</span>
-		</button>
-	{/if}
 	<button class="tab tab-signout" onclick={() => (showSignOutConfirm = true)} aria-label="Sign out">
 		<LogOut size={22} aria-hidden="true" />
 		<span class="tab-label">Sign out</span>
@@ -88,7 +81,6 @@
 
 	.tab:hover { color: var(--text-2); }
 	.tab-active { color: var(--accent) !important; }
-	.tab-install { color: var(--accent); }
 
 	/* Sign-out sheet */
 	.signout-backdrop {

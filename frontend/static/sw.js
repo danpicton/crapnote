@@ -4,7 +4,7 @@
 // v3: switched navigation requests to network-first so soft-refresh picks up
 // new deploys instead of serving a stale `/` shell that references old
 // content-hashed `/_app/immutable/*` assets the server no longer has.
-const CACHE_NAME = 'crapnote-v4';
+const CACHE_NAME = 'crapnote-v3';
 
 // ─── Install: precache the app shell + ALL /_app/ assets ──────────────────────
 self.addEventListener('install', (event) => {
