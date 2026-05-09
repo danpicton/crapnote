@@ -844,10 +844,12 @@
 		.create-form { max-width: none; padding: 0; }
 		.fields-row { gap: 0; }
 		.fields-row .field-input {
-			border: none;
-			border-bottom: 1px solid var(--border);
-			border-radius: 0;
-			background: transparent;
+			border: none !important;
+			border-bottom: 1px solid var(--border) !important;
+			border-radius: 0 !important;
+			background: transparent !important;
+			-webkit-appearance: none;
+			appearance: none;
 			padding: 14px 16px;
 			font-size: 16px;
 			width: 100%;
@@ -857,9 +859,11 @@
 		/* PasswordInput inside create form: flat rows */
 		.fields-row :global(.pw-wrap) { width: 100%; border-bottom: 1px solid var(--border); }
 		.fields-row :global(.pw-wrap input) {
-			border: none;
-			border-radius: 0;
-			background: transparent;
+			border: none !important;
+			border-radius: 0 !important;
+			background: transparent !important;
+			-webkit-appearance: none;
+			appearance: none;
 			padding: 14px 2.75rem 14px 16px;
 			font-size: 16px;
 			width: 100%;
@@ -888,7 +892,7 @@
 			align-items: center;
 			justify-content: center;
 			padding: 10px 8px;
-			font-size: 14px;
+			font-size: 12px;
 			cursor: pointer;
 			background: none;
 			border-right: 1px solid var(--border);
