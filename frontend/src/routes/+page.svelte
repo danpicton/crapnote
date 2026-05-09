@@ -60,6 +60,17 @@
 	// Helpers for detecting mobile viewport
 	function isMobile() { return window.matchMedia('(max-width: 640px)').matches; }
 
+	// Reactive mobile state: used to conditionally render mobile-only DOM (avoids
+	// duplicate elements that confuse Playwright's attribute-based locators).
+	let isMobileLayout = $state(typeof window !== 'undefined' ? window.matchMedia('(max-width: 640px)').matches : false);
+	$effect(() => {
+		const mq = window.matchMedia('(max-width: 640px)');
+		isMobileLayout = mq.matches;
+		const handler = (e: MediaQueryListEvent) => { isMobileLayout = e.matches; };
+		mq.addEventListener('change', handler);
+		return () => mq.removeEventListener('change', handler);
+	});
+
 	// ── Mobile swipe state ───────────────────────────────────────────
 	let swipeX = $state<Record<number, number>>({});
 	let swipeActive = $state<number | null>(null);
@@ -985,7 +996,8 @@
 			</button>
 		</header>
 
-		<!-- Mobile header (wordmark row + search + tabs) -->
+		<!-- Mobile header (wordmark row + search + tabs) — only rendered on mobile -->
+		{#if isMobileLayout}
 		<div class="mob-header">
 			<div class="mob-header-row">
 				<a href="/" class="mob-wordmark" onclick={(e) => { e.preventDefault(); void goHome(); }}>
@@ -1029,6 +1041,7 @@
 				>TAGS</button>
 			</div>
 		</div>
+		{/if}
 
 		<!-- Desktop search -->
 		<div class="search-box">
