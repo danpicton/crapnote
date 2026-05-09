@@ -98,6 +98,12 @@
 				font-family: var(--sans);
 			}
 
+			/* Hide scrollbars on mobile — keep native-feel touch scrolling */
+			@media (max-width: 640px) {
+				* { scrollbar-width: none; -ms-overflow-style: none; }
+				*::-webkit-scrollbar { display: none !important; }
+			}
+
 			/* Milkdown / ProseMirror editor ─ ensure it follows the theme */
 			.ProseMirror { color: var(--text) !important; caret-color: var(--text); font-family: var(--serif); font-size: 1.0625rem; line-height: 1.6; }
 			.ProseMirror h1 { font-family: var(--serif); font-weight: 700; font-size: 2rem; letter-spacing: -0.03em; line-height: 1.08; color: var(--text); }

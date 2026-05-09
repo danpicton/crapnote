@@ -188,7 +188,7 @@
 		</section>
 
 		<!-- Developer -->
-		<section class="section">
+		<section class="section section-developer">
 			<div class="section-label">
 				<h2>Developer</h2>
 				<p>API tokens for CLIs, scripts, and backups.</p>
@@ -457,7 +457,7 @@
 		.settings-inner {
 			padding: 0;
 			flex: 1;
-			overflow-y: auto;
+			overflow-y: scroll;
 		}
 
 		/* Hide desktop wordmark (overlaps on mobile) */
@@ -521,8 +521,12 @@
 			overflow: hidden;
 		}
 
-		/* Keyboard shortcuts — hide entirely on mobile */
+		/* Keyboard shortcuts and developer section — hide on mobile (desktop-only content) */
 		.section-keyboard-shortcuts { display: none; }
+		.section-developer { display: none; }
+
+		/* Account info: add touch-friendly padding inside card */
+		.account-info { padding: 14px 16px; font-size: 15px; }
 
 		/* Export row */
 		.export-row { flex-direction: column; gap: 0.75rem; padding: 14px 16px; }

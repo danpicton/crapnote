@@ -789,7 +789,7 @@
 
 	@media (max-width: 640px) {
 		.admin-page { display: flex; flex-direction: column; overflow: hidden; }
-		.admin-inner { padding: 0; padding-bottom: 80px; flex: 1; overflow-y: auto; }
+		.admin-inner { padding: 0; padding-bottom: 80px; flex: 1; overflow-y: scroll; }
 
 		/* Hide desktop-only elements */
 		.wordmark, .page-header { display: none !important; }
@@ -830,7 +830,7 @@
 		.section { grid-template-columns: 1fr; gap: 0.5rem; padding: 14px 16px 12px; border-top: 1px solid var(--border); }
 		.first-section { padding-top: 14px; border-top: none; }
 		.section-label h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); margin-bottom: 6px; font-family: var(--sans); }
-		.section-label p { font-size: 13px; color: var(--text-3); margin: 2px 0 10px; display: block; }
+		.section-label p { display: none; }
 
 		/* Section body: card appearance */
 		.section-body {
