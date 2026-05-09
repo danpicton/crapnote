@@ -166,7 +166,7 @@
 							ontouchend={() => onSwipeEnd(note.id)}
 						>
 							<div class="note-row">
-								<button class="note-title-btn" onclick={() => { if ((swipeX[note.id] ?? 0) !== 0) { resetSwipe(note.id); return; } toggleExpand(note.id); }}>
+								<button class="note-title-btn" onclick={() => { if ((swipeX[note.id] ?? 0) !== 0) { resetSwipe(note.id); return; } if (window.matchMedia('(max-width: 640px)').matches) { goto(`/archive/${note.id}`); } else { toggleExpand(note.id); } }}>
 									<span class="note-title">{note.title || 'Untitled'}</span>
 									{#if note.body}
 										<span class="note-preview">{notePreview(note.body)}</span>
@@ -392,7 +392,7 @@
 			flex-direction: column;
 			overflow: hidden;
 		}
-		.archive-inner { padding: 0 1rem 80px; overflow-y: auto; }
+		.archive-inner { padding: 0 20px 80px; overflow-y: auto; }
 
 		/* Hide desktop-only elements */
 		.wordmark, .page-header, .desk-only { display: none !important; }

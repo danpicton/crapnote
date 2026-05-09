@@ -24,9 +24,10 @@
 		onchange?: (markdown: string) => void;
 		ref?: EditorRef | null;
 		oninsertlink?: () => void;
+		readonly?: boolean;
 	}
 
-	let { value = '', onchange, ref = $bindable<EditorRef | null>(null), oninsertlink }: Props = $props();
+	let { value = '', onchange, ref = $bindable<EditorRef | null>(null), oninsertlink, readonly = false }: Props = $props();
 
 	let container: HTMLDivElement;
 	let _editor: Editor | null = null;
@@ -49,6 +50,13 @@
 			.use(history)
 			.use(listener)
 			.create();
+
+		if (readonly) {
+			_editor.action((ctx) => {
+				const view = ctx.get(editorViewCtx);
+				view.setProps({ editable: () => false });
+			});
+		}
 
 		container.addEventListener('crapnote:insert-link', () => oninsertlink?.());
 
@@ -90,7 +98,7 @@
 	});
 </script>
 
-<div bind:this={container} class="editor-container"></div>
+<div bind:this={container} class="editor-container" class:readonly></div>
 
 <style>
 	.editor-container {
@@ -100,6 +108,8 @@
 		min-height: 0;
 		cursor: text;
 	}
+	.editor-container.readonly { cursor: default; }
+	.editor-container.readonly :global(.ProseMirror) { cursor: default; caret-color: transparent; }
 
 	.editor-container :global(.milkdown) {
 		max-width: 720px;
