@@ -528,9 +528,21 @@
 		/* Account info: add touch-friendly padding inside card */
 		.account-info { padding: 14px 16px; font-size: 15px; }
 
-		/* Export row */
-		.export-row { flex-direction: column; gap: 0.75rem; padding: 14px 16px; }
-		.hint { padding: 0 16px 14px; }
+		/* Export row: flat input row, then button with breathing room */
+		.export-row { flex-direction: column; gap: 0; padding: 0; }
+		.export-row .field-input {
+			border: none;
+			border-bottom: 1px solid var(--border);
+			border-radius: 0;
+			background: transparent;
+			padding: 14px 16px;
+			font-size: 16px;
+			width: 100%;
+			box-sizing: border-box;
+			outline: none;
+		}
+		.export-row .btn-primary { margin: 12px 16px 0; width: calc(100% - 32px); box-sizing: border-box; }
+		.hint { padding: 8px 16px 14px; }
 
 		/* Buttons full-width on mobile */
 		.btn-primary { width: 100%; box-sizing: border-box; padding: 13px 16px; font-size: 16px; border-radius: 10px; }
@@ -549,7 +561,8 @@
 			text-decoration: none;
 			border-radius: 0;
 		}
-		.field-input { width: 100%; border-radius: 10px; padding: 12px 14px; font-size: 16px; }
+		.field-input { width: 100%; border-radius: 0; padding: 14px 16px; font-size: 16px; border: none; border-bottom: 1px solid var(--border); background: transparent; outline: none; box-sizing: border-box; }
+		.field-input:focus { border-bottom-color: var(--accent); }
 
 		/* Theme toggle row: full-width list item */
 		.theme-toggle-row {
@@ -568,26 +581,31 @@
 		.theme-toggle-row input:checked ~ .toggle-track .toggle-thumb { transform: translateX(18px); }
 		.toggle-text { font-size: 16px; }
 
-		/* Override PasswordInput styling on mobile */
+		/* PasswordInput: flat borderless rows inside card */
 		.section :global(.pw-wrap) { width: 100%; }
 		.section :global(.pw-wrap input) {
-			border-radius: 10px;
-			padding: 12px 2.5rem 12px 14px;
+			border: none;
+			border-radius: 0;
+			background: transparent;
+			padding: 6px 2.75rem 12px 16px;
 			font-size: 16px;
 			box-sizing: border-box;
+			width: 100%;
+			outline: none;
 		}
+		.section :global(.pw-wrap .toggle) { right: 12px; }
 
-		/* Password fields */
+		/* Password fields: flat rows with bottom separator */
 		.pw-form { max-width: none; gap: 0; }
 		.pw-field {
 			display: flex;
 			flex-direction: column;
-			gap: 4px;
-			padding: 0 16px 0;
+			gap: 0;
+			padding: 0;
 			border-bottom: 1px solid var(--border);
 		}
-		.field-label { font-size: 13px; color: var(--text-3); margin-bottom: 4px; display: block; padding-top: 12px; }
-		.pw-form .btn-primary { margin: 16px 16px 0; width: calc(100% - 32px); border-radius: 10px; }
+		.field-label { font-size: 11px; color: var(--text-4); margin-bottom: 0; display: block; padding: 12px 16px 4px; text-transform: uppercase; letter-spacing: 0.06em; }
+		.pw-form .btn-primary { margin: 12px 16px; width: calc(100% - 32px); box-sizing: border-box; }
 
 		/* Mobile footer */
 		.mob-settings-footer {

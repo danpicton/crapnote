@@ -826,8 +826,8 @@
 			margin: 0;
 		}
 
-		/* Sections become single column */
-		.section { grid-template-columns: 1fr; gap: 0.5rem; padding: 14px 16px 12px; border-top: 1px solid var(--border); }
+		/* Sections: match settings layout exactly */
+		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 16px 12px; border-top: 1px solid var(--border); }
 		.first-section { padding-top: 14px; border-top: none; }
 		.section-label h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); margin-bottom: 6px; font-family: var(--sans); }
 		.section-label p { display: none; }
@@ -840,11 +840,37 @@
 			overflow: hidden;
 		}
 
-		/* Create form full width */
-		.create-form { max-width: none; padding: 12px 16px 14px; }
-		.btn-primary { width: 100%; justify-content: center; padding: 0.75rem; border-radius: 10px; font-size: 1rem; }
-		.form-actions { flex-direction: column; gap: 0.625rem; }
-		.checkbox-label { font-size: 15px; }
+		/* Create form: flat rows inside card */
+		.create-form { max-width: none; padding: 0; }
+		.fields-row { gap: 0; }
+		.fields-row .field-input {
+			border: none;
+			border-bottom: 1px solid var(--border);
+			border-radius: 0;
+			background: transparent;
+			padding: 14px 16px;
+			font-size: 16px;
+			width: 100%;
+			box-sizing: border-box;
+			outline: none;
+		}
+		/* PasswordInput inside create form: flat rows */
+		.fields-row :global(.pw-wrap) { width: 100%; border-bottom: 1px solid var(--border); }
+		.fields-row :global(.pw-wrap input) {
+			border: none;
+			border-radius: 0;
+			background: transparent;
+			padding: 14px 2.75rem 14px 16px;
+			font-size: 16px;
+			width: 100%;
+			box-sizing: border-box;
+			outline: none;
+		}
+		.fields-row :global(.pw-wrap .toggle) { right: 12px; }
+
+		.form-actions { flex-direction: column; gap: 0; padding: 12px 16px; }
+		.checkbox-label { font-size: 15px; padding: 4px 0 12px; }
+		.btn-primary { width: 100%; justify-content: center; padding: 13px; border-radius: 10px; font-size: 16px; }
 
 		/* Segmented radio control for mode-toggle */
 		.mode-toggle {
@@ -854,7 +880,7 @@
 			border-radius: 10px;
 			overflow: hidden;
 			padding: 0;
-			margin: 0 0 16px;
+			margin: 12px 16px;
 		}
 		.radio-label {
 			flex: 1;
