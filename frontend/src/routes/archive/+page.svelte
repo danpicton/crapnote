@@ -198,7 +198,7 @@
 								<button
 									class="mob-swipe-btn mob-swipe-delete"
 									onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void deleteNote(note.id); }}
-									aria-label="Delete permanently"
+									aria-label="Delete note"
 								>
 									<Trash2 size={20} aria-hidden="true" />
 									<span>Delete</span>

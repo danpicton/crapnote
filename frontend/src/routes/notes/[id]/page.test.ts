@@ -134,7 +134,7 @@ describe('/notes/[id] page', () => {
 	it('renders the formatting toolbar', async () => {
 		render(NotePage);
 		await waitFor(() =>
-			expect(screen.getByRole('toolbar', { name: /formatting/i })).toBeInTheDocument()
+			expect(screen.getAllByRole('toolbar', { name: /formatting/i }).length).toBeGreaterThan(0)
 		);
 	});
 
@@ -269,8 +269,8 @@ describe('Link toolbar', () => {
 
 		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
 
-		expect(screen.getByPlaceholderText(/https/i)).toBeInTheDocument();
-		expect(screen.getByRole('button', { name: /apply/i })).toBeInTheDocument();
+		expect(screen.getAllByPlaceholderText(/https/i).length).toBeGreaterThan(0);
+		expect(screen.getAllByRole('button', { name: /apply/i }).length).toBeGreaterThan(0);
 	});
 
 	it('pressing Escape closes the dialog', async () => {
@@ -278,7 +278,7 @@ describe('Link toolbar', () => {
 		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
 
 		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
-		const input = screen.getByPlaceholderText(/https/i);
+		const input = screen.getAllByPlaceholderText(/https/i)[0];
 
 		await fireEvent.keyDown(input, { key: 'Escape' });
 
@@ -290,7 +290,7 @@ describe('Link toolbar', () => {
 		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
 
 		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
-		expect(screen.getByPlaceholderText(/https/i)).toBeInTheDocument();
+		expect(screen.getAllByPlaceholderText(/https/i).length).toBeGreaterThan(0);
 
 		await fireEvent.click(document.querySelector('.link-dialog-backdrop')!);
 
@@ -302,7 +302,7 @@ describe('Link toolbar', () => {
 		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
 
 		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
-		const input = screen.getByPlaceholderText(/https/i);
+		const input = screen.getAllByPlaceholderText(/https/i)[0];
 		await fireEvent.input(input, { target: { value: 'https://example.com' } });
 
 		await fireEvent.keyDown(input, { key: 'Enter' });
@@ -315,7 +315,7 @@ describe('Link toolbar', () => {
 		await waitFor(() => screen.getByTitle('Insert link (Ctrl+K)'));
 
 		await fireEvent.click(screen.getByTitle('Insert link (Ctrl+K)'));
-		await fireEvent.click(screen.getByRole('button', { name: /apply/i }));
+		await fireEvent.click(screen.getAllByRole('button', { name: /apply/i })[0]);
 
 		expect(screen.queryByPlaceholderText(/https/i)).not.toBeInTheDocument();
 	});

@@ -55,6 +55,10 @@ vi.mock('$lib/components/Editor.svelte', async () => ({
 	default: (anchor: unknown, props: unknown) => { void anchor; void props; },
 }));
 
+vi.mock('$lib/components/MobileTabBar.svelte', () => ({
+	default: (anchor: unknown, props: unknown) => { void anchor; void props; },
+}));
+
 vi.mock('$lib/milkdown/underline', () => ({
 	underlinePlugin: [],
 	toggleUnderlineCommand: { key: 'ToggleUnderline' },
@@ -101,7 +105,7 @@ import { syncOfflineChanges } from '$lib/offlineSync';
 // Helper: override matchMedia to simulate a mobile or desktop viewport for one test.
 function mockViewport(mobile: boolean) {
 	vi.stubGlobal('matchMedia', vi.fn().mockImplementation((query: string) => ({
-		matches: mobile && query === '(max-width: 767px)',
+		matches: mobile && query === '(max-width: 640px)',
 		media: query,
 		onchange: null,
 		addListener: vi.fn(),
@@ -136,7 +140,7 @@ async function focusEditor() {
 describe('Notes page', () => {
 	it('renders the app title', async () => {
 		render(Page);
-		await waitFor(() => expect(screen.getByText('Crapnote')).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByText('Crapnote').length).toBeGreaterThan(0));
 	});
 
 	it('shows the note list after load', async () => {
@@ -146,7 +150,7 @@ describe('Notes page', () => {
 
 	it('shows new note button', async () => {
 		render(Page);
-		await waitFor(() => expect(screen.getByRole('button', { name: /new note/i })).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByRole('button', { name: /new note/i }).length).toBeGreaterThan(0));
 	});
 
 	it('new note is inserted after pinned notes', async () => {
@@ -370,9 +374,10 @@ describe('Typemark (home link)', () => {
 	it('clicking the typemark resets the search term', async () => {
 		render(Page);
 		await waitFor(() => screen.getByText('Test Note'));
-		const searchInput = screen.getByPlaceholderText(/search/i);
+		const searchInputs = screen.getAllByPlaceholderText(/search/i);
+		const searchInput = searchInputs[searchInputs.length - 1]; // desktop search is last in DOM
 		await fireEvent.input(searchInput, { target: { value: 'my search' } });
-		await fireEvent.click(screen.getByRole('link', { name: /crapnote/i }));
+		await fireEvent.click(screen.getAllByRole('link', { name: /crapnote/i })[0]);
 		await waitFor(() => expect((searchInput as HTMLInputElement).value).toBe(''));
 	});
 });
@@ -440,32 +445,32 @@ describe('Pane switcher', () => {
 	it('shows All, Starred and Tags tabs', async () => {
 		render(Page);
 		await waitFor(() => {
-			expect(screen.getByRole('button', { name: /^all/i })).toBeInTheDocument();
-			expect(screen.getByRole('button', { name: /^starred/i })).toBeInTheDocument();
-			expect(screen.getByRole('button', { name: /^tags/i })).toBeInTheDocument();
+			expect(screen.getAllByRole('button', { name: /^all/i }).length).toBeGreaterThan(0);
+			expect(screen.getAllByRole('button', { name: /^starred/i }).length).toBeGreaterThan(0);
+			expect(screen.getAllByRole('button', { name: /^tags/i }).length).toBeGreaterThan(0);
 		});
 	});
 
 	it('clicking the Tags tab reveals the tag panel', async () => {
 		render(Page);
-		await waitFor(() => screen.getByRole('button', { name: /^tags/i }));
+		await waitFor(() => screen.getAllByRole('button', { name: /^tags/i }));
 
-		await fireEvent.click(screen.getByRole('button', { name: /^tags/i }));
+		await fireEvent.click(screen.getAllByRole('button', { name: /^tags/i })[0]);
 
-		await waitFor(() =>
-			expect(screen.getByRole('group', { name: /tag filters/i })).toBeInTheDocument()
-		);
-		expect(screen.getByRole('button', { name: /alpha/i })).toBeInTheDocument();
+		await waitFor(() => {
+			expect(screen.getByRole('group', { name: /tag filters/i })).toBeInTheDocument();
+			expect(screen.getByRole('button', { name: /alpha/i })).toBeInTheDocument();
+		});
 	});
 
 	it('clicking All tab hides the tag panel', async () => {
 		render(Page);
-		await waitFor(() => screen.getByRole('button', { name: /^tags/i }));
+		await waitFor(() => screen.getAllByRole('button', { name: /^tags/i }));
 
-		await fireEvent.click(screen.getByRole('button', { name: /^tags/i }));
+		await fireEvent.click(screen.getAllByRole('button', { name: /^tags/i })[0]);
 		await waitFor(() => screen.getByRole('group', { name: /tag filters/i }));
 
-		await fireEvent.click(screen.getByRole('button', { name: /^all/i }));
+		await fireEvent.click(screen.getAllByRole('button', { name: /^all/i })[0]);
 
 		await waitFor(() =>
 			expect(screen.queryByRole('group', { name: /tag filters/i })).not.toBeInTheDocument()
@@ -490,7 +495,7 @@ describe('Offline mode', () => {
 		]);
 
 		render(Page);
-		await waitFor(() => expect(screen.getByText(/offline/i)).toBeInTheDocument());
+		await waitFor(() => expect(screen.getAllByText(/offline/i).length).toBeGreaterThan(0));
 	});
 
 	it('loads notes from IndexedDB when offline', async () => {
@@ -704,7 +709,7 @@ describe('Offline mode', () => {
 
 		// The indicator is the only button whose aria-label mentions "sync"
 		const syncBtn = await waitFor(() =>
-			screen.getByRole('button', { name: /sync/i })
+			screen.getAllByRole('button', { name: /sync/i })[0]
 		);
 		await fireEvent.click(syncBtn);
 
