@@ -392,7 +392,7 @@
 			flex-direction: column;
 			overflow: hidden;
 		}
-		.archive-inner { padding: 0 20px 80px; overflow-y: auto; }
+		.archive-inner { padding: 0 0 80px; overflow-y: auto; }
 
 		/* Hide desktop-only elements */
 		.wordmark, .page-header, .desk-only { display: none !important; }
@@ -402,7 +402,7 @@
 			display: flex;
 			align-items: center;
 			gap: 0.25rem;
-			padding: calc(env(safe-area-inset-top, 0px) + 12px) 0 0.25rem;
+			padding: calc(env(safe-area-inset-top, 0px) + 12px) 8px 0.25rem;
 			flex-shrink: 0;
 		}
 		.mob-back-btn {
@@ -414,7 +414,6 @@
 			color: var(--text-3);
 			text-decoration: none;
 			flex-shrink: 0;
-			margin-left: -10px;
 		}
 		.mob-back-btn:hover { color: var(--text); }
 		.mob-page-title {
@@ -510,7 +509,7 @@
 
 		/* Larger tap targets for note title rows */
 		.note-row {
-			padding: 0.875rem 0;
+			padding: 0.875rem 20px;
 			min-height: 56px;
 		}
 		.note-title-btn {

@@ -12,7 +12,10 @@
 
 	onMount(async () => {
 		try {
-			note = await api.notes.get(noteId);
+			// api.notes.get excludes archived notes, so fetch the archive list and find by ID
+			const archived = await api.notes.listArchived();
+			note = archived.find((n) => n.id === noteId) ?? null;
+			if (!note) { goto('/archive'); return; }
 		} catch {
 			goto('/archive');
 			return;
