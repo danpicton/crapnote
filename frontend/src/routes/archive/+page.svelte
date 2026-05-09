@@ -147,59 +147,60 @@
 		{:else}
 			<ul class="note-list" role="list">
 				{#each notes as note (note.id)}
-					<li class="note-item" style="--swipe-x: {swipeX[note.id] ?? 0}px">
-						<!-- Swipe panel (left-swipe = restore + delete) -->
-						<div class="mob-swipe-right" class:mob-swipe-visible={(swipeX[note.id] ?? 0) < -4}>
-							<button
-								class="mob-swipe-btn mob-swipe-restore"
-								onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void unarchive(note.id); }}
-								aria-label="Restore note"
-							>
-								<ArchiveRestore size={20} aria-hidden="true" />
-								<span>Restore</span>
-							</button>
-							<button
-								class="mob-swipe-btn mob-swipe-delete"
-								onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void deleteNote(note.id); }}
-								aria-label="Delete permanently"
-							>
-								<Trash2 size={20} aria-hidden="true" />
-								<span>Delete</span>
-							</button>
-						</div>
-
+					<li class="note-item">
 						<div
-							class="note-row-body"
-							role="listitem"
-							style="transition: {swipeActive === note.id ? 'none' : 'transform 250ms cubic-bezier(.2,.8,.2,1)'}"
+							class="swipe-row"
+							style="transform: translateX({swipeX[note.id] ?? 0}px); transition: {swipeActive === note.id ? 'none' : 'transform 250ms cubic-bezier(.2,.8,.2,1)'}"
 							ontouchstart={(e) => onSwipeStart(e, note.id)}
 							ontouchmove={(e) => onSwipeMove(e, note.id)}
 							ontouchend={() => onSwipeEnd(note.id)}
 						>
-							<div
-								class="note-btn"
-								role="button"
-								tabindex="0"
-								onclick={() => onNoteClick(note.id)}
-								onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && onNoteClick(note.id)}
-							>
-								<div class="note-row-top">
-									<span class="note-title">{note.title || 'Untitled'}</span>
+							<div class="note-row-body" role="listitem">
+								<div
+									class="note-btn"
+									role="button"
+									tabindex="0"
+									onclick={() => onNoteClick(note.id)}
+									onkeydown={(e) => (e.key === 'Enter' || e.key === ' ') && onNoteClick(note.id)}
+								>
+									<div class="note-row-top">
+										<span class="note-title">{note.title || 'Untitled'}</span>
+									</div>
+									{#if notePreview(note.body)}
+										<span class="note-preview">{notePreview(note.body)}</span>
+									{/if}
+									<span class="note-date">
+										{new Date(note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
+									</span>
 								</div>
-								{#if notePreview(note.body)}
-									<span class="note-preview">{notePreview(note.body)}</span>
-								{/if}
-								<span class="note-date">
-									{new Date(note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
-								</span>
+								<!-- Desktop action buttons -->
+								<div class="note-hover-actions">
+									<button class="act-btn" onclick={() => unarchive(note.id)} title="Restore from archive" aria-label="Restore from archive">
+										<ArchiveRestore size={14} />
+									</button>
+									<button class="act-btn danger" onclick={() => deleteNote(note.id)} title="Delete permanently" aria-label="Delete permanently">
+										<Trash2 size={14} />
+									</button>
+								</div>
 							</div>
-							<!-- Desktop action buttons -->
-							<div class="note-hover-actions">
-								<button class="act-btn" onclick={() => unarchive(note.id)} title="Restore from archive" aria-label="Restore from archive">
-									<ArchiveRestore size={14} />
+
+							<!-- Inline swipe action buttons (mobile only) -->
+							<div class="mob-swipe-actions">
+								<button
+									class="mob-swipe-btn mob-swipe-restore"
+									onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void unarchive(note.id); }}
+									aria-label="Restore note"
+								>
+									<ArchiveRestore size={20} aria-hidden="true" />
+									<span>Restore</span>
 								</button>
-								<button class="act-btn danger" onclick={() => deleteNote(note.id)} title="Delete permanently" aria-label="Delete permanently">
-									<Trash2 size={14} />
+								<button
+									class="mob-swipe-btn mob-swipe-delete"
+									onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void deleteNote(note.id); }}
+									aria-label="Delete permanently"
+								>
+									<Trash2 size={20} aria-hidden="true" />
+									<span>Delete</span>
 								</button>
 							</div>
 						</div>
@@ -361,7 +362,8 @@
 
 	/* Hide preview and mobile elements on desktop */
 	.note-preview { display: none; }
-	.mob-header, .mob-empty-state, .mob-swipe-right { display: none; }
+	.mob-header, .mob-empty-state, .mob-swipe-actions { display: none; }
+	.swipe-row { display: contents; }
 
 	/* ── Mobile ── */
 	@media (max-width: 640px) {
@@ -436,18 +438,26 @@
 		.mob-empty-sub { font-size: 0.875rem; color: var(--text-3); margin: 0; max-width: 240px; }
 
 		/* Note items — swipeable */
-		.note-item { position: relative; overflow: hidden; contain: paint; }
+		.note-item { overflow: hidden; }
 
-		.mob-swipe-right {
+		/* Inline flex row: note content + action buttons side by side */
+		.swipe-row {
 			display: flex;
-			position: absolute;
-			top: 0; right: 0; bottom: 0;
 			align-items: stretch;
-			pointer-events: none;
-			opacity: 0;
-			transition: opacity 150ms;
+			will-change: transform;
 		}
-		.mob-swipe-visible { pointer-events: auto; opacity: 1; }
+
+		/* Row body fills full item width; buttons sit to the right, clipped by overflow: hidden */
+		.note-row-body {
+			flex: 0 0 100vw;
+			min-width: 0;
+			background: var(--bg);
+		}
+
+		.mob-swipe-actions {
+			display: flex;
+			flex-shrink: 0;
+		}
 
 		.mob-swipe-btn {
 			display: flex;
@@ -466,16 +476,6 @@
 		}
 		.mob-swipe-restore { background: var(--gesture-archive); }
 		.mob-swipe-delete  { background: var(--gesture-delete); }
-
-		/* Row body translates on swipe */
-		.note-row-body {
-			display: block;
-			background: var(--bg);
-			transform: translateX(var(--swipe-x, 0));
-			will-change: transform;
-			position: relative;
-			z-index: 1;
-		}
 
 		/* Note button — exactly matches note list */
 		.note-btn {
@@ -527,6 +527,6 @@
 	}
 
 	@media (min-width: 641px) {
-		.mob-header, .mob-empty-state, .mob-swipe-right { display: none !important; }
+		.mob-header, .mob-empty-state, .mob-swipe-actions { display: none !important; }
 	}
 </style>
