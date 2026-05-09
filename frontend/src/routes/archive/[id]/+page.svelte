@@ -12,7 +12,6 @@
 
 	onMount(async () => {
 		try {
-			// api.notes.get excludes archived notes, so fetch the archive list and find by ID
 			const archived = await api.notes.listArchived();
 			note = archived.find((n) => n.id === noteId) ?? null;
 			if (!note) { goto('/archive'); return; }
@@ -45,15 +44,14 @@
 		<a href="/archive" class="topbar-btn" aria-label="Back to archive">
 			<ChevronLeft size={22} />
 		</a>
-		<div class="topbar-spacer"></div>
+		{#if note}
+			<h1 class="topbar-title">{note.title || 'Untitled'}</h1>
+		{/if}
 	</div>
 
 	{#if loading}
 		<div class="loading">Loading…</div>
 	{:else if note}
-		<div class="note-header">
-			<h1 class="note-title">{note.title || 'Untitled'}</h1>
-		</div>
 		<div class="editor-body">
 			<Editor value={note.body ?? ''} readonly />
 		</div>
@@ -81,7 +79,8 @@
 	.mob-topbar {
 		display: flex;
 		align-items: center;
-		padding: calc(env(safe-area-inset-top, 0px) + 10px) 8px 8px;
+		padding: calc(env(safe-area-inset-top, 0px) + 10px) 12px 8px;
+		border-bottom: 1px solid var(--border);
 		flex-shrink: 0;
 		gap: 4px;
 	}
@@ -102,22 +101,18 @@
 	}
 	.topbar-btn:hover { background: var(--bg-hover); }
 
-	.topbar-spacer { flex: 1; }
-
-	.note-header {
-		padding: 4px 22px 10px;
-		flex-shrink: 0;
-		border-bottom: 1px solid var(--border);
-	}
-
-	.note-title {
+	.topbar-title {
+		flex: 1;
 		font-family: var(--serif);
 		font-weight: 700;
-		font-size: 1.5rem;
-		letter-spacing: -0.04em;
+		font-size: 1.1rem;
+		letter-spacing: -0.03em;
 		line-height: 1.2;
 		color: var(--text);
 		margin: 0;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 
 	.loading {
@@ -137,7 +132,6 @@
 		overflow: hidden;
 	}
 
-	/* Override editor-container padding for mobile */
 	.editor-body :global(.editor-container) { padding: 0; }
 	.editor-body :global(.milkdown),
 	.editor-body :global(.milkdown-root) { flex: 1; min-height: 0; }
