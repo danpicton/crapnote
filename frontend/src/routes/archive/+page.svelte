@@ -436,7 +436,7 @@
 		.mob-empty-sub { font-size: 0.875rem; color: var(--text-3); margin: 0; max-width: 240px; }
 
 		/* Note items — swipeable */
-		.note-item { position: relative; overflow: hidden; }
+		.note-item { position: relative; overflow: hidden; contain: paint; }
 
 		.mob-swipe-right {
 			display: flex;
