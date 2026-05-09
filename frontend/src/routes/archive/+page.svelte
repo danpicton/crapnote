@@ -150,6 +150,7 @@
 					<li class="note-item">
 						<div
 							class="swipe-row"
+							role="presentation"
 							style="transform: translateX({swipeX[note.id] ?? 0}px); transition: {swipeActive === note.id ? 'none' : 'transform 250ms cubic-bezier(.2,.8,.2,1)'}"
 							ontouchstart={(e) => onSwipeStart(e, note.id)}
 							ontouchmove={(e) => onSwipeMove(e, note.id)}
