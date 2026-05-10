@@ -657,7 +657,11 @@
 		outline: none;
 	}
 	.field-input:focus { border-color: var(--accent); }
-	.field-input.field-invalid { border-color: var(--danger); box-shadow: inset 0 -1px 0 var(--danger); }
+	.field-input.field-invalid {
+		border-color: var(--danger);
+		border-width: 2px;
+		background: var(--danger-bg);
+	}
 
 	/* Override PasswordInput inside the create form to match field-input sizing */
 	.fields-row :global(.pw-wrap) { width: 100%; }

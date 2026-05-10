@@ -94,10 +94,10 @@
 
 	/* Invalid state — applied by the parent when a required field fails
 	   submission validation. Cleared by the parent on the next input. */
-	.pw-wrap-invalid input,
-	:global(.fields-row) .pw-wrap-invalid input {
+	.pw-wrap-invalid input {
 		border-color: var(--danger) !important;
-		box-shadow: inset 0 -1px 0 var(--danger);
+		border-width: 2px !important;
+		background: var(--danger-bg) !important;
 	}
 
 	.toggle {

@@ -124,16 +124,18 @@
 					border-bottom: none !important;
 				}
 
-				/* Required-field validation: red bottom border on submit failure.
-				   Parent components add .field-invalid on plain inputs and
-				   .pw-wrap-invalid on the password wrapper; cleared on next input.
-				   On the settings page each PasswordInput sits in a .pw-field row
-				   whose own border-bottom is the visible separator, so colour that
-				   when the wrapper inside is invalid. */
+				/* Required-field validation: bold red bottom border + light red
+				   background tint on submit failure. Parent components add
+				   .field-invalid on plain inputs and .pw-wrap-invalid on the
+				   password wrapper; cleared on next input. On the settings page
+				   each PasswordInput sits in a .pw-field row whose own
+				   border-bottom is the visible separator, so colour that and
+				   tint the row when the wrapper inside is invalid. */
 				.fields-row .field-invalid,
 				.fields-row .pw-wrap-invalid,
 				.pw-field:has(.pw-wrap-invalid) {
-					border-bottom-color: var(--danger) !important;
+					border-bottom: 2px solid var(--danger) !important;
+					background: var(--danger-bg) !important;
 				}
 			}
 
