@@ -834,11 +834,14 @@
 			margin: 0;
 		}
 
-		/* Sections: single column with side padding (matches settings) */
-		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 16px 12px; }
+		/* Sections: outer band is edge-to-edge so the inter-section divider
+		   spans the full viewport. Only the section label and the rounded
+		   card inside are horizontally inset. */
+		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 0 12px; }
 		.first-section { padding-top: 14px; border-top: none; }
 
-		/* Section label (matches settings) */
+		/* Section label: 16px inset so the heading aligns with the card */
+		.section-label { padding: 0 16px; }
 		.section-label p { display: none; }
 		.section-label h2 {
 			font-size: 13px;
@@ -850,11 +853,12 @@
 			font-family: var(--sans);
 		}
 
-		/* Section body: card appearance (matches settings) */
+		/* Section body: rounded card, inset 16px from each edge */
 		.section-body {
 			background: var(--bg-alt);
 			border-radius: 14px;
 			padding: 2px 0;
+			margin: 0 16px;
 			overflow: hidden;
 		}
 
