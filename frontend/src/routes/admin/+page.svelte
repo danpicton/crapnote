@@ -221,7 +221,7 @@
 		<a href="/settings" class="mob-back-btn" aria-label="Back to settings">
 			<ChevronLeft size={22} />
 		</a>
-		<h1 class="mob-page-title">Users<span class="accent-dot">.</span></h1>
+		<h1 class="mob-page-title">User management<span class="accent-dot">.</span></h1>
 	</div>
 	<div class="admin-inner">
 		<header class="page-header">
@@ -273,11 +273,11 @@
 							/>
 						{/if}
 					</div>
+					<label class="admin-toggle-row">
+						<span class="admin-toggle-text">Make admin</span>
+						<input type="checkbox" bind:checked={newIsAdmin} class="admin-toggle-input" />
+					</label>
 					<div class="form-actions">
-						<label class="checkbox-label">
-							<input type="checkbox" bind:checked={newIsAdmin} />
-							Admin
-						</label>
 						<button
 							type="submit"
 							class="btn-primary"
@@ -642,13 +642,21 @@
 		box-sizing: border-box;
 	}
 
-	.checkbox-label {
+	.admin-toggle-row {
 		display: flex;
 		align-items: center;
-		gap: 0.375rem;
+		justify-content: space-between;
+		gap: 0.5rem;
 		font-size: 0.875rem;
 		color: var(--text-2);
 		cursor: pointer;
+		font-family: var(--sans);
+	}
+	.admin-toggle-input {
+		width: 16px;
+		height: 16px;
+		cursor: pointer;
+		flex-shrink: 0;
 	}
 
 	.btn-primary {
@@ -872,31 +880,51 @@
 		}
 		.fields-row :global(.pw-wrap .toggle) { right: 12px; }
 
-		.form-actions { flex-direction: column; gap: 0; padding: 12px 16px; }
-		.checkbox-label { font-size: 15px; padding: 4px 0 12px; }
+		.form-actions {
+			flex-direction: column;
+			align-items: stretch;
+			gap: 0;
+			padding: 12px 16px;
+		}
 		.btn-primary { width: 100%; justify-content: center; padding: 13px; border-radius: 10px; font-size: 16px; }
+
+		/* Admin toggle row: full-width card row matching the settings dark-mode toggle */
+		.admin-toggle-row {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			padding: 14px 16px;
+			min-height: 48px;
+			font-size: 16px;
+			color: var(--text);
+			border-top: 1px solid var(--border);
+			box-sizing: border-box;
+		}
+		.admin-toggle-input { width: 20px; height: 20px; }
 
 		/* Segmented radio control for mode-toggle */
 		.mode-toggle {
 			display: flex;
 			gap: 0;
-			border: 1px solid var(--border);
-			border-radius: 10px;
+			border: none;
+			border-bottom: 1px solid var(--border);
+			border-radius: 0;
 			overflow: hidden;
 			padding: 0;
-			margin: 12px 16px;
+			margin: 0;
 		}
 		.radio-label {
 			flex: 1;
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			padding: 10px 8px;
-			font-size: 12px;
+			padding: 12px 8px;
+			font-size: 13px;
 			cursor: pointer;
 			background: none;
 			border-right: 1px solid var(--border);
 			text-align: center;
+			color: var(--text-2);
 		}
 		.radio-label:last-child { border-right: none; }
 		.radio-label:has(input:checked) {
@@ -906,15 +934,15 @@
 		}
 		.radio-label input { display: none; }
 
-		/* Mobile user list (new card design) */
+		/* Mobile user list — fills the section-body card; no inner card */
 		.mob-user-list {
 			display: flex;
 			flex-direction: column;
 			list-style: none;
 			margin: 0;
 			padding: 0;
-			background: var(--bg-alt);
-			border-radius: 14px;
+			background: transparent;
+			border-radius: 0;
 			overflow: hidden;
 		}
 		.mob-user-item {

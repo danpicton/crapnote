@@ -42,7 +42,7 @@ backend/server
 # Frontend build artifacts copied into embed dir (run `make build` to populate)
 backend/cmd/server/ui/build/_app/
 backend/cmd/server/ui/build/manifest.json
-backend/cmd/server/ui/build/sw.js
+backend/cmd/server/ui/build/service-worker.js
 backend/cmd/server/ui/build/favicon.png
 backend/cmd/server/ui/build/index.html
 

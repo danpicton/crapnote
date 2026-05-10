@@ -6,7 +6,10 @@ export async function registerSW() {
 	if (!('serviceWorker' in navigator)) return;
 
 	try {
-		const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+		const reg = await navigator.serviceWorker.register('/service-worker.js', {
+			scope: '/',
+			type: 'module',
+		});
 		console.log('[SW] registered', reg.scope);
 
 		// When we come back online, flush the SW request queue.

@@ -9,7 +9,12 @@ const config = {
 			fallback: 'index.html',
 			precompress: false,
 			strict: false
-		})
+		}),
+		// We register the service worker manually from sw-register.ts so we can
+		// also wire up the online → flush-queue background sync hook there.
+		serviceWorker: {
+			register: false
+		}
 	}
 };
 

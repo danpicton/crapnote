@@ -53,7 +53,7 @@ describe('Admin page', () => {
 	it('renders heading', async () => {
 		render(AdminPage);
 		await waitFor(() => {
-			expect(screen.getByRole('heading', { name: /user management/i })).toBeInTheDocument();
+			expect(screen.getAllByRole('heading', { name: /user management/i }).length).toBeGreaterThan(0);
 		});
 	});
 
@@ -234,7 +234,7 @@ describe('Admin page', () => {
 describe('Admin — Typemark', () => {
 	it('typemark is a link to the home page', async () => {
 		render(AdminPage);
-		await waitFor(() => screen.getByRole('heading', { name: /user management/i }));
+		await waitFor(() => screen.getAllByRole('heading', { name: /user management/i }));
 		const link = screen.getByRole('link', { name: /^crapnote/i });
 		expect(link).toHaveAttribute('href', '/');
 	});
