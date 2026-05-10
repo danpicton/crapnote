@@ -210,18 +210,13 @@ func hashInviteToken(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// ChangePassword updates a user's password after verifying the current one.
-// Returns ErrInvalidCredentials if the current password is wrong.
-func (s *Service) ChangePassword(ctx context.Context, userID int64, currentPassword, newPassword string) error {
-	u, err := s.users.FindByID(ctx, userID)
-	if errors.Is(err, ErrNotFound) {
-		return ErrInvalidCredentials
-	}
-	if err != nil {
+// ChangePassword sets a new password for the authenticated user. The current
+// password is intentionally NOT required: a logged-in user who has forgotten
+// their password should still be able to set a new one without an admin
+// reset. Authenticity is enforced at the handler layer (cookie auth only).
+func (s *Service) ChangePassword(ctx context.Context, userID int64, newPassword string) error {
+	if _, err := s.users.FindByID(ctx, userID); err != nil {
 		return fmt.Errorf("change password: lookup: %w", err)
-	}
-	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(currentPassword)); err != nil {
-		return ErrInvalidCredentials
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcryptCost)
 	if err != nil {

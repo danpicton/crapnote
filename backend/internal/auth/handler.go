@@ -123,9 +123,12 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // ChangePassword handles POST /api/auth/password.
-// Body: { "current_password": "...", "new_password": "..." }
-// Any authenticated user (cookie or bearer) can change their own password
-// by supplying their current password.
+// Body: { "new_password": "..." }
+// Any authenticated user (via cookie — bearer tokens are blocked at the
+// router) can change their own password. We deliberately do NOT require the
+// current password: a logged-in user who has forgotten it should still be
+// able to set a new one. The cookie-only gate plus the audit log entry is
+// the trade-off here.
 func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	if u == nil {
@@ -134,8 +137,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		CurrentPassword string `json:"current_password"`
-		NewPassword     string `json:"new_password"`
+		NewPassword string `json:"new_password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -146,16 +148,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.svc.ChangePassword(r.Context(), u.ID, req.CurrentPassword, req.NewPassword)
-	if errors.Is(err, ErrInvalidCredentials) {
-		slog.Warn("audit: password change rejected — wrong current password",
-			"event", "password_change_denied",
-			"user_id", u.ID,
-			"ip", httpx.ClientIP(r),
-		)
-		writeError(w, http.StatusForbidden, "current password is incorrect")
-		return
-	}
+	err := h.svc.ChangePassword(r.Context(), u.ID, req.NewPassword)
 	if err != nil {
 		slog.Error("audit: password change error",
 			"event", "password_change_error",

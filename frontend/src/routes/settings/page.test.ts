@@ -95,9 +95,6 @@ describe('Settings — Change password', () => {
 		mockApi.auth.changePassword.mockResolvedValueOnce(undefined);
 		render(SettingsPage);
 
-		await fireEvent.input(screen.getByLabelText(/current password/i), {
-			target: { value: 'oldpassword12' },
-		});
 		await fireEvent.input(screen.getByLabelText('New password'), {
 			target: { value: 'newpassword345' },
 		});
@@ -107,16 +104,13 @@ describe('Settings — Change password', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /update password/i }));
 
 		await waitFor(() => {
-			expect(mockApi.auth.changePassword).toHaveBeenCalledWith('oldpassword12', 'newpassword345');
+			expect(mockApi.auth.changePassword).toHaveBeenCalledWith('newpassword345');
 		});
 	});
 
 	it('rejects when the new password and confirmation differ', async () => {
 		render(SettingsPage);
 
-		await fireEvent.input(screen.getByLabelText(/current password/i), {
-			target: { value: 'oldpassword12' },
-		});
 		await fireEvent.input(screen.getByLabelText('New password'), {
 			target: { value: 'newpassword345' },
 		});
@@ -131,32 +125,8 @@ describe('Settings — Change password', () => {
 		expect(mockApi.auth.changePassword).not.toHaveBeenCalled();
 	});
 
-	it('shows an error when the current password is wrong', async () => {
-		const { ApiError } = await import('$lib/api');
-		mockApi.auth.changePassword.mockRejectedValueOnce(new ApiError(403, '{}'));
-		render(SettingsPage);
-
-		await fireEvent.input(screen.getByLabelText(/current password/i), {
-			target: { value: 'wrong12345678' },
-		});
-		await fireEvent.input(screen.getByLabelText('New password'), {
-			target: { value: 'newpassword345' },
-		});
-		await fireEvent.input(screen.getByLabelText(/confirm new password/i), {
-			target: { value: 'newpassword345' },
-		});
-		await fireEvent.click(screen.getByRole('button', { name: /update password/i }));
-
-		await waitFor(() => {
-			expect(screen.getByRole('alert').textContent).toMatch(/incorrect/i);
-		});
-	});
-
 	it('rejects new passwords shorter than 12 characters client-side', async () => {
 		render(SettingsPage);
-		await fireEvent.input(screen.getByLabelText(/current password/i), {
-			target: { value: 'oldpassword12' },
-		});
 		await fireEvent.input(screen.getByLabelText('New password'), {
 			target: { value: 'short' },
 		});

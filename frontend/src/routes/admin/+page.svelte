@@ -276,8 +276,7 @@
 							placeholder="Username"
 							bind:value={newUsername}
 							oninput={() => clearInvalid('username')}
-							class="field-input"
-							class:field-invalid={invalidUsername}
+							class="field-input {invalidUsername ? 'field-invalid' : ''}"
 						/>
 						{#if createMode === 'password'}
 							<PasswordInput
@@ -639,6 +638,12 @@
 		flex-direction: column;
 		gap: 0.5rem;
 	}
+
+	/* Desktop only: constrain the create-user form to match the settings
+	   change-password form width (320px) so the two forms feel consistent. */
+	@media (min-width: 641px) {
+		.create-form { max-width: 320px; }
+	}
 	.form-actions {
 		display: flex;
 		gap: 0.75rem;
@@ -912,6 +917,17 @@
 			width: 100%;
 			box-sizing: border-box;
 			outline: none;
+		}
+		/* Validation override has to live inside the admin component so it
+		   beats the .fields-row .field-input rule above on specificity — the
+		   global app.html rule is one class less specific and was losing. */
+		.fields-row .field-input.field-invalid {
+			border-bottom: 2px solid var(--danger) !important;
+			background: var(--danger-bg) !important;
+		}
+		.fields-row :global(.pw-wrap-invalid) {
+			border-bottom: 2px solid var(--danger) !important;
+			background: var(--danger-bg) !important;
 		}
 		/* PasswordInput inside create form: flat rows */
 		.fields-row :global(.pw-wrap) { width: 100%; border-bottom: 1px solid var(--border); }

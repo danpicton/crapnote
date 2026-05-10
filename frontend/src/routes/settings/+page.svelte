@@ -22,7 +22,6 @@
 	let exportError = $state('');
 	let exportSubmitting = $state(false);
 
-	let currentPassword = $state('');
 	let newPassword = $state('');
 	let newPasswordConfirm = $state('');
 	let pwError = $state('');
@@ -50,13 +49,11 @@
 
 	// Required-field flags. Cleared as the user edits the field; toggled on
 	// again whenever a submit attempt fails.
-	let invalidCurrent = $state(false);
 	let invalidNew = $state(false);
 	let invalidConfirm = $state(false);
 
-	function clearInvalid(field: 'current' | 'new' | 'confirm') {
-		if (field === 'current') invalidCurrent = false;
-		else if (field === 'new') invalidNew = false;
+	function clearInvalid(field: 'new' | 'confirm') {
+		if (field === 'new') invalidNew = false;
 		else invalidConfirm = false;
 	}
 
@@ -64,10 +61,9 @@
 		e.preventDefault();
 		pwError = '';
 		pwSuccess = '';
-		invalidCurrent = !currentPassword;
 		invalidNew = !newPassword;
 		invalidConfirm = !newPasswordConfirm;
-		if (invalidCurrent || invalidNew || invalidConfirm) return;
+		if (invalidNew || invalidConfirm) return;
 		if (newPassword.length < 12) {
 			pwError = 'New password must be at least 12 characters.';
 			return;
@@ -78,15 +74,12 @@
 		}
 		pwSubmitting = true;
 		try {
-			await api.auth.changePassword(currentPassword, newPassword);
+			await api.auth.changePassword(newPassword);
 			pwSuccess = 'Password updated.';
-			currentPassword = '';
 			newPassword = '';
 			newPasswordConfirm = '';
 		} catch (err) {
-			if (err instanceof ApiError && err.status === 403) {
-				pwError = 'Current password is incorrect.';
-			} else if (err instanceof ApiError && err.status === 400) {
+			if (err instanceof ApiError && err.status === 400) {
 				pwError = 'New password is not acceptable. Use at least 12 characters.';
 			} else {
 				pwError = 'Failed to update password.';
@@ -164,17 +157,6 @@
 				{#if pwError}<p role="alert" class="msg-error">{pwError}</p>{/if}
 				{#if pwSuccess}<p role="status" class="msg-success">{pwSuccess}</p>{/if}
 				<form class="pw-form" onsubmit={changePassword} novalidate>
-					<div class="pw-field">
-						<label for="current-password" class="field-label">Current password</label>
-						<PasswordInput
-							id="current-password"
-							autocomplete="current-password"
-							bind:value={currentPassword}
-							disabled={pwSubmitting}
-							invalid={invalidCurrent}
-							oninput={() => clearInvalid('current')}
-						/>
-					</div>
 					<div class="pw-field">
 						<label for="new-password" class="field-label">New password</label>
 						<PasswordInput
