@@ -73,8 +73,12 @@ sw.addEventListener('fetch', (event) => {
 
 	// Don't try to cache non-GET requests at all (the queueing path is below).
 	if (url.pathname.startsWith('/api/')) {
+		// Network-first for reads; bare network for writes (no SW-level queue —
+		// the frontend manages its own offline cache + dirty-note replay via
+		// IndexedDB, and the previous queue produced 202s the API client could
+		// not distinguish from a real success, corrupting note state).
 		const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
-		event.respondWith(isWrite ? networkOrQueue(request) : networkFirst(request));
+		event.respondWith(isWrite ? networkOnly(request) : networkFirst(request));
 		return;
 	}
 
@@ -149,91 +153,15 @@ async function cacheFirst(request: Request): Promise<Response> {
 	}
 }
 
-async function networkOrQueue(request: Request): Promise<Response> {
+async function networkOnly(request: Request): Promise<Response> {
 	try {
-		return await fetch(request.clone());
+		return await fetch(request);
 	} catch {
-		await enqueue(request);
-		return new Response(JSON.stringify({ queued: true }), {
-			status: 202,
+		// No SW-level queueing: surface a 503 so the API client throws and the
+		// caller's own offline-cache fallback (IndexedDB dirty notes) runs.
+		return new Response('{"error":"offline"}', {
+			status: 503,
 			headers: { 'Content-Type': 'application/json' },
 		});
 	}
 }
-
-// ─── Offline write queue (IndexedDB) ─────────────────────────────────────────
-
-interface QueueEntry {
-	id?: number;
-	url: string;
-	method: string;
-	headers: Record<string, string>;
-	body: string;
-	timestamp: number;
-}
-
-async function enqueue(request: Request): Promise<void> {
-	const body = await request.text();
-	const entry: QueueEntry = {
-		url: request.url,
-		method: request.method,
-		headers: Object.fromEntries(request.headers.entries()),
-		body,
-		timestamp: Date.now(),
-	};
-	const db = await openDB();
-	const tx = db.transaction('queue', 'readwrite');
-	tx.objectStore('queue').add(entry);
-	await new Promise<void>((resolve, reject) => {
-		tx.oncomplete = () => resolve();
-		tx.onerror = () => reject(tx.error);
-	});
-}
-
-async function flushQueue(): Promise<void> {
-	const db = await openDB();
-	const tx = db.transaction('queue', 'readwrite');
-	const store = tx.objectStore('queue');
-	const entries = await new Promise<QueueEntry[]>((resolve, reject) => {
-		const req = store.getAll();
-		req.onsuccess = () => resolve(req.result as QueueEntry[]);
-		req.onerror = () => reject(req.error);
-	});
-	for (const entry of entries) {
-		try {
-			const response = await fetch(entry.url, {
-				method: entry.method,
-				headers: entry.headers,
-				body: entry.body || undefined,
-			});
-			if (response.ok && entry.id != null) store.delete(entry.id);
-		} catch {
-			break; // still offline
-		}
-	}
-}
-
-function openDB(): Promise<IDBDatabase> {
-	return new Promise((resolve, reject) => {
-		const req = sw.indexedDB.open('crapnote-offline', 1);
-		req.onupgradeneeded = (e) => {
-			const db = (e.target as IDBOpenDBRequest).result;
-			if (!db.objectStoreNames.contains('queue')) {
-				db.createObjectStore('queue', { keyPath: 'id', autoIncrement: true });
-			}
-		};
-		req.onsuccess = () => resolve(req.result);
-		req.onerror = () => reject(req.error);
-	});
-}
-
-sw.addEventListener('sync', (event: Event) => {
-	const syncEvent = event as Event & { tag: string; waitUntil: (p: Promise<unknown>) => void };
-	if (syncEvent.tag === 'flush-offline-queue') syncEvent.waitUntil(flushQueue());
-});
-
-sw.addEventListener('message', (event) => {
-	if ((event.data as { type?: string } | undefined)?.type === 'FLUSH_QUEUE') {
-		event.waitUntil(flushQueue());
-	}
-});

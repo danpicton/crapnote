@@ -520,11 +520,12 @@
 			line-height: 1;
 		}
 
-		/* Sections: single column with side padding */
-		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 16px 12px; }
+		/* Sections: edge-to-edge bands. Only the label keeps a 16px inset. */
+		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 0 12px; }
 		.first-section { padding-top: 14px; border-top: none; }
 
 		/* Section label */
+		.section-label { padding: 0 16px; }
 		.section-label p { display: none; }
 		.section-label h2 {
 			font-size: 13px;
@@ -536,11 +537,11 @@
 			font-family: var(--sans);
 		}
 
-		/* Section body: card appearance */
+		/* Section body: full-width band — no inset, no rounded corners. */
 		.section-body {
 			background: var(--bg-alt);
-			border-radius: 14px;
-			padding: 2px 0;
+			border-radius: 0;
+			padding: 0;
 			overflow: hidden;
 		}
 

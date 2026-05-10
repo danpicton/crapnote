@@ -170,8 +170,8 @@
 	}
 
 	// Derived sync status for the mobile sync status row
-	let mobileSyncState = $derived.by((): 'synced' | 'syncing' | 'pending' | 'offline' => {
-		if (!isOnline) return 'offline';
+	let mobileSyncState = $derived.by((): 'synced' | 'syncing' | 'pending' | 'offline' | 'offline-pending' => {
+		if (!isOnline) return syncStatus === 'unsynced' ? 'offline-pending' : 'offline';
 		if (syncStatus === 'syncing') return 'syncing';
 		if (syncStatus === 'unsynced') return 'pending';
 		return 'synced';
@@ -387,6 +387,7 @@
 
 	async function loadNotes() {
 		if (!navigator.onLine) {
+			isOnline = false;
 			notes = await loadFromCache();
 			return;
 		}
@@ -396,13 +397,15 @@
 		if (starredOnly) params.starred = true;
 		try {
 			const fetched = await api.notes.list(params);
+			isOnline = true;
 			notes = await mergeServerWithCache(fetched);
 			// Cache top-N when no filter is active (we want the canonical recent list)
 			if (!search && activeTagId === null && !starredOnly) {
 				cacheNotesForOffline(fetched); // fire-and-forget
 			}
 		} catch {
-			// Network failed despite onLine — fall back to cache
+			// Network failed despite navigator.onLine — server is unreachable.
+			isOnline = false;
 			notes = await loadFromCache();
 		}
 	}
@@ -426,7 +429,10 @@
 	 * the source of each run is traceable in DevTools.
 	 */
 	async function heartbeatSync(trigger: SyncTrigger = 'heartbeat') {
-		if (!navigator.onLine) return;
+		if (!navigator.onLine) {
+			isOnline = false;
+			return;
+		}
 		syncStatus = 'syncing';
 
 		const result = await syncOfflineChanges(trigger);
@@ -438,11 +444,12 @@
 		}
 
 		// Pull: refresh list so server-side changes (from another device, conflict notes,
-		// etc.) show up. loadNotes() merges with IDB so still-dirty local edits survive.
+		// etc.) show up. loadNotes() merges with IDB so still-dirty local edits survive
+		// and (importantly) updates `isOnline` based on whether the server replied.
 		try {
 			await loadNotes();
 		} catch {
-			// loadNotes already falls back to cache on network failure — swallow here.
+			isOnline = false;
 		}
 
 		// Finalise status from IDB — if anything remained dirty (network errors)
@@ -1249,7 +1256,8 @@
 		<button
 			class="mob-sync-row"
 			class:mob-sync-synced={mobileSyncState === 'synced'}
-			class:mob-sync-offline={mobileSyncState === 'offline'}
+			class:mob-sync-offline={mobileSyncState === 'offline' || mobileSyncState === 'offline-pending'}
+			class:mob-sync-pending={mobileSyncState === 'pending' || mobileSyncState === 'offline-pending'}
 			onclick={manualSync}
 			aria-label="Sync status — tap to sync"
 			disabled={mobileSyncState === 'syncing' || !isOnline}
@@ -1266,6 +1274,10 @@
 			{:else if mobileSyncState === 'pending'}
 				<CloudUpload size={13} aria-hidden="true" />
 				<span>NOT SYNCED</span>
+				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
+			{:else if mobileSyncState === 'offline-pending'}
+				<WifiOff size={13} aria-hidden="true" />
+				<span>OFFLINE · UNSYNCED</span>
 				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
 			{:else}
 				<WifiOff size={13} aria-hidden="true" />

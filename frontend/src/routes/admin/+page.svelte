@@ -834,17 +834,19 @@
 			margin: 0;
 		}
 
-		/* Sections: match settings layout exactly */
-		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 16px 12px; border-top: 1px solid var(--border); }
+		/* Sections: edge-to-edge bands so the section body uses the full
+		   viewport width — only the section label keeps a 16px inset. */
+		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 0 12px; border-top: 1px solid var(--border); }
 		.first-section { padding-top: 14px; border-top: none; }
+		.section-label { padding: 0 16px; }
 		.section-label h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); margin-bottom: 6px; font-family: var(--sans); }
 		.section-label p { display: none; }
 
-		/* Section body: card appearance */
+		/* Section body: full-width card — no inset, no rounded corners. */
 		.section-body {
 			background: var(--bg-alt);
-			border-radius: 14px;
-			padding: 2px 0;
+			border-radius: 0;
+			padding: 0;
 			overflow: hidden;
 		}
 
