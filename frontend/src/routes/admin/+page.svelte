@@ -834,19 +834,27 @@
 			margin: 0;
 		}
 
-		/* Sections: edge-to-edge bands so the section body uses the full
-		   viewport width — only the section label keeps a 16px inset. */
-		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 0 12px; border-top: 1px solid var(--border); }
+		/* Sections: single column with side padding (matches settings) */
+		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 16px 12px; }
 		.first-section { padding-top: 14px; border-top: none; }
-		.section-label { padding: 0 16px; }
-		.section-label h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); margin-bottom: 6px; font-family: var(--sans); }
-		.section-label p { display: none; }
 
-		/* Section body: full-width card — no inset, no rounded corners. */
+		/* Section label (matches settings) */
+		.section-label p { display: none; }
+		.section-label h2 {
+			font-size: 13px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.06em;
+			color: var(--text-3);
+			margin-bottom: 6px;
+			font-family: var(--sans);
+		}
+
+		/* Section body: card appearance (matches settings) */
 		.section-body {
 			background: var(--bg-alt);
-			border-radius: 0;
-			padding: 0;
+			border-radius: 14px;
+			padding: 2px 0;
 			overflow: hidden;
 		}
 
@@ -886,9 +894,17 @@
 			flex-direction: column;
 			align-items: stretch;
 			gap: 0;
-			padding: 12px 16px;
+			padding: 0;
 		}
-		.btn-primary { width: 100%; justify-content: center; padding: 13px; border-radius: 10px; font-size: 16px; }
+		.btn-primary {
+			margin: 12px 16px;
+			width: calc(100% - 32px);
+			justify-content: center;
+			box-sizing: border-box;
+			padding: 13px 16px;
+			border-radius: 10px;
+			font-size: 16px;
+		}
 
 		/* Admin toggle row: full-width card row matching the settings dark-mode toggle */
 		.admin-toggle-row {
