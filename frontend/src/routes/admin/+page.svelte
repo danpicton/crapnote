@@ -580,7 +580,7 @@
 		margin: 0;
 	}
 
-	.section-body { min-width: 0; overflow-x: auto; }
+	.section-body { min-width: 0; }
 
 	.msg-error {
 		color: var(--danger);
@@ -608,7 +608,7 @@
 		cursor: pointer;
 	}
 
-	.create-form { display: flex; flex-direction: column; gap: 0.625rem; max-width: 320px; }
+	.create-form { display: flex; flex-direction: column; gap: 0.625rem; }
 	.fields-row {
 		display: flex;
 		flex-direction: column;
@@ -797,7 +797,7 @@
 
 	@media (max-width: 640px) {
 		.admin-page { display: flex; flex-direction: column; overflow: hidden; }
-		.admin-inner { padding: 0; padding-bottom: 80px; flex: 1; overflow-y: scroll; }
+		.admin-inner { width: 100%; max-width: none; padding: 0; padding-bottom: 80px; flex: 1; overflow-y: scroll; }
 
 		/* Hide desktop-only elements */
 		.wordmark, .page-header { display: none !important; }
@@ -834,14 +834,18 @@
 			margin: 0;
 		}
 
-		/* Sections: outer band is edge-to-edge so the inter-section divider
-		   spans the full viewport. Only the section label and the rounded
-		   card inside are horizontally inset. */
-		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 0 12px; }
+		/* Match settings exactly: section has 16px horizontal padding,
+		   section-body fills the section as a rounded card. */
+		.section {
+			width: 100%;
+			max-width: none;
+			grid-template-columns: 1fr;
+			gap: 0;
+			padding: 14px 16px 12px;
+			box-sizing: border-box;
+		}
 		.first-section { padding-top: 14px; border-top: none; }
 
-		/* Section label: 16px inset so the heading aligns with the card */
-		.section-label { padding: 0 16px; }
 		.section-label p { display: none; }
 		.section-label h2 {
 			font-size: 13px;
@@ -853,17 +857,18 @@
 			font-family: var(--sans);
 		}
 
-		/* Section body: rounded card, inset 16px from each edge */
 		.section-body {
+			width: 100%;
+			max-width: none;
 			background: var(--bg-alt);
 			border-radius: 14px;
 			padding: 2px 0;
-			margin: 0 16px;
 			overflow: hidden;
+			box-sizing: border-box;
 		}
 
 		/* Create form: flat rows inside card */
-		.create-form { max-width: none; padding: 0; }
+		.create-form { padding: 0; }
 		.fields-row { gap: 0; }
 		.fields-row .field-input {
 			border: none !important;
