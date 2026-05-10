@@ -210,6 +210,12 @@ func hashInviteToken(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// UserByID looks up a user by their ID. Used by handlers that need to write
+// a user response after a flow that only yielded a session/user-id.
+func (s *Service) UserByID(ctx context.Context, id int64) (*User, error) {
+	return s.users.FindByID(ctx, id)
+}
+
 // ChangePassword sets a new password for the authenticated user. The current
 // password is intentionally NOT required: a logged-in user who has forgotten
 // their password should still be able to set a new one without an admin

@@ -88,9 +88,28 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 
+	// Return the user object so the SPA can populate its auth store
+	// without a follow-up /api/auth/me round-trip. Without this, the
+	// fresh-login UI renders before is_admin is known and the admin-only
+	// surfaces (e.g. settings → user management) stay hidden until refresh.
+	u, err := h.svc.UserByID(r.Context(), sess.UserID)
+	if err != nil {
+		// The session was just created so this should never miss; play it
+		// safe and degrade to the previous behaviour rather than 500ing.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"}) //nolint:errcheck
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"}) //nolint:errcheck
+	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+		"id":                 u.ID,
+		"username":           u.Username,
+		"is_admin":           u.IsAdmin,
+		"api_tokens_enabled": u.APITokensEnabled,
+		"created_at":         u.CreatedAt,
+	})
 }
 
 // Logout handles POST /api/auth/logout.

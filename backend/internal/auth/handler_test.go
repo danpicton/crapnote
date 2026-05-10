@@ -69,6 +69,20 @@ func TestHandler_Login_Success(t *testing.T) {
 	if !sessionCookie.HttpOnly {
 		t.Fatal("session cookie must be HttpOnly")
 	}
+
+	// The body must include the user object so the SPA can populate its
+	// auth store on first paint without an extra /api/auth/me round-trip;
+	// admin-only UI was hidden until refresh before this was added.
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["username"] != "admin" {
+		t.Fatalf("expected username=admin in response, got %v", resp["username"])
+	}
+	if resp["is_admin"] != true {
+		t.Fatalf("expected is_admin=true in response, got %v (resp=%v)", resp["is_admin"], resp)
+	}
 }
 
 // Cookie Secure flag must follow the transport, not be hardcoded to true.
