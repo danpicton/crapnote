@@ -69,7 +69,16 @@
 		e.preventDefault();
 		createError = '';
 
+		if (!newUsername.trim()) {
+			createError = 'Please enter a username.';
+			return;
+		}
+
 		if (createMode === 'password') {
+			if (!newPassword) {
+				createError = 'Please enter a password.';
+				return;
+			}
 			if (newPassword.length < 12) {
 				createError = 'Password must be at least 12 characters.';
 				return;
@@ -253,23 +262,21 @@
 					</label>
 				</fieldset>
 
-				<form onsubmit={createUser} class="create-form">
+				<form onsubmit={createUser} class="create-form" novalidate>
 					<div class="fields-row">
-						<input type="text" placeholder="Username" bind:value={newUsername} required class="field-input" />
+						<input type="text" placeholder="Username" bind:value={newUsername} class="field-input" />
 						{#if createMode === 'password'}
 							<PasswordInput
 								id="new-user-password"
 								placeholder="Password"
 								autocomplete="new-password"
 								bind:value={newPassword}
-								required
 							/>
 							<PasswordInput
 								id="new-user-password-confirm"
 								placeholder="Confirm password"
 								autocomplete="new-password"
 								bind:value={newPasswordConfirm}
-								required
 							/>
 						{/if}
 					</div>
