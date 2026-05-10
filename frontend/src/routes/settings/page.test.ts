@@ -6,6 +6,15 @@ const mockApi = vi.hoisted(() => ({
 	auth: { changePassword: vi.fn() },
 	tokens: { list: vi.fn().mockResolvedValue([]) },
 }));
+const mockAuth = vi.hoisted(() => ({
+	user: { id: 1, username: 'alice', is_admin: false, created_at: '' } as {
+		id: number;
+		username: string;
+		is_admin: boolean;
+		created_at: string;
+	} | null,
+	loading: false,
+}));
 vi.mock('$lib/api', () => ({
 	api: mockApi,
 	ApiError: class ApiError extends Error {
@@ -16,7 +25,7 @@ vi.mock('$lib/api', () => ({
 }));
 
 vi.mock('$lib/stores/auth.svelte', () => ({
-	auth: { user: { id: 1, username: 'alice', is_admin: false, created_at: '' } },
+	auth: mockAuth,
 }));
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
@@ -46,6 +55,32 @@ describe('Settings page', () => {
 	it('shows back link to notes', () => {
 		render(SettingsPage);
 		expect(screen.getAllByRole('link', { name: /back to notes/i }).length).toBeGreaterThan(0);
+	});
+});
+
+// The Administration → User management link is gated on auth.user?.is_admin.
+// A previous bug returned {status:"ok"} from POST /api/auth/login, so on a
+// fresh login the SPA stored a user object with no is_admin field and the
+// link stayed hidden until refresh. These tests guard the gate itself.
+describe('Settings — Administration link', () => {
+	it('shows the User management link when the user is an admin', () => {
+		mockAuth.user = { id: 1, username: 'admin', is_admin: true, created_at: '' };
+		render(SettingsPage);
+		expect(screen.getByRole('link', { name: /user management/i })).toBeInTheDocument();
+	});
+
+	it('hides the User management link when the user is not an admin', () => {
+		mockAuth.user = { id: 1, username: 'alice', is_admin: false, created_at: '' };
+		render(SettingsPage);
+		expect(screen.queryByRole('link', { name: /user management/i })).toBeNull();
+	});
+
+	it('hides the User management link when auth.user is null', () => {
+		mockAuth.user = null;
+		render(SettingsPage);
+		expect(screen.queryByRole('link', { name: /user management/i })).toBeNull();
+		// Restore for subsequent tests in this file that assume a logged-in user.
+		mockAuth.user = { id: 1, username: 'alice', is_admin: false, created_at: '' };
 	});
 });
 
@@ -138,6 +173,23 @@ describe('Settings — Change password', () => {
 		await waitFor(() => {
 			expect(screen.getByRole('alert').textContent).toMatch(/12 characters/i);
 		});
+		expect(mockApi.auth.changePassword).not.toHaveBeenCalled();
+	});
+
+	// Required-field UI: empty New / Confirm fields get .pw-wrap-invalid on
+	// submit. The class is what the global mobile rule + PasswordInput
+	// component scope key off of to paint the row red.
+	it('flags both empty password fields with .pw-wrap-invalid on empty submit', async () => {
+		render(SettingsPage);
+
+		await fireEvent.click(screen.getByRole('button', { name: /update password/i }));
+
+		const newPw = screen.getByLabelText('New password');
+		const confirmPw = screen.getByLabelText(/confirm new password/i);
+		await waitFor(() =>
+			expect(newPw.closest('.pw-wrap')?.classList.contains('pw-wrap-invalid')).toBe(true),
+		);
+		expect(confirmPw.closest('.pw-wrap')?.classList.contains('pw-wrap-invalid')).toBe(true);
 		expect(mockApi.auth.changePassword).not.toHaveBeenCalled();
 	});
 });

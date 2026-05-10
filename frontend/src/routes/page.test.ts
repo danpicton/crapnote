@@ -498,6 +498,23 @@ describe('Offline mode', () => {
 		await waitFor(() => expect(screen.getAllByText(/offline/i).length).toBeGreaterThan(0));
 	});
 
+	// navigator.onLine being true is not enough — the server can still be
+	// unreachable (DNS failure, captive portal, app server down, etc.). The
+	// sync status row used to keep saying "SYNCED" in that case; loadNotes
+	// now flips isOnline based on whether the API actually replied.
+	it('shows OFFLINE when navigator.onLine is true but the API is unreachable', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(api.notes.list).mockRejectedValue(new Error('network'));
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ id: 1, title: 'Cached Note', body: '', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			  is_dirty: false, is_new: false },
+		]);
+
+		render(Page);
+		await waitFor(() => expect(screen.getAllByText(/offline/i).length).toBeGreaterThan(0));
+	});
+
 	it('loads notes from IndexedDB when offline', async () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: false });
 		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
