@@ -65,20 +65,27 @@
 		loading = false;
 	}
 
+	// Track which required fields failed validation. Cleared as the user
+	// edits the field; toggled on again whenever a submit attempt fails.
+	let invalidUsername = $state(false);
+	let invalidPassword = $state(false);
+	let invalidPasswordConfirm = $state(false);
+
+	function clearInvalid(field: 'username' | 'password' | 'passwordConfirm') {
+		if (field === 'username') invalidUsername = false;
+		else if (field === 'password') invalidPassword = false;
+		else invalidPasswordConfirm = false;
+	}
+
 	async function createUser(e: Event) {
 		e.preventDefault();
 		createError = '';
-
-		if (!newUsername.trim()) {
-			createError = 'Please enter a username.';
-			return;
-		}
+		invalidUsername = !newUsername.trim();
+		invalidPassword = createMode === 'password' && !newPassword;
+		invalidPasswordConfirm = createMode === 'password' && !newPasswordConfirm;
+		if (invalidUsername || invalidPassword || invalidPasswordConfirm) return;
 
 		if (createMode === 'password') {
-			if (!newPassword) {
-				createError = 'Please enter a password.';
-				return;
-			}
 			if (newPassword.length < 12) {
 				createError = 'Password must be at least 12 characters.';
 				return;
@@ -264,19 +271,30 @@
 
 				<form onsubmit={createUser} class="create-form" novalidate>
 					<div class="fields-row">
-						<input type="text" placeholder="Username" bind:value={newUsername} class="field-input" />
+						<input
+							type="text"
+							placeholder="Username"
+							bind:value={newUsername}
+							oninput={() => clearInvalid('username')}
+							class="field-input"
+							class:field-invalid={invalidUsername}
+						/>
 						{#if createMode === 'password'}
 							<PasswordInput
 								id="new-user-password"
 								placeholder="Password"
 								autocomplete="new-password"
 								bind:value={newPassword}
+								invalid={invalidPassword}
+								oninput={() => clearInvalid('password')}
 							/>
 							<PasswordInput
 								id="new-user-password-confirm"
 								placeholder="Confirm password"
 								autocomplete="new-password"
 								bind:value={newPasswordConfirm}
+								invalid={invalidPasswordConfirm}
+								oninput={() => clearInvalid('passwordConfirm')}
 							/>
 						{/if}
 					</div>
@@ -639,6 +657,7 @@
 		outline: none;
 	}
 	.field-input:focus { border-color: var(--accent); }
+	.field-input.field-invalid { border-color: var(--danger); box-shadow: inset 0 -1px 0 var(--danger); }
 
 	/* Override PasswordInput inside the create form to match field-input sizing */
 	.fields-row :global(.pw-wrap) { width: 100%; }

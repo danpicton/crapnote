@@ -48,10 +48,26 @@
 		}
 	}
 
+	// Required-field flags. Cleared as the user edits the field; toggled on
+	// again whenever a submit attempt fails.
+	let invalidCurrent = $state(false);
+	let invalidNew = $state(false);
+	let invalidConfirm = $state(false);
+
+	function clearInvalid(field: 'current' | 'new' | 'confirm') {
+		if (field === 'current') invalidCurrent = false;
+		else if (field === 'new') invalidNew = false;
+		else invalidConfirm = false;
+	}
+
 	async function changePassword(e: Event) {
 		e.preventDefault();
 		pwError = '';
 		pwSuccess = '';
+		invalidCurrent = !currentPassword;
+		invalidNew = !newPassword;
+		invalidConfirm = !newPasswordConfirm;
+		if (invalidCurrent || invalidNew || invalidConfirm) return;
 		if (newPassword.length < 12) {
 			pwError = 'New password must be at least 12 characters.';
 			return;
@@ -147,18 +163,39 @@
 			<div class="section-body">
 				{#if pwError}<p role="alert" class="msg-error">{pwError}</p>{/if}
 				{#if pwSuccess}<p role="status" class="msg-success">{pwSuccess}</p>{/if}
-				<form class="pw-form" onsubmit={changePassword}>
+				<form class="pw-form" onsubmit={changePassword} novalidate>
 					<div class="pw-field">
 						<label for="current-password" class="field-label">Current password</label>
-						<PasswordInput id="current-password" autocomplete="current-password" bind:value={currentPassword} disabled={pwSubmitting} required />
+						<PasswordInput
+							id="current-password"
+							autocomplete="current-password"
+							bind:value={currentPassword}
+							disabled={pwSubmitting}
+							invalid={invalidCurrent}
+							oninput={() => clearInvalid('current')}
+						/>
 					</div>
 					<div class="pw-field">
 						<label for="new-password" class="field-label">New password</label>
-						<PasswordInput id="new-password" autocomplete="new-password" bind:value={newPassword} disabled={pwSubmitting} required />
+						<PasswordInput
+							id="new-password"
+							autocomplete="new-password"
+							bind:value={newPassword}
+							disabled={pwSubmitting}
+							invalid={invalidNew}
+							oninput={() => clearInvalid('new')}
+						/>
 					</div>
 					<div class="pw-field">
 						<label for="new-password-confirm" class="field-label">Confirm new password</label>
-						<PasswordInput id="new-password-confirm" autocomplete="new-password" bind:value={newPasswordConfirm} disabled={pwSubmitting} required />
+						<PasswordInput
+							id="new-password-confirm"
+							autocomplete="new-password"
+							bind:value={newPasswordConfirm}
+							disabled={pwSubmitting}
+							invalid={invalidConfirm}
+							oninput={() => clearInvalid('confirm')}
+						/>
 					</div>
 					<button type="submit" class="btn-primary" disabled={pwSubmitting}>
 						{pwSubmitting ? 'Updating…' : 'Update password'}

@@ -2,7 +2,7 @@
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23faf8f4'/%3E%3Ctext x='50%25' y='62%25' text-anchor='middle' font-family='Georgia,serif' font-weight='800' font-size='22' fill='%231a1612'%3EC%3C/text%3E%3Ccircle cx='25' cy='22' r='2.4' fill='%23e45c3a'/%3E%3C/svg%3E" />
+		<link rel="icon" type="image/svg+xml" href="%sveltekit.assets%/favicon.svg" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="theme-color" content="#faf8f4" />
 		<link rel="manifest" href="%sveltekit.assets%/manifest.json" />
@@ -122,6 +122,18 @@
 				}
 				.fields-row .pw-wrap input {
 					border-bottom: none !important;
+				}
+
+				/* Required-field validation: red bottom border on submit failure.
+				   Parent components add .field-invalid on plain inputs and
+				   .pw-wrap-invalid on the password wrapper; cleared on next input.
+				   On the settings page each PasswordInput sits in a .pw-field row
+				   whose own border-bottom is the visible separator, so colour that
+				   when the wrapper inside is invalid. */
+				.fields-row .field-invalid,
+				.fields-row .pw-wrap-invalid,
+				.pw-field:has(.pw-wrap-invalid) {
+					border-bottom-color: var(--danger) !important;
 				}
 			}
 
