@@ -19,7 +19,7 @@
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, type Note, type Tag } from '$lib/api';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
-	import { openOfflineDB, getNote as getOfflineNote, upsertNote } from '$lib/offlineDB';
+	import { openOfflineDB, getNote as getOfflineNote, upsertNote, type CachedNote } from '$lib/offlineDB';
 	import {
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Link,
@@ -207,31 +207,49 @@
 		}
 	});
 
+	async function saveOfflineEdit(field: 'title' | 'body', value: string) {
+		const db = await openOfflineDB();
+		try {
+			const existing = await getOfflineNote(db, noteId);
+			const base: CachedNote = existing ?? {
+				id: noteId,
+				title: note?.title ?? '',
+				body: note?.body ?? '',
+				starred: note?.starred ?? false,
+				pinned: note?.pinned ?? false,
+				tags: noteTags.map((t) => ({ id: t.id, name: t.name })),
+				server_updated_at: note?.updated_at ?? new Date().toISOString(),
+				local_updated_at: new Date().toISOString(),
+				is_dirty: false,
+				is_new: noteId < 0,
+			};
+			await upsertNote(db, {
+				...base,
+				[field]: value,
+				local_updated_at: new Date().toISOString(),
+				is_dirty: true,
+			});
+		} finally {
+			db.close();
+		}
+		if (note) note = { ...note, [field]: value };
+	}
+
 	function scheduleAutoSave(field: 'title' | 'body', value: string) {
 		if (saveTimer) clearTimeout(saveTimer);
 		saveTimer = setTimeout(async () => {
 			saving = true;
 			try {
 				if (!navigator.onLine || noteId < 0) {
-					// Save to IndexedDB and mark dirty
+					await saveOfflineEdit(field, value);
+					return;
+				}
+				try {
+					const updated = await api.notes.update(noteId, { [field]: value });
+					note = updated;
+					// Keep cache in sync
 					const db = await openOfflineDB();
-					const existing = await getOfflineNote(db, noteId);
-					if (existing) {
-						await upsertNote(db, {
-							...existing,
-							[field]: value,
-							local_updated_at: new Date().toISOString(),
-							is_dirty: true,
-						});
-					}
-					db.close();
-					if (note) note = { ...note, [field]: value };
-				} else {
 					try {
-						const updated = await api.notes.update(noteId, { [field]: value });
-						note = updated;
-						// Keep cache in sync
-						const db = await openOfflineDB();
 						const existing = await getOfflineNote(db, noteId);
 						if (existing && !existing.is_dirty) {
 							await upsertNote(db, {
@@ -242,22 +260,14 @@
 								local_updated_at: updated.updated_at,
 							});
 						}
+					} finally {
 						db.close();
-					} catch {
-						// Lost connectivity — save offline
-						const db = await openOfflineDB();
-						const existing = await getOfflineNote(db, noteId);
-						if (existing) {
-							await upsertNote(db, {
-								...existing,
-								[field]: value,
-								local_updated_at: new Date().toISOString(),
-								is_dirty: true,
-							});
-						}
-						db.close();
-						if (note) note = { ...note, [field]: value };
 					}
+				} catch {
+					// Server unreachable (network error or 503 from the SW) — save
+					// offline so the edit isn't lost. The home-page heartbeat will
+					// flush it once the server is reachable again.
+					await saveOfflineEdit(field, value);
 				}
 			} finally {
 				saving = false;

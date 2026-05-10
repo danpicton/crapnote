@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ChevronLeft } from 'lucide-svelte';
+	import { ChevronLeft, ChevronRight, Users } from 'lucide-svelte';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
@@ -19,8 +19,9 @@
 	}
 
 	let exportPassword = $state('');
+	let exportError = $state('');
+	let exportSubmitting = $state(false);
 
-	let currentPassword = $state('');
 	let newPassword = $state('');
 	let newPasswordConfirm = $state('');
 	let pwError = $state('');
@@ -31,20 +32,38 @@
 		!auth.loading && !!auth.user && (auth.user.is_admin || !!auth.user.api_tokens_enabled),
 	);
 
-	function doExport() {
-		const url = exportPassword
-			? `/api/export?password=${encodeURIComponent(exportPassword)}`
-			: '/api/export';
-		const a = document.createElement('a');
-		a.href = url;
-		a.download = '';
-		a.click();
+	async function doExport() {
+		exportError = '';
+		exportSubmitting = true;
+		try {
+			await api.export(exportPassword || undefined);
+			exportPassword = '';
+		} catch (err) {
+			exportError = err instanceof ApiError && err.message
+				? err.message
+				: 'Export failed.';
+		} finally {
+			exportSubmitting = false;
+		}
+	}
+
+	// Required-field flags. Cleared as the user edits the field; toggled on
+	// again whenever a submit attempt fails.
+	let invalidNew = $state(false);
+	let invalidConfirm = $state(false);
+
+	function clearInvalid(field: 'new' | 'confirm') {
+		if (field === 'new') invalidNew = false;
+		else invalidConfirm = false;
 	}
 
 	async function changePassword(e: Event) {
 		e.preventDefault();
 		pwError = '';
 		pwSuccess = '';
+		invalidNew = !newPassword;
+		invalidConfirm = !newPasswordConfirm;
+		if (invalidNew || invalidConfirm) return;
 		if (newPassword.length < 12) {
 			pwError = 'New password must be at least 12 characters.';
 			return;
@@ -55,15 +74,12 @@
 		}
 		pwSubmitting = true;
 		try {
-			await api.auth.changePassword(currentPassword, newPassword);
+			await api.auth.changePassword(newPassword);
 			pwSuccess = 'Password updated.';
-			currentPassword = '';
 			newPassword = '';
 			newPasswordConfirm = '';
 		} catch (err) {
-			if (err instanceof ApiError && err.status === 403) {
-				pwError = 'Current password is incorrect.';
-			} else if (err instanceof ApiError && err.status === 400) {
+			if (err instanceof ApiError && err.status === 400) {
 				pwError = 'New password is not acceptable. Use at least 12 characters.';
 			} else {
 				pwError = 'Failed to update password.';
@@ -103,9 +119,12 @@
 				<p>Everything you've written, as Markdown.</p>
 			</div>
 			<div class="section-body">
+				{#if exportError}<p role="alert" class="msg-error">{exportError}</p>{/if}
 				<div class="export-row">
-					<input type="password" placeholder="Password (optional)" bind:value={exportPassword} autocomplete="new-password" class="field-input" />
-					<button class="btn-primary" onclick={doExport}>Export notes</button>
+					<input type="password" placeholder="Password (optional)" bind:value={exportPassword} autocomplete="new-password" class="field-input" disabled={exportSubmitting} />
+					<button class="btn-primary" onclick={doExport} disabled={exportSubmitting}>
+						{exportSubmitting ? 'Exporting…' : 'Export notes'}
+					</button>
 				</div>
 				<p class="hint">A ZIP of individual <code>.md</code> files. Password-protected if supplied.</p>
 			</div>
@@ -119,8 +138,10 @@
 				<p>Users and who can do what.</p>
 			</div>
 			<div class="section-body">
-				<a href="/admin" class="btn-default btn-chevron">
-					User management <span class="chevron">›</span>
+				<a href="/admin" class="admin-link">
+					<span class="admin-link-icon" aria-hidden="true"><Users size={18} /></span>
+					<span class="admin-link-label">User management</span>
+					<ChevronRight size={18} class="admin-link-chevron" aria-hidden="true" />
 				</a>
 			</div>
 		</section>
@@ -135,18 +156,28 @@
 			<div class="section-body">
 				{#if pwError}<p role="alert" class="msg-error">{pwError}</p>{/if}
 				{#if pwSuccess}<p role="status" class="msg-success">{pwSuccess}</p>{/if}
-				<form class="pw-form" onsubmit={changePassword}>
-					<div class="pw-field">
-						<label for="current-password" class="field-label">Current password</label>
-						<PasswordInput id="current-password" autocomplete="current-password" bind:value={currentPassword} disabled={pwSubmitting} required />
-					</div>
+				<form class="pw-form" onsubmit={changePassword} novalidate>
 					<div class="pw-field">
 						<label for="new-password" class="field-label">New password</label>
-						<PasswordInput id="new-password" autocomplete="new-password" bind:value={newPassword} disabled={pwSubmitting} required />
+						<PasswordInput
+							id="new-password"
+							autocomplete="new-password"
+							bind:value={newPassword}
+							disabled={pwSubmitting}
+							invalid={invalidNew}
+							oninput={() => clearInvalid('new')}
+						/>
 					</div>
 					<div class="pw-field">
 						<label for="new-password-confirm" class="field-label">Confirm new password</label>
-						<PasswordInput id="new-password-confirm" autocomplete="new-password" bind:value={newPasswordConfirm} disabled={pwSubmitting} required />
+						<PasswordInput
+							id="new-password-confirm"
+							autocomplete="new-password"
+							bind:value={newPasswordConfirm}
+							disabled={pwSubmitting}
+							invalid={invalidConfirm}
+							oninput={() => clearInvalid('confirm')}
+						/>
 					</div>
 					<button type="submit" class="btn-primary" disabled={pwSubmitting}>
 						{pwSubmitting ? 'Updating…' : 'Update password'}
@@ -237,7 +268,9 @@
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
-		padding: 2rem 0 1.5rem;
+		/* 3.5rem top clears the fixed .wordmark (top: 1.25rem, ~1.5rem tall)
+		   so the page title doesn't overlap it on narrow desktop widths. */
+		padding: 3.5rem 0 1.5rem;
 		border-bottom: 1px solid var(--border);
 		margin-bottom: 0;
 	}
@@ -362,21 +395,32 @@
 	.btn-primary:hover { background: var(--accent-dk); }
 	.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
 
-	.btn-default {
+	.admin-link {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.5rem;
-		padding: 0.5rem 1rem;
-		border: 1px solid var(--border);
-		background: transparent;
+		gap: 0.625rem;
+		padding: 0.5rem 0.75rem 0.5rem 0.625rem;
+		border: 1px solid var(--border-md);
+		background: var(--bg);
 		color: var(--text);
 		font-size: 0.875rem;
 		font-family: var(--sans);
 		cursor: pointer;
 		text-decoration: none;
+		transition: border-color 0.15s, background 0.15s;
 	}
-	.btn-default:hover { background: var(--bg-hover); }
-	.btn-chevron .chevron { color: var(--text-3); }
+	.admin-link:hover {
+		background: var(--bg-hover);
+		border-color: var(--accent);
+	}
+	.admin-link-icon {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--accent);
+	}
+	.admin-link-label { font-weight: 500; }
+	:global(.admin-link-chevron) { color: var(--text-3); }
 
 	.export-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
 
@@ -546,10 +590,10 @@
 
 		/* Buttons full-width on mobile */
 		.btn-primary { width: 100%; box-sizing: border-box; padding: 13px 16px; font-size: 16px; border-radius: 10px; }
-		.btn-default {
+		.admin-link {
 			display: flex;
-			justify-content: space-between;
 			align-items: center;
+			gap: 12px;
 			width: 100%;
 			box-sizing: border-box;
 			padding: 14px 16px;
@@ -561,6 +605,7 @@
 			text-decoration: none;
 			border-radius: 0;
 		}
+		.admin-link-label { flex: 1; }
 		.field-input { width: 100%; border-radius: 0; padding: 14px 16px; font-size: 16px; border: none; border-bottom: 1px solid var(--border); background: transparent; outline: none; box-sizing: border-box; }
 		.field-input:focus { border-bottom-color: var(--accent); }
 

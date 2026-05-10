@@ -92,11 +92,8 @@ export const api = {
 			request<User>('POST', '/api/auth/login', { username, password }),
 		logout: () => request<void>('POST', '/api/auth/logout'),
 		me: () => request<User>('GET', '/api/auth/me'),
-		changePassword: (currentPassword: string, newPassword: string) =>
-			request<void>('POST', '/api/auth/password', {
-				current_password: currentPassword,
-				new_password: newPassword,
-			}),
+		changePassword: (newPassword: string) =>
+			request<void>('POST', '/api/auth/password', { new_password: newPassword }),
 	},
 
 	notes: {

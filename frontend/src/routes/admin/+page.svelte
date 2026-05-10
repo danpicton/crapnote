@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { ChevronLeft, ChevronRight, UserPlus, Trash2, Lock, LockOpen, KeyRound, Mail, Copy, Check } from 'lucide-svelte';
+	import { ChevronLeft, ChevronRight, UserPlus, Trash2, Lock, LockOpen, KeyRound, Mail, Copy, Check, Webhook } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 	import PasswordPromptModal from '$lib/components/PasswordPromptModal.svelte';
@@ -65,9 +65,25 @@
 		loading = false;
 	}
 
+	// Track which required fields failed validation. Cleared as the user
+	// edits the field; toggled on again whenever a submit attempt fails.
+	let invalidUsername = $state(false);
+	let invalidPassword = $state(false);
+	let invalidPasswordConfirm = $state(false);
+
+	function clearInvalid(field: 'username' | 'password' | 'passwordConfirm') {
+		if (field === 'username') invalidUsername = false;
+		else if (field === 'password') invalidPassword = false;
+		else invalidPasswordConfirm = false;
+	}
+
 	async function createUser(e: Event) {
 		e.preventDefault();
 		createError = '';
+		invalidUsername = !newUsername.trim();
+		invalidPassword = createMode === 'password' && !newPassword;
+		invalidPasswordConfirm = createMode === 'password' && !newPasswordConfirm;
+		if (invalidUsername || invalidPassword || invalidPasswordConfirm) return;
 
 		if (createMode === 'password') {
 			if (newPassword.length < 12) {
@@ -221,7 +237,7 @@
 		<a href="/settings" class="mob-back-btn" aria-label="Back to settings">
 			<ChevronLeft size={22} />
 		</a>
-		<h1 class="mob-page-title">Users<span class="accent-dot">.</span></h1>
+		<h1 class="mob-page-title">User management<span class="accent-dot">.</span></h1>
 	</div>
 	<div class="admin-inner">
 		<header class="page-header">
@@ -253,31 +269,39 @@
 					</label>
 				</fieldset>
 
-				<form onsubmit={createUser} class="create-form">
+				<form onsubmit={createUser} class="create-form" novalidate>
 					<div class="fields-row">
-						<input type="text" placeholder="Username" bind:value={newUsername} required class="field-input" />
+						<input
+							type="text"
+							placeholder="Username"
+							bind:value={newUsername}
+							oninput={() => clearInvalid('username')}
+							class="field-input {invalidUsername ? 'field-invalid' : ''}"
+						/>
 						{#if createMode === 'password'}
 							<PasswordInput
 								id="new-user-password"
 								placeholder="Password"
 								autocomplete="new-password"
 								bind:value={newPassword}
-								required
+								invalid={invalidPassword}
+								oninput={() => clearInvalid('password')}
 							/>
 							<PasswordInput
 								id="new-user-password-confirm"
 								placeholder="Confirm password"
 								autocomplete="new-password"
 								bind:value={newPasswordConfirm}
-								required
+								invalid={invalidPasswordConfirm}
+								oninput={() => clearInvalid('passwordConfirm')}
 							/>
 						{/if}
 					</div>
+					<label class="admin-toggle-row">
+						<span class="admin-toggle-text">Make admin</span>
+						<input type="checkbox" bind:checked={newIsAdmin} class="admin-toggle-input" />
+					</label>
 					<div class="form-actions">
-						<label class="checkbox-label">
-							<input type="checkbox" bind:checked={newIsAdmin} />
-							Admin
-						</label>
 						<button
 							type="submit"
 							class="btn-primary"
@@ -452,7 +476,7 @@
 										</button>
 										{#if !user.is_admin}
 											<button class="mob-user-action-btn" onclick={() => toggleApiTokens(user, !user.api_tokens_enabled)}>
-												{user.api_tokens_enabled ? 'Disable API' : 'Enable API'}
+												<Webhook size={15} /> {user.api_tokens_enabled ? 'Disable API' : 'Enable API'}
 											</button>
 										{/if}
 										{#if user.id !== auth.user?.id}
@@ -502,7 +526,9 @@
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
-		padding: 2rem 0 1.5rem;
+		/* 3.5rem top clears the fixed .wordmark (top: 1.25rem, ~1.5rem tall)
+		   so the page title doesn't overlap it on narrow desktop widths. */
+		padding: 3.5rem 0 1.5rem;
 		border-bottom: 1px solid var(--border);
 	}
 
@@ -580,7 +606,7 @@
 		margin: 0;
 	}
 
-	.section-body { min-width: 0; overflow-x: auto; }
+	.section-body { min-width: 0; }
 
 	.msg-error {
 		color: var(--danger);
@@ -608,11 +634,17 @@
 		cursor: pointer;
 	}
 
-	.create-form { display: flex; flex-direction: column; gap: 0.625rem; max-width: 320px; }
+	.create-form { display: flex; flex-direction: column; gap: 0.625rem; }
 	.fields-row {
 		display: flex;
 		flex-direction: column;
 		gap: 0.5rem;
+	}
+
+	/* Desktop only: constrain the create-user form to match the settings
+	   change-password form width (320px) so the two forms feel consistent. */
+	@media (min-width: 641px) {
+		.create-form { max-width: 320px; }
 	}
 	.form-actions {
 		display: flex;
@@ -632,6 +664,11 @@
 		outline: none;
 	}
 	.field-input:focus { border-color: var(--accent); }
+	.field-input.field-invalid {
+		border-color: var(--danger);
+		border-width: 2px;
+		background: var(--danger-bg);
+	}
 
 	/* Override PasswordInput inside the create form to match field-input sizing */
 	.fields-row :global(.pw-wrap) { width: 100%; }
@@ -642,13 +679,21 @@
 		box-sizing: border-box;
 	}
 
-	.checkbox-label {
+	.admin-toggle-row {
 		display: flex;
 		align-items: center;
-		gap: 0.375rem;
+		justify-content: space-between;
+		gap: 0.5rem;
 		font-size: 0.875rem;
 		color: var(--text-2);
 		cursor: pointer;
+		font-family: var(--sans);
+	}
+	.admin-toggle-input {
+		width: 16px;
+		height: 16px;
+		cursor: pointer;
+		flex-shrink: 0;
 	}
 
 	.btn-primary {
@@ -789,7 +834,7 @@
 
 	@media (max-width: 640px) {
 		.admin-page { display: flex; flex-direction: column; overflow: hidden; }
-		.admin-inner { padding: 0; padding-bottom: 80px; flex: 1; overflow-y: scroll; }
+		.admin-inner { width: 100%; max-width: none; padding: 0; padding-bottom: 80px; flex: 1; overflow-y: scroll; }
 
 		/* Hide desktop-only elements */
 		.wordmark, .page-header { display: none !important; }
@@ -826,22 +871,41 @@
 			margin: 0;
 		}
 
-		/* Sections: match settings layout exactly */
-		.section { grid-template-columns: 1fr; gap: 0; padding: 14px 16px 12px; border-top: 1px solid var(--border); }
+		/* Match settings exactly: section has 16px horizontal padding,
+		   section-body fills the section as a rounded card. */
+		.section {
+			width: 100%;
+			max-width: none;
+			grid-template-columns: 1fr;
+			gap: 0;
+			padding: 14px 16px 12px;
+			box-sizing: border-box;
+		}
 		.first-section { padding-top: 14px; border-top: none; }
-		.section-label h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-3); margin-bottom: 6px; font-family: var(--sans); }
-		.section-label p { display: none; }
 
-		/* Section body: card appearance */
+		.section-label p { display: none; }
+		.section-label h2 {
+			font-size: 13px;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.06em;
+			color: var(--text-3);
+			margin-bottom: 6px;
+			font-family: var(--sans);
+		}
+
 		.section-body {
+			width: 100%;
+			max-width: none;
 			background: var(--bg-alt);
 			border-radius: 14px;
 			padding: 2px 0;
 			overflow: hidden;
+			box-sizing: border-box;
 		}
 
 		/* Create form: flat rows inside card */
-		.create-form { max-width: none; padding: 0; }
+		.create-form { padding: 0; }
 		.fields-row { gap: 0; }
 		.fields-row .field-input {
 			border: none !important;
@@ -855,6 +919,17 @@
 			width: 100%;
 			box-sizing: border-box;
 			outline: none;
+		}
+		/* Validation override has to live inside the admin component so it
+		   beats the .fields-row .field-input rule above on specificity — the
+		   global app.html rule is one class less specific and was losing. */
+		.fields-row .field-input.field-invalid {
+			border-bottom: 2px solid var(--danger) !important;
+			background: var(--danger-bg) !important;
+		}
+		.fields-row :global(.pw-wrap-invalid) {
+			border-bottom: 2px solid var(--danger) !important;
+			background: var(--danger-bg) !important;
 		}
 		/* PasswordInput inside create form: flat rows */
 		.fields-row :global(.pw-wrap) { width: 100%; border-bottom: 1px solid var(--border); }
@@ -872,31 +947,59 @@
 		}
 		.fields-row :global(.pw-wrap .toggle) { right: 12px; }
 
-		.form-actions { flex-direction: column; gap: 0; padding: 12px 16px; }
-		.checkbox-label { font-size: 15px; padding: 4px 0 12px; }
-		.btn-primary { width: 100%; justify-content: center; padding: 13px; border-radius: 10px; font-size: 16px; }
+		.form-actions {
+			flex-direction: column;
+			align-items: stretch;
+			gap: 0;
+			padding: 0;
+		}
+		.btn-primary {
+			margin: 12px 16px;
+			width: calc(100% - 32px);
+			justify-content: center;
+			box-sizing: border-box;
+			padding: 13px 16px;
+			border-radius: 10px;
+			font-size: 16px;
+		}
+
+		/* Admin toggle row: full-width card row matching the settings dark-mode toggle */
+		.admin-toggle-row {
+			display: flex;
+			justify-content: space-between;
+			align-items: center;
+			padding: 14px 16px;
+			min-height: 48px;
+			font-size: 16px;
+			color: var(--text);
+			border-top: 1px solid var(--border);
+			box-sizing: border-box;
+		}
+		.admin-toggle-input { width: 20px; height: 20px; }
 
 		/* Segmented radio control for mode-toggle */
 		.mode-toggle {
 			display: flex;
 			gap: 0;
-			border: 1px solid var(--border);
-			border-radius: 10px;
+			border: none;
+			border-bottom: 1px solid var(--border);
+			border-radius: 0;
 			overflow: hidden;
 			padding: 0;
-			margin: 12px 16px;
+			margin: 0;
 		}
 		.radio-label {
 			flex: 1;
 			display: flex;
 			align-items: center;
 			justify-content: center;
-			padding: 10px 8px;
-			font-size: 12px;
+			padding: 12px 8px;
+			font-size: 13px;
 			cursor: pointer;
 			background: none;
 			border-right: 1px solid var(--border);
 			text-align: center;
+			color: var(--text-2);
 		}
 		.radio-label:last-child { border-right: none; }
 		.radio-label:has(input:checked) {
@@ -906,15 +1009,15 @@
 		}
 		.radio-label input { display: none; }
 
-		/* Mobile user list (new card design) */
+		/* Mobile user list — fills the section-body card; no inner card */
 		.mob-user-list {
 			display: flex;
 			flex-direction: column;
 			list-style: none;
 			margin: 0;
 			padding: 0;
-			background: var(--bg-alt);
-			border-radius: 14px;
+			background: transparent;
+			border-radius: 0;
 			overflow: hidden;
 		}
 		.mob-user-item {

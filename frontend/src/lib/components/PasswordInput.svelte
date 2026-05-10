@@ -14,7 +14,9 @@
 		placeholder?: string;
 		required?: boolean;
 		disabled?: boolean;
+		invalid?: boolean;
 		onchange?: (value: string) => void;
+		oninput?: (value: string) => void;
 	}
 
 	let {
@@ -24,7 +26,9 @@
 		placeholder,
 		required = false,
 		disabled = false,
+		invalid = false,
 		onchange,
+		oninput,
 	}: Props = $props();
 
 	let visible = $state(false);
@@ -32,11 +36,12 @@
 	function handleInput(e: Event) {
 		const target = e.currentTarget as HTMLInputElement;
 		value = target.value;
+		oninput?.(target.value);
 		onchange?.(target.value);
 	}
 </script>
 
-<div class="pw-wrap">
+<div class="pw-wrap" class:pw-wrap-invalid={invalid}>
 	<input
 		{id}
 		type={visible ? 'text' : 'password'}
@@ -85,6 +90,14 @@
 	.pw-wrap input:focus {
 		outline: none;
 		border-color: var(--accent);
+	}
+
+	/* Invalid state — applied by the parent when a required field fails
+	   submission validation. Cleared by the parent on the next input. */
+	.pw-wrap-invalid input {
+		border-color: var(--danger) !important;
+		border-width: 2px !important;
+		background: var(--danger-bg) !important;
 	}
 
 	.toggle {

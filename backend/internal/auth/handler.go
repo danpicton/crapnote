@@ -88,9 +88,28 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 
+	// Return the user object so the SPA can populate its auth store
+	// without a follow-up /api/auth/me round-trip. Without this, the
+	// fresh-login UI renders before is_admin is known and the admin-only
+	// surfaces (e.g. settings → user management) stay hidden until refresh.
+	u, err := h.svc.UserByID(r.Context(), sess.UserID)
+	if err != nil {
+		// The session was just created so this should never miss; play it
+		// safe and degrade to the previous behaviour rather than 500ing.
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"}) //nolint:errcheck
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"}) //nolint:errcheck
+	json.NewEncoder(w).Encode(map[string]any{ //nolint:errcheck
+		"id":                 u.ID,
+		"username":           u.Username,
+		"is_admin":           u.IsAdmin,
+		"api_tokens_enabled": u.APITokensEnabled,
+		"created_at":         u.CreatedAt,
+	})
 }
 
 // Logout handles POST /api/auth/logout.
@@ -123,9 +142,12 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 // ChangePassword handles POST /api/auth/password.
-// Body: { "current_password": "...", "new_password": "..." }
-// Any authenticated user (cookie or bearer) can change their own password
-// by supplying their current password.
+// Body: { "new_password": "..." }
+// Any authenticated user (via cookie — bearer tokens are blocked at the
+// router) can change their own password. We deliberately do NOT require the
+// current password: a logged-in user who has forgotten it should still be
+// able to set a new one. The cookie-only gate plus the audit log entry is
+// the trade-off here.
 func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	u := UserFromContext(r.Context())
 	if u == nil {
@@ -134,8 +156,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		CurrentPassword string `json:"current_password"`
-		NewPassword     string `json:"new_password"`
+		NewPassword string `json:"new_password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -146,16 +167,7 @@ func (h *Handler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.svc.ChangePassword(r.Context(), u.ID, req.CurrentPassword, req.NewPassword)
-	if errors.Is(err, ErrInvalidCredentials) {
-		slog.Warn("audit: password change rejected — wrong current password",
-			"event", "password_change_denied",
-			"user_id", u.ID,
-			"ip", httpx.ClientIP(r),
-		)
-		writeError(w, http.StatusForbidden, "current password is incorrect")
-		return
-	}
+	err := h.svc.ChangePassword(r.Context(), u.ID, req.NewPassword)
 	if err != nil {
 		slog.Error("audit: password change error",
 			"event", "password_change_error",

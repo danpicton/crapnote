@@ -69,6 +69,20 @@ func TestHandler_Login_Success(t *testing.T) {
 	if !sessionCookie.HttpOnly {
 		t.Fatal("session cookie must be HttpOnly")
 	}
+
+	// The body must include the user object so the SPA can populate its
+	// auth store on first paint without an extra /api/auth/me round-trip;
+	// admin-only UI was hidden until refresh before this was added.
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp["username"] != "admin" {
+		t.Fatalf("expected username=admin in response, got %v", resp["username"])
+	}
+	if resp["is_admin"] != true {
+		t.Fatalf("expected is_admin=true in response, got %v (resp=%v)", resp["is_admin"], resp)
+	}
 }
 
 // Cookie Secure flag must follow the transport, not be hardcoded to true.
@@ -207,7 +221,7 @@ func TestHandler_ChangePassword_Success(t *testing.T) {
 	h, svc, users := newTestHandlerWithRepo(t)
 	u := createUser(t, users, "alice", "currentpass123", false)
 
-	body := `{"current_password":"currentpass123","new_password":"brandnewpass456"}`
+	body := `{"new_password":"brandnewpass456"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(auth.WithUser(req.Context(), u))
@@ -228,19 +242,25 @@ func TestHandler_ChangePassword_Success(t *testing.T) {
 	}
 }
 
-func TestHandler_ChangePassword_WrongCurrent_Returns403(t *testing.T) {
-	h, _, users := newTestHandlerWithRepo(t)
+// The endpoint deliberately no longer requires the current password — a
+// logged-in user who has forgotten it should still be able to set a new one.
+// See ChangePassword in service.go for the rationale.
+func TestHandler_ChangePassword_NoCurrent_Succeeds(t *testing.T) {
+	h, svc, users := newTestHandlerWithRepo(t)
 	u := createUser(t, users, "alice", "currentpass123", false)
 
-	body := `{"current_password":"wrongpass","new_password":"brandnewpass456"}`
+	body := `{"new_password":"brandnewpass456"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(auth.WithUser(req.Context(), u))
 	w := httptest.NewRecorder()
 	h.ChangePassword(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, err := svc.Login(t.Context(), "alice", "brandnewpass456"); err != nil {
+		t.Fatalf("new password should work: %v", err)
 	}
 }
 
@@ -248,7 +268,7 @@ func TestHandler_ChangePassword_ShortNew_Returns400(t *testing.T) {
 	h, _, users := newTestHandlerWithRepo(t)
 	u := createUser(t, users, "alice", "currentpass123", false)
 
-	body := `{"current_password":"currentpass123","new_password":"short"}`
+	body := `{"new_password":"short"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(auth.WithUser(req.Context(), u))
@@ -262,7 +282,7 @@ func TestHandler_ChangePassword_ShortNew_Returns400(t *testing.T) {
 
 func TestHandler_ChangePassword_Unauthenticated_Returns401(t *testing.T) {
 	h, _, _ := newTestHandlerWithRepo(t)
-	body := `{"current_password":"a","new_password":"brandnewpass456"}`
+	body := `{"new_password":"brandnewpass456"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()

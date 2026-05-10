@@ -53,7 +53,7 @@ describe('Admin page', () => {
 	it('renders heading', async () => {
 		render(AdminPage);
 		await waitFor(() => {
-			expect(screen.getByRole('heading', { name: /user management/i })).toBeInTheDocument();
+			expect(screen.getAllByRole('heading', { name: /user management/i }).length).toBeGreaterThan(0);
 		});
 	});
 
@@ -229,12 +229,53 @@ describe('Admin page', () => {
 			),
 		).toBeFalsy();
 	});
+
+	// Required-field UI: empty fields get .field-invalid / .pw-wrap-invalid
+	// classes on submit (rendered as a 2px danger border + light red tint).
+	// Cleared on the next input event. The class wiring was previously
+	// inconsistent — the username row in particular silently failed.
+	it('flags every empty required field with the invalid class on empty submit', async () => {
+		mockFetch.mockResolvedValueOnce(ok(mockUsers));
+		render(AdminPage);
+		await waitFor(() => screen.getByPlaceholderText(/^username$/i));
+
+		await fireEvent.click(screen.getByRole('button', { name: /create user/i }));
+
+		const username = screen.getByPlaceholderText(/^username$/i);
+		await waitFor(() => expect(username.classList.contains('field-invalid')).toBe(true));
+		const password = screen.getByPlaceholderText(/^password$/i);
+		const passwordWrap = password.closest('.pw-wrap');
+		expect(passwordWrap?.classList.contains('pw-wrap-invalid')).toBe(true);
+		const confirm = screen.getByPlaceholderText(/confirm password/i);
+		const confirmWrap = confirm.closest('.pw-wrap');
+		expect(confirmWrap?.classList.contains('pw-wrap-invalid')).toBe(true);
+
+		// And nothing was sent to the server.
+		expect(
+			mockFetch.mock.calls.find(
+				(c) => c[1]?.method === 'POST' && typeof c[0] === 'string' && c[0].endsWith('/api/admin/users'),
+			),
+		).toBeFalsy();
+	});
+
+	it('clears the invalid class on the next input event for a flagged field', async () => {
+		mockFetch.mockResolvedValueOnce(ok(mockUsers));
+		render(AdminPage);
+		await waitFor(() => screen.getByPlaceholderText(/^username$/i));
+
+		await fireEvent.click(screen.getByRole('button', { name: /create user/i }));
+		const username = screen.getByPlaceholderText(/^username$/i);
+		await waitFor(() => expect(username.classList.contains('field-invalid')).toBe(true));
+
+		await fireEvent.input(username, { target: { value: 'a' } });
+		await waitFor(() => expect(username.classList.contains('field-invalid')).toBe(false));
+	});
 });
 
 describe('Admin — Typemark', () => {
 	it('typemark is a link to the home page', async () => {
 		render(AdminPage);
-		await waitFor(() => screen.getByRole('heading', { name: /user management/i }));
+		await waitFor(() => screen.getAllByRole('heading', { name: /user management/i }));
 		const link = screen.getByRole('link', { name: /^crapnote/i });
 		expect(link).toHaveAttribute('href', '/');
 	});

@@ -56,11 +56,11 @@
 			<Editor value={note.body ?? ''} readonly />
 		</div>
 		<div class="note-footer">
-			<button class="footer-btn footer-restore" onclick={restore}>
-				<ArchiveRestore size={16} aria-hidden="true" /> Restore
+			<button class="footer-btn footer-restore" onclick={restore} title="Restore" aria-label="Restore">
+				<ArchiveRestore size={18} aria-hidden="true" />
 			</button>
-			<button class="footer-btn footer-delete" onclick={deleteNote}>
-				<Trash2 size={16} aria-hidden="true" /> Delete permanently
+			<button class="footer-btn footer-delete" onclick={deleteNote} title="Delete permanently" aria-label="Delete permanently">
+				<Trash2 size={18} aria-hidden="true" />
 			</button>
 		</div>
 	{/if}
@@ -145,7 +145,8 @@
 	.note-footer {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		justify-content: flex-end;
+		gap: 6px;
 		padding: 8px 12px calc(env(safe-area-inset-bottom, 0px) + 8px);
 		border-top: 1px solid var(--border);
 		background: var(--bg-alt);
@@ -155,22 +156,17 @@
 	.footer-btn {
 		display: inline-flex;
 		align-items: center;
-		gap: 6px;
-		padding: 8px 14px;
-		border-radius: 8px;
-		border: 1px solid var(--border);
-		background: var(--bg);
+		justify-content: center;
+		width: 40px;
+		height: 40px;
+		border-radius: 10px;
+		border: none;
+		background: transparent;
 		color: var(--text-2);
-		font-size: 13px;
-		font-family: var(--sans);
 		cursor: pointer;
 	}
-	.footer-btn:hover { background: var(--bg-hover); }
+	.footer-btn:hover { background: var(--bg-hover); color: var(--text); }
 
-	.footer-delete {
-		color: var(--danger);
-		border-color: var(--danger-bd);
-		background: var(--danger-bg);
-	}
-	.footer-delete:hover { background: var(--danger); color: white; }
+	.footer-delete { color: var(--danger); }
+	.footer-delete:hover { background: var(--danger-bg); color: var(--danger); }
 </style>
