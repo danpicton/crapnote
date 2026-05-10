@@ -526,7 +526,9 @@
 		display: flex;
 		align-items: center;
 		gap: 0.75rem;
-		padding: 2rem 0 1.5rem;
+		/* 3.5rem top clears the fixed .wordmark (top: 1.25rem, ~1.5rem tall)
+		   so the page title doesn't overlap it on narrow desktop widths. */
+		padding: 3.5rem 0 1.5rem;
 		border-bottom: 1px solid var(--border);
 	}
 
