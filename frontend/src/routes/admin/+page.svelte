@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
-	import { ChevronLeft, ChevronRight, UserPlus, Trash2, Lock, LockOpen, KeyRound, Mail, Copy, Check } from 'lucide-svelte';
+	import { ChevronLeft, ChevronRight, UserPlus, Trash2, Lock, LockOpen, KeyRound, Mail, Copy, Check, Webhook } from 'lucide-svelte';
 	import { auth } from '$lib/stores/auth.svelte';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 	import PasswordPromptModal from '$lib/components/PasswordPromptModal.svelte';
@@ -452,7 +452,7 @@
 										</button>
 										{#if !user.is_admin}
 											<button class="mob-user-action-btn" onclick={() => toggleApiTokens(user, !user.api_tokens_enabled)}>
-												{user.api_tokens_enabled ? 'Disable API' : 'Enable API'}
+												<Webhook size={15} /> {user.api_tokens_enabled ? 'Disable API' : 'Enable API'}
 											</button>
 										{/if}
 										{#if user.id !== auth.user?.id}
