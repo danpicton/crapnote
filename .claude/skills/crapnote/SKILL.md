@@ -12,18 +12,9 @@ description: >-
 
 CrapNote is a PWA note-taking application. The Go backend serves a REST API and embeds the SvelteKit frontend via `go:embed`. SQLite is the default database (PostgreSQL optional via `DATABASE_URL`).
 
-## The One Rule: Red-Green-Refactor TDD
+## TDD
 
-Every change follows strict red-green-refactor TDD. The cycle is non-negotiable:
-
-1. **Red** — Write a failing test that describes the behaviour you want. Run it. Watch it fail. If it doesn't fail, the test is wrong or the behaviour already exists.
-2. **Green** — Write the *simplest* code that makes the test pass. No more. Resist the urge to "while I'm here" — that comes next.
-3. **Refactor** — Clean up duplication, improve naming, extract helpers. All tests still pass.
-4. **Repeat** — Pick the next small behaviour and start again.
-
-Do not write implementation code beyond scaffolding without a failing test first. "Scaffolding" means only: empty files, type stubs, function signatures that return zero values — enough for the compiler to accept the test file, nothing that encodes business logic.
-
-When the feature involves multiple layers (migration, repository, service, handler, frontend), build bottom-up: each layer gets its own red-green-refactor cycle before moving to the next.
+This project uses strict TDD. Follow the global `tdd` skill for process (red-green-refactor, vertical slices, mocking guidelines).
 
 ## Project Layout
 
@@ -131,9 +122,9 @@ cd e2e && npx playwright test
 
 E2E tests build the full stack (backend + frontend), start the server, and run Playwright with a single worker (SQLite single-writer constraint).
 
-## Feature Build Order (TDD)
+## Feature Build Order
 
-When adding a new feature, follow this sequence. Each step is its own red-green-refactor cycle:
+When adding a new feature, follow this sequence. Each step is its own red-green-refactor cycle (see the global `tdd` skill):
 
 ### 1. Database Migration
 
