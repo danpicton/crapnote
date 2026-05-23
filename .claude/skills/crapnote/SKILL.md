@@ -3,9 +3,9 @@ name: crapnote
 description: >-
   How to develop features, fix bugs, and make changes in the CrapNote PWA project — a SvelteKit 5 + Go + SQLite note-taking application.
   Use this skill whenever working on the crapnote codebase, including adding features, fixing bugs, writing tests, refactoring,
-  working with the editor, database migrations, API endpoints, frontend components, deployment config, or any code changes in this repo.
-  Trigger on any task that touches Go backend code, SvelteKit frontend code, SQLite/PostgreSQL schemas, Docker/K8s config,
-  or the E2E test suite in this project.
+  database migrations, API endpoints, frontend components, or any code changes in this repo.
+  Trigger on any task that touches Go backend code, SvelteKit frontend code, SQLite/PostgreSQL schemas, or the E2E test suite.
+  For editor/Milkdown work see the crapnote-editor skill; for deployment/infra see crapnote-deploy.
 ---
 
 # CrapNote Development Skill
@@ -57,10 +57,8 @@ This project uses strict TDD. Follow the global `tdd` skill for process (red-gre
 │   ├── tests/            # auth, notes, tags spec files
 │   ├── global-setup.ts   # builds backend, starts server, seeds DB
 │   └── playwright.config.ts  # single worker (SQLite constraint)
-├── deploy/
-│   ├── docker-compose.yml    # app + Prometheus + Loki + Grafana + Alloy
-│   └── k8s/                  # deployment, service, ingress (Traefik), PVC, secret
-└── Dockerfile            # multi-stage: node build → go build → distroless
+├── deploy/               # see crapnote-deploy skill
+└── Dockerfile            # see crapnote-deploy skill
 ```
 
 ## Architecture Patterns
@@ -213,13 +211,11 @@ vi.mock('$lib/api', () => ({
     },
 }));
 
-// Mock the Milkdown editor (it uses browser APIs that break in jsdom)
+// Mock the Milkdown editor (see crapnote-editor skill)
 vi.mock('$lib/components/Editor.svelte', async () => ({
     default: (anchor: unknown, props: unknown) => { void anchor; void props; },
 }));
 ```
-
-The Milkdown editor must always be mocked in unit tests — it depends on browser APIs not available in jsdom.
 
 ### 8. Frontend Component Implementation
 
@@ -252,16 +248,6 @@ For significant user-facing features, add a Playwright spec in `e2e/tests/`. E2E
 - In handler tests, use `withUser(req, user)` to simulate authenticated requests.
 - Admin-only endpoints check `user.IsAdmin` and return 403 if false.
 
-## Frontend Editor
-
-The editor uses Milkdown (ProseMirror-based) for live markdown rendering. Key points:
-
-- The editor component is at `frontend/src/lib/components/Editor.svelte`
-- Custom plugins live in `frontend/src/lib/milkdown/` (image paste, link, underline)
-- The first line is always the title (rendered as H1)
-- Auto-save triggers on blur
-- In tests, always mock the editor — it requires real DOM APIs
-
 ## Environment Variables
 
 ```
@@ -278,6 +264,5 @@ PORT                # HTTP port (default: 8080)
 - **Forgot `-tags sqlite_fts5`**: Tests will fail with migration errors. Always use `make test` or pass the tag explicitly.
 - **Forgot `CGO_ENABLED=1`**: The sqlite3 driver needs CGO. Set it for `go build`, `go run`, and `go test`.
 - **FTS5 trigger sync**: When inserting/updating notes directly in tests via SQL (not through the repo), the FTS5 triggers handle sync automatically. But if you're writing migration tests that manipulate the `notes_fts` table directly, be aware of this.
-- **Milkdown in tests**: Always mock `$lib/components/Editor.svelte` in Vitest tests. The real component hangs in jsdom.
 - **E2E single worker**: Playwright runs with `workers: 1` because SQLite doesn't support concurrent writers. Don't change this.
 - **Go 1.24 route patterns**: Routes use `"METHOD /path/{param}"` syntax. The `{param}` is accessed via `r.PathValue("param")`.
