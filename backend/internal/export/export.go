@@ -107,7 +107,9 @@ func rewriteImageSrcs(body string, imgFiles map[string]string) string {
 
 // Build creates a ZIP archive of all non-trashed notes for userID.
 // imageData maps image ID → image bytes+mime; if nil no images are bundled.
-// If password is non-empty each entry is AES-256 encrypted.
+// If password is non-empty each entry is encrypted with WinZip AES-256
+// (readable by 7-Zip, WinZip, Keka and similar; not by some stock OS
+// extractors, which only support the legacy ZipCrypto scheme).
 func Build(w io.Writer, noteList []*notes.Note, imageData map[string]images.Data, password string) error {
 	zw := yzip.NewWriter(w)
 
@@ -132,7 +134,7 @@ func Build(w io.Writer, noteList []*notes.Note, imageData map[string]images.Data
 		var fw io.Writer
 		var err error
 		if password != "" {
-			fw, err = zw.Encrypt(zipName, password, yzip.StandardEncryption)
+			fw, err = zw.Encrypt(zipName, password, yzip.AES256Encryption)
 		} else {
 			fw, err = zw.Create(zipName)
 		}
@@ -145,16 +147,18 @@ func Build(w io.Writer, noteList []*notes.Note, imageData map[string]images.Data
 	}
 
 	// Write notes, rewriting image src paths to relative ones.
-	seen := make(map[string]int)
+	assigned := make(map[string]bool)
 	for _, n := range noteList {
+		// Deduplicate: "note.md", "note-2.md", etc. Probe against every name
+		// already assigned, not a per-title counter — a different title can
+		// legitimately claim a suffixed name first (e.g. "Note 2" owns
+		// "note-2.md" before the duplicates of "Note" need it).
 		name := sanitiseFilename(n.Title)
-		// Deduplicate: "note.md", "note-2.md", etc.
-		if count := seen[name]; count > 0 {
-			ext := ".md"
-			base := strings.TrimSuffix(name, ext)
-			name = fmt.Sprintf("%s-%d%s", base, count+1, ext)
+		base := strings.TrimSuffix(name, ".md")
+		for i := 2; assigned[name]; i++ {
+			name = fmt.Sprintf("%s-%d.md", base, i)
 		}
-		seen[name]++
+		assigned[name] = true
 
 		body := rewriteImageSrcs(n.Body, imgFiles)
 		content := fmt.Sprintf("# %s\n\n%s\n", n.Title, body)
@@ -162,7 +166,7 @@ func Build(w io.Writer, noteList []*notes.Note, imageData map[string]images.Data
 		var fw io.Writer
 		var err error
 		if password != "" {
-			fw, err = zw.Encrypt(name, password, yzip.StandardEncryption)
+			fw, err = zw.Encrypt(name, password, yzip.AES256Encryption)
 		} else {
 			fw, err = zw.Create(name)
 		}
