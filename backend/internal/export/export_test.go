@@ -51,6 +51,49 @@ func buildArchive(t *testing.T, password string) []byte {
 	return buf.Bytes()
 }
 
+func TestBuild_DuplicateTitlesGetDistinctFilenames(t *testing.T) {
+	// All three titles sanitise to the same base name, so the archive must
+	// deduplicate them — duplicate entry names silently corrupt the ZIP or
+	// overwrite each other on extraction.
+	noteList := []*notes.Note{
+		{ID: 1, Title: "Note", Body: "first"},
+		{ID: 2, Title: "Note", Body: "second"},
+		{ID: 3, Title: "Note", Body: "third"},
+	}
+	var buf bytes.Buffer
+	if err := export.Build(&buf, noteList, nil, ""); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	zr, err := yzip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatalf("open archive: %v", err)
+	}
+	if len(zr.File) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(zr.File))
+	}
+	seen := make(map[string]bool)
+	for _, f := range zr.File {
+		if seen[f.Name] {
+			t.Errorf("duplicate entry name %q in archive", f.Name)
+		}
+		seen[f.Name] = true
+	}
+	for _, want := range []string{"note.md", "note-2.md", "note-3.md"} {
+		if !seen[want] {
+			t.Errorf("expected entry %q, archive has %v", want, keys(seen))
+		}
+	}
+}
+
+func keys(m map[string]bool) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
 func TestBuild_PasswordProtectedUsesAES256(t *testing.T) {
 	data := buildArchive(t, "correct horse battery staple")
 
@@ -117,11 +160,19 @@ func TestBuild_PasswordProtectedRejectsWrongPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open archive: %v", err)
 	}
-	if len(zr.File) == 0 {
-		t.Fatal("archive contains no entries")
-	}
 
-	f := zr.File[0]
+	// Select the entry by name, not index — entry ordering inside the
+	// archive is not part of Build's contract.
+	var f *yzip.File
+	for _, candidate := range zr.File {
+		if candidate.Name == "first-note.md" {
+			f = candidate
+			break
+		}
+	}
+	if f == nil {
+		t.Fatal("archive does not contain first-note.md")
+	}
 	f.SetPassword("wrong password")
 	rc, err := f.Open()
 	if err == nil {

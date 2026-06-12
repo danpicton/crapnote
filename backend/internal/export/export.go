@@ -149,14 +149,17 @@ func Build(w io.Writer, noteList []*notes.Note, imageData map[string]images.Data
 	// Write notes, rewriting image src paths to relative ones.
 	seen := make(map[string]int)
 	for _, n := range noteList {
-		name := sanitiseFilename(n.Title)
-		// Deduplicate: "note.md", "note-2.md", etc.
-		if count := seen[name]; count > 0 {
+		// Deduplicate: "note.md", "note-2.md", etc. The counter is keyed on
+		// the original sanitised name — keying on the renamed one would reset
+		// the count and hand the same "-2" suffix to every later duplicate.
+		origName := sanitiseFilename(n.Title)
+		name := origName
+		if count := seen[origName]; count > 0 {
 			ext := ".md"
-			base := strings.TrimSuffix(name, ext)
+			base := strings.TrimSuffix(origName, ext)
 			name = fmt.Sprintf("%s-%d%s", base, count+1, ext)
 		}
-		seen[name]++
+		seen[origName]++
 
 		body := rewriteImageSrcs(n.Body, imgFiles)
 		content := fmt.Sprintf("# %s\n\n%s\n", n.Title, body)
