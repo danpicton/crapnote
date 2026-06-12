@@ -107,7 +107,9 @@ func rewriteImageSrcs(body string, imgFiles map[string]string) string {
 
 // Build creates a ZIP archive of all non-trashed notes for userID.
 // imageData maps image ID → image bytes+mime; if nil no images are bundled.
-// If password is non-empty each entry is AES-256 encrypted.
+// If password is non-empty each entry is encrypted with WinZip AES-256
+// (readable by 7-Zip, WinZip, Keka and similar; not by some stock OS
+// extractors, which only support the legacy ZipCrypto scheme).
 func Build(w io.Writer, noteList []*notes.Note, imageData map[string]images.Data, password string) error {
 	zw := yzip.NewWriter(w)
 
@@ -132,7 +134,7 @@ func Build(w io.Writer, noteList []*notes.Note, imageData map[string]images.Data
 		var fw io.Writer
 		var err error
 		if password != "" {
-			fw, err = zw.Encrypt(zipName, password, yzip.StandardEncryption)
+			fw, err = zw.Encrypt(zipName, password, yzip.AES256Encryption)
 		} else {
 			fw, err = zw.Create(zipName)
 		}
@@ -162,7 +164,7 @@ func Build(w io.Writer, noteList []*notes.Note, imageData map[string]images.Data
 		var fw io.Writer
 		var err error
 		if password != "" {
-			fw, err = zw.Encrypt(name, password, yzip.StandardEncryption)
+			fw, err = zw.Encrypt(name, password, yzip.AES256Encryption)
 		} else {
 			fw, err = zw.Create(name)
 		}
