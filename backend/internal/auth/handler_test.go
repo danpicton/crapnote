@@ -10,6 +10,7 @@ import (
 
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/db"
+	"github.com/danpicton/crapnote/internal/httpx"
 )
 
 func newTestHandler(t *testing.T) (*auth.Handler, *auth.Service) {
@@ -105,7 +106,7 @@ func TestHandler_Login_Cookie_NotSecure_OverHTTP(t *testing.T) {
 	}
 }
 
-func TestHandler_Login_Cookie_Secure_WhenForwardedProtoIsHTTPS(t *testing.T) {
+func TestHandler_Login_Cookie_Secure_WhenTrustedProxySignalsHTTPS(t *testing.T) {
 	h, svc := newTestHandler(t)
 	svc.SeedAdmin(t.Context(), "admin", "pass") //nolint:errcheck
 
@@ -113,11 +114,29 @@ func TestHandler_Login_Cookie_Secure_WhenForwardedProtoIsHTTPS(t *testing.T) {
 		bytes.NewBufferString(`{"username":"admin","password":"pass"}`))
 	req.Header.Set("X-Forwarded-Proto", "https") // reverse proxy signals HTTPS
 	w := httptest.NewRecorder()
-	h.Login(w, req)
+	httpx.TrustProxy()(http.HandlerFunc(h.Login)).ServeHTTP(w, req)
 
 	cookie := findCookie(t, w.Result(), "session")
 	if !cookie.Secure {
-		t.Fatal("session cookie must be Secure when behind an HTTPS reverse proxy")
+		t.Fatal("session cookie must be Secure when behind a trusted HTTPS reverse proxy")
+	}
+}
+
+func TestHandler_Login_Cookie_IgnoresForwardedProtoWithoutTrust(t *testing.T) {
+	h, svc := newTestHandler(t)
+	svc.SeedAdmin(t.Context(), "admin", "pass") //nolint:errcheck
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+		bytes.NewBufferString(`{"username":"admin","password":"pass"}`))
+	// Client-supplied header with no trusted proxy configured: it must not
+	// influence the Secure flag.
+	req.Header.Set("X-Forwarded-Proto", "https")
+	w := httptest.NewRecorder()
+	h.Login(w, req)
+
+	cookie := findCookie(t, w.Result(), "session")
+	if cookie.Secure {
+		t.Fatal("X-Forwarded-Proto must be ignored when no trusted proxy is configured")
 	}
 }
 

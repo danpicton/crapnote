@@ -2,33 +2,9 @@
 package httpx
 
 import (
-	"net"
 	"net/http"
 	"strconv"
-	"strings"
 )
-
-// ClientIP returns a stable key identifying the requesting client. It prefers
-// the first entry of X-Forwarded-For (set by a trusted reverse proxy), then
-// X-Real-IP, and falls back to r.RemoteAddr. Deployments that sit directly
-// on the public internet without a proxy should be aware that XFF is
-// spoofable.
-func ClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		if i := strings.IndexByte(xff, ','); i >= 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
-	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
 
 // Defaults used by ParsePage when the caller omits query parameters.
 const (

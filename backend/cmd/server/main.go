@@ -12,6 +12,7 @@ import (
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/db"
 	"github.com/danpicton/crapnote/internal/export"
+	"github.com/danpicton/crapnote/internal/httpx"
 	"github.com/danpicton/crapnote/internal/images"
 	"github.com/danpicton/crapnote/internal/middleware"
 	"github.com/danpicton/crapnote/internal/notes"
@@ -149,6 +150,19 @@ func main() {
 
 	// Wrap with observability middleware (metrics outermost, then logging, then security headers).
 	handler := middleware.Metrics()(middleware.Logging(logger)(middleware.SecurityHeaders()(mux)))
+
+	// TRUST_PROXY: opt-in trust of reverse-proxy headers, default off. When
+	// off, the client IP used for the login/bearer rate limiters and audit
+	// logs is the connection's RemoteAddr, and X-Forwarded-For / X-Real-IP /
+	// X-Forwarded-Proto are ignored — they are client-controlled, and
+	// honouring them lets an attacker rotate rate-limit buckets and forge
+	// audit-log IPs. Set TRUST_PROXY=1 only when exactly one trusted reverse
+	// proxy sits in front of the app; the rightmost X-Forwarded-For entry
+	// (appended by that proxy) is then used. See httpx.TrustProxy.
+	if v, err := strconv.ParseBool(envOrDefault("TRUST_PROXY", "false")); err == nil && v {
+		handler = httpx.TrustProxy()(handler)
+		logger.Info("trusting reverse-proxy forwarded headers (TRUST_PROXY)")
+	}
 
 	addr := fmt.Sprintf(":%s", port)
 	logger.Info("server starting", "addr", addr)

@@ -101,6 +101,7 @@ npm run lint      # eslint
 | `LOGIN_RATE_BURST` | `5` | Burst allowance for the login limiter |
 | `BEARER_RATE_PER_MINUTE` | `600` | Per-IP rate limit applied only to requests carrying an `Authorization` header |
 | `BEARER_RATE_BURST` | `300` | Burst allowance for the bearer-auth limiter |
+| `TRUST_PROXY` | `false` | Set to `1` only when the app sits behind exactly one trusted reverse proxy. When on, the client IP for rate limiting and audit logs is taken from the rightmost `X-Forwarded-For` entry (appended by the proxy; `X-Real-IP` as fallback) and `X-Forwarded-Proto: https` marks session cookies `Secure`. When off (the default), these headers are ignored — they are client-controlled — and the TCP peer address is used. |
 
 ### Frontend build-time variables
 
