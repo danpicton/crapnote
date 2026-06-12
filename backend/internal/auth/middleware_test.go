@@ -85,6 +85,47 @@ func TestRequireAuth_ValidSession_InjectsUser(t *testing.T) {
 	}
 }
 
+func TestRequireAuth_LockedUser_SessionRejected(t *testing.T) {
+	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+	users := auth.NewUserRepo(database)
+	svc := auth.NewService(users, auth.NewSessionRepo(database), 7*24*time.Hour)
+	h := auth.NewHandler(svc)
+
+	svc.SeedAdmin(t.Context(), "alice", "pass") //nolint:errcheck
+	sess, err := svc.Login(t.Context(), "alice", "pass")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+	alice, err := users.FindByUsername(t.Context(), "alice")
+	if err != nil {
+		t.Fatalf("find alice: %v", err)
+	}
+
+	request := func() int {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.AddCookie(&http.Cookie{Name: "session", Value: sess.ID})
+		w := httptest.NewRecorder()
+		h.RequireAuth(okHandler).ServeHTTP(w, req)
+		return w.Code
+	}
+
+	if code := request(); code != http.StatusOK {
+		t.Fatalf("before lock: expected 200, got %d", code)
+	}
+
+	if err := users.Lock(t.Context(), alice.ID); err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+
+	if code := request(); code != http.StatusUnauthorized {
+		t.Fatalf("after lock: expected 401, got %d", code)
+	}
+}
+
 func TestRequireAdmin_NoUser(t *testing.T) {
 	h, _ := newMiddlewareFixture(t)
 

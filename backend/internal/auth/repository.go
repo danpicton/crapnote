@@ -375,6 +375,13 @@ func (r *SessionRepo) Delete(ctx context.Context, id string) error {
 	return err
 }
 
+// DeleteForUser removes every session belonging to a user. Used to revoke
+// access on security-sensitive events (lock, password change/reset).
+func (r *SessionRepo) DeleteForUser(ctx context.Context, userID int64) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=?`, userID)
+	return err
+}
+
 // DeleteExpired removes all sessions whose expires_at is in the past.
 func (r *SessionRepo) DeleteExpired(ctx context.Context) error {
 	_, err := r.db.ExecContext(ctx,

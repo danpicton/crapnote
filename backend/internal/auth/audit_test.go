@@ -35,8 +35,9 @@ func newAuditFixture(t *testing.T) (*auth.Handler, *auth.AdminHandler, *auth.Ser
 	t.Cleanup(func() { database.Close() })
 
 	userRepo := auth.NewUserRepo(database)
-	svc := auth.NewService(userRepo, auth.NewSessionRepo(database), 7*24*time.Hour)
-	return auth.NewHandler(svc), auth.NewAdminHandler(userRepo), svc, userRepo
+	sessRepo := auth.NewSessionRepo(database)
+	svc := auth.NewService(userRepo, sessRepo, 7*24*time.Hour)
+	return auth.NewHandler(svc), auth.NewAdminHandler(userRepo, sessRepo), svc, userRepo
 }
 
 func TestAudit_FailedLoginIsLogged(t *testing.T) {

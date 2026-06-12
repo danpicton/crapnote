@@ -347,6 +347,102 @@ func TestService_CompleteSetup_UnlocksTheAccount(t *testing.T) {
 	}
 }
 
+func TestService_CompleteSetup_RevokesExistingSessions(t *testing.T) {
+	svc, users, _ := newTestServiceWithInvites(t)
+	ctx := context.Background()
+
+	u := createUser(t, users, "alice", "old-password", false)
+	sess, err := svc.Login(ctx, "alice", "old-password")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	raw, _, err := svc.CreateInvite(ctx, u.ID, time.Hour)
+	if err != nil {
+		t.Fatalf("CreateInvite: %v", err)
+	}
+	if _, err := svc.CompleteSetup(ctx, raw, "new-real-password-123"); err != nil {
+		t.Fatalf("CompleteSetup: %v", err)
+	}
+
+	if _, err := svc.ValidateSession(ctx, sess.ID); err != auth.ErrNotFound {
+		t.Fatalf("expected pre-existing session to be revoked by setup, got %v", err)
+	}
+}
+
+func TestService_ValidateSession_LockedUser(t *testing.T) {
+	svc, users := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	u := createUser(t, users, "alice", "correctpass", false)
+
+	sess, err := svc.Login(ctx, "alice", "correctpass")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	if _, err := svc.ValidateSession(ctx, sess.ID); err != nil {
+		t.Fatalf("ValidateSession before lock: %v", err)
+	}
+
+	if err := users.Lock(ctx, u.ID); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	if _, err := svc.ValidateSession(ctx, sess.ID); err != auth.ErrNotFound {
+		t.Fatalf("expected ErrNotFound for locked user's session, got %v", err)
+	}
+}
+
+func TestService_Login_AutoLockout_RevokesExistingSessions(t *testing.T) {
+	svc, users := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	u := createUser(t, users, "alice", "correctpass", false)
+
+	sess, err := svc.Login(ctx, "alice", "correctpass")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	for i := 0; i < auth.MaxFailedLoginAttempts; i++ {
+		svc.Login(ctx, "alice", "wrong") //nolint:errcheck
+	}
+	got, _ := users.FindByID(ctx, u.ID)
+	if got.LockedAt == nil {
+		t.Fatal("expected account to be locked")
+	}
+
+	// The session must be deleted, not merely suspended by the lock: it stays
+	// dead even after an admin unlocks the account.
+	if err := users.Unlock(ctx, u.ID); err != nil {
+		t.Fatalf("Unlock: %v", err)
+	}
+	if _, err := svc.ValidateSession(ctx, sess.ID); err != auth.ErrNotFound {
+		t.Fatalf("expected session revoked by automatic lockout, got %v", err)
+	}
+}
+
+func TestService_ChangePassword_RevokesExistingSessions(t *testing.T) {
+	svc, users := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	u := createUser(t, users, "alice", "correctpass", false)
+
+	sess, err := svc.Login(ctx, "alice", "correctpass")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	if err := svc.ChangePassword(ctx, u.ID, "new-strong-password"); err != nil {
+		t.Fatalf("ChangePassword: %v", err)
+	}
+
+	if _, err := svc.ValidateSession(ctx, sess.ID); err != auth.ErrNotFound {
+		t.Fatalf("expected pre-existing session to be revoked, got %v", err)
+	}
+	// The new password must work for a fresh login.
+	if _, err := svc.Login(ctx, "alice", "new-strong-password"); err != nil {
+		t.Fatalf("login with new password: %v", err)
+	}
+}
+
 func TestService_ValidateSession_Expired(t *testing.T) {
 	svc := newTestService(t)
 	ctx := context.Background()

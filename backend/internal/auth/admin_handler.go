@@ -17,20 +17,21 @@ import (
 
 // AdminHandler holds HTTP handlers for admin user-management endpoints.
 type AdminHandler struct {
-	users *UserRepo
-	svc   *Service // optional — required for invite endpoints
+	users    *UserRepo
+	sessions *SessionRepo
+	svc      *Service // optional — required for invite endpoints
 }
 
 // NewAdminHandler creates a new AdminHandler for the admin CRUD endpoints.
 // Invite-based endpoints are unavailable; use NewAdminHandlerWithInvites.
-func NewAdminHandler(users *UserRepo) *AdminHandler {
-	return &AdminHandler{users: users}
+func NewAdminHandler(users *UserRepo, sessions *SessionRepo) *AdminHandler {
+	return &AdminHandler{users: users, sessions: sessions}
 }
 
 // NewAdminHandlerWithInvites creates a new AdminHandler with access to the
 // auth Service, enabling the invite endpoints.
-func NewAdminHandlerWithInvites(users *UserRepo, svc *Service) *AdminHandler {
-	return &AdminHandler{users: users, svc: svc}
+func NewAdminHandlerWithInvites(users *UserRepo, sessions *SessionRepo, svc *Service) *AdminHandler {
+	return &AdminHandler{users: users, sessions: sessions, svc: svc}
 }
 
 // ListUsers handles GET /api/admin/users
@@ -358,6 +359,10 @@ func (h *AdminHandler) SetUserPassword(w http.ResponseWriter, r *http.Request) {
 	// regain access immediately. Ignore ErrNotFound (user just deleted).
 	h.users.Unlock(r.Context(), id) //nolint:errcheck
 
+	// Revoke the user's existing sessions: a reset usually follows a
+	// compromise, and anyone holding an old cookie must be evicted.
+	h.sessions.DeleteForUser(r.Context(), id) //nolint:errcheck
+
 	slog.Info("audit: admin password reset",
 		"event", "admin_password_reset",
 		"admin_id", caller.ID,
@@ -393,6 +398,10 @@ func (h *AdminHandler) LockUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+
+	// Locking is meant to cut off access immediately — delete any established
+	// sessions rather than leaving them to expire naturally.
+	h.sessions.DeleteForUser(r.Context(), id) //nolint:errcheck
 
 	slog.Info("audit: admin lock",
 		"event", "admin_lock",

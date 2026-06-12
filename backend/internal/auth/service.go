@@ -100,6 +100,9 @@ func (s *Service) Login(ctx context.Context, username, password string) (*Sessio
 			n, incErr := s.users.IncrementFailedAttempts(ctx, u.ID)
 			if incErr == nil && n >= MaxFailedLoginAttempts {
 				s.users.Lock(ctx, u.ID) //nolint:errcheck
+				// Lockout implies the account may be under attack — evict any
+				// established sessions rather than leaving them live.
+				s.sessions.DeleteForUser(ctx, u.ID) //nolint:errcheck
 			}
 		}
 		return nil, ErrInvalidCredentials
@@ -182,6 +185,10 @@ func (s *Service) CompleteSetup(ctx context.Context, rawToken, newPassword strin
 	s.users.Unlock(ctx, inv.UserID) //nolint:errcheck
 	// Consume the invite.
 	s.invites.Delete(ctx, inv.ID) //nolint:errcheck
+	// Setting a new credential revokes any sessions established under the old
+	// one — an admin regenerating an invite is often resetting a compromised
+	// or offboarded account.
+	s.sessions.DeleteForUser(ctx, inv.UserID) //nolint:errcheck
 
 	return s.users.FindByID(ctx, inv.UserID)
 }
@@ -228,11 +235,22 @@ func (s *Service) ChangePassword(ctx context.Context, userID int64, newPassword 
 	if err != nil {
 		return fmt.Errorf("change password: hash: %w", err)
 	}
-	return s.users.SetPassword(ctx, userID, string(hash))
+	if err := s.users.SetPassword(ctx, userID, string(hash)); err != nil {
+		return err
+	}
+	// Revoke every existing session so a credential change evicts anyone
+	// holding an old cookie (including a possible attacker). The caller is
+	// logged out too; the SPA simply re-authenticates.
+	if err := s.sessions.DeleteForUser(ctx, userID); err != nil {
+		return fmt.Errorf("change password: revoke sessions: %w", err)
+	}
+	return nil
 }
 
 // ValidateSession returns the User associated with the session if it exists
-// and has not expired. Returns ErrNotFound if missing or expired.
+// and has not expired. Returns ErrNotFound if missing, expired, or the user
+// is locked — a locked account's sessions stop working immediately, mirroring
+// the bearer-token path.
 func (s *Service) ValidateSession(ctx context.Context, sessionID string) (*User, error) {
 	sess, err := s.sessions.Find(ctx, sessionID)
 	if err != nil {
@@ -242,5 +260,12 @@ func (s *Service) ValidateSession(ctx context.Context, sessionID string) (*User,
 		s.sessions.Delete(ctx, sessionID) //nolint:errcheck
 		return nil, ErrNotFound
 	}
-	return s.users.FindByID(ctx, sess.UserID)
+	u, err := s.users.FindByID(ctx, sess.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if u.LockedAt != nil {
+		return nil, ErrNotFound
+	}
+	return u, nil
 }

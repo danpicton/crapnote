@@ -36,7 +36,7 @@ func newAdminFixture(t *testing.T) (*auth.AdminHandler, *auth.User, *auth.Servic
 		t.Fatalf("find admin: %v", err)
 	}
 
-	return auth.NewAdminHandler(userRepo), admin, svc
+	return auth.NewAdminHandler(userRepo, sessRepo), admin, svc
 }
 
 func adminRequest(r *http.Request, u *auth.User) *http.Request {
@@ -63,7 +63,7 @@ func newAdminInviteFixture(t *testing.T) (*auth.AdminHandler, *auth.User, *auth.
 	if err != nil {
 		t.Fatalf("find admin: %v", err)
 	}
-	return auth.NewAdminHandlerWithInvites(userRepo, svc), admin, svc
+	return auth.NewAdminHandlerWithInvites(userRepo, sessRepo, svc), admin, svc
 }
 
 func TestAdminHandler_ListUsers(t *testing.T) {
@@ -251,6 +251,42 @@ func TestAdminHandler_SetUserPassword_UpdatesHashAndUnlocks(t *testing.T) {
 	}
 }
 
+func TestAdminHandler_SetUserPassword_RevokesSessions(t *testing.T) {
+	h, admin, svc := newAdminFixture(t)
+	ctx := context.Background()
+
+	body := `{"username":"erin","password":"correct-horse-battery","is_admin":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.CreateUser(w, req)
+	var created map[string]any
+	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
+	erinID := int64(created["id"].(float64))
+
+	sess, err := svc.Login(ctx, "erin", "correct-horse-battery")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	req2 := httptest.NewRequest(http.MethodPut,
+		fmt.Sprintf("/api/admin/users/%d/password", erinID),
+		bytes.NewBufferString(`{"password":"new-strong-pass-1234"}`))
+	req2.SetPathValue("id", fmt.Sprintf("%d", erinID))
+	req2 = adminRequest(req2, admin)
+	w2 := httptest.NewRecorder()
+	h.SetUserPassword(w2, req2)
+
+	if w2.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	if _, err := svc.ValidateSession(ctx, sess.ID); err != auth.ErrNotFound {
+		t.Fatalf("expected erin's session to be revoked by admin reset, got %v", err)
+	}
+}
+
 func TestAdminHandler_SetUserPassword_RejectsShortPassword(t *testing.T) {
 	h, admin, _ := newAdminFixture(t)
 	req := httptest.NewRequest(http.MethodPut,
@@ -306,6 +342,52 @@ func TestAdminHandler_LockUser_SetsLockedFlag(t *testing.T) {
 	json.NewDecoder(w2.Body).Decode(&resp) //nolint:errcheck
 	if resp["locked"] != true {
 		t.Fatalf("expected locked=true, got %v", resp["locked"])
+	}
+}
+
+func TestAdminHandler_LockUser_RevokesSessions(t *testing.T) {
+	h, admin, svc := newAdminFixture(t)
+	ctx := context.Background()
+
+	body := `{"username":"bob","password":"correct-horse-battery","is_admin":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.CreateUser(w, req)
+	var created map[string]any
+	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
+	bobID := int64(created["id"].(float64))
+
+	sess, err := svc.Login(ctx, "bob", "correct-horse-battery")
+	if err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/api/admin/users/%d/lock", bobID), nil)
+	req2.SetPathValue("id", fmt.Sprintf("%d", bobID))
+	req2 = adminRequest(req2, admin)
+	w2 := httptest.NewRecorder()
+	h.LockUser(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("lock: expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	// The session must be deleted, not merely suspended by the lock flag:
+	// it stays dead even after the account is unlocked again.
+	req3 := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/api/admin/users/%d/unlock", bobID), nil)
+	req3.SetPathValue("id", fmt.Sprintf("%d", bobID))
+	req3 = adminRequest(req3, admin)
+	w3 := httptest.NewRecorder()
+	h.UnlockUser(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("unlock: expected 200, got %d: %s", w3.Code, w3.Body.String())
+	}
+
+	if _, err := svc.ValidateSession(ctx, sess.ID); err != auth.ErrNotFound {
+		t.Fatalf("expected bob's session to be revoked by lock, got %v", err)
 	}
 }
 
