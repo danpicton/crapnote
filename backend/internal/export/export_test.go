@@ -86,6 +86,42 @@ func TestBuild_DuplicateTitlesGetDistinctFilenames(t *testing.T) {
 	}
 }
 
+func TestBuild_DedupSkipsNamesTakenByOtherTitles(t *testing.T) {
+	// "Note 2" claims "note-2.md" outright; the second "Note" duplicate must
+	// not be handed the same name by the dedup suffixing.
+	noteList := []*notes.Note{
+		{ID: 1, Title: "Note 2", Body: "claims note-2.md"},
+		{ID: 2, Title: "Note", Body: "first"},
+		{ID: 3, Title: "Note", Body: "second"},
+	}
+	var buf bytes.Buffer
+	if err := export.Build(&buf, noteList, nil, ""); err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	zr, err := yzip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatalf("open archive: %v", err)
+	}
+	if len(zr.File) != 3 {
+		t.Fatalf("expected 3 entries, got %d", len(zr.File))
+	}
+	seen := make(map[string]bool)
+	for _, f := range zr.File {
+		if seen[f.Name] {
+			t.Errorf("duplicate entry name %q in archive", f.Name)
+		}
+		seen[f.Name] = true
+	}
+	// Earlier notes keep their names; the colliding duplicate moves on to
+	// the next free suffix.
+	for _, want := range []string{"note-2.md", "note.md", "note-3.md"} {
+		if !seen[want] {
+			t.Errorf("expected entry %q, archive has %v", want, keys(seen))
+		}
+	}
+}
+
 func keys(m map[string]bool) []string {
 	var out []string
 	for k := range m {
