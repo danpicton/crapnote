@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -124,6 +125,15 @@ func (s *Service) Logout(ctx context.Context, sessionID string) error {
 	return s.sessions.Delete(ctx, sessionID)
 }
 
+// RevokeUserSessions deletes every session belonging to a user. It is the
+// single choke-point for session revocation so credential-change, account-lock
+// and admin-reset flows all share one path — any future audit entry,
+// revoked-reason column or rate limit can be added here rather than in each
+// caller.
+func (s *Service) RevokeUserSessions(ctx context.Context, userID int64) error {
+	return s.sessions.DeleteForUser(ctx, userID)
+}
+
 // CreateInvite issues a one-time setup token for a user. The raw token is
 // returned to the caller and must be shown to the admin exactly once — only
 // a SHA-256 hash is persisted. Any existing invites for the user are deleted
@@ -187,8 +197,16 @@ func (s *Service) CompleteSetup(ctx context.Context, rawToken, newPassword strin
 	s.invites.Delete(ctx, inv.ID) //nolint:errcheck
 	// Setting a new credential revokes any sessions established under the old
 	// one — an admin regenerating an invite is often resetting a compromised
-	// or offboarded account.
-	s.sessions.DeleteForUser(ctx, inv.UserID) //nolint:errcheck
+	// or offboarded account. The password is already set; a revocation failure
+	// is a degraded-security outcome, not a reason to fail the setup, so we log
+	// and continue.
+	if err := s.RevokeUserSessions(ctx, inv.UserID); err != nil {
+		slog.Error("audit: session revocation failed during setup completion",
+			"event", "session_revocation_failed",
+			"user_id", inv.UserID,
+			"error", err,
+		)
+	}
 
 	return s.users.FindByID(ctx, inv.UserID)
 }
@@ -241,16 +259,28 @@ func (s *Service) ChangePassword(ctx context.Context, userID int64, newPassword 
 	// Revoke every existing session so a credential change evicts anyone
 	// holding an old cookie (including a possible attacker). The caller is
 	// logged out too; the SPA simply re-authenticates.
-	if err := s.sessions.DeleteForUser(ctx, userID); err != nil {
-		return fmt.Errorf("change password: revoke sessions: %w", err)
+	//
+	// The new password is already committed here. If revocation fails we log
+	// and still report success: telling the caller the change failed would be
+	// wrong (it didn't) and would invite a confusing retry against
+	// already-changed state. The worst case is degraded security — old sessions
+	// linger — not a failed change.
+	if err := s.RevokeUserSessions(ctx, userID); err != nil {
+		slog.Error("audit: session revocation failed after password change",
+			"event", "session_revocation_failed",
+			"user_id", userID,
+			"error", err,
+		)
 	}
 	return nil
 }
 
 // ValidateSession returns the User associated with the session if it exists
-// and has not expired. Returns ErrNotFound if missing, expired, or the user
-// is locked — a locked account's sessions stop working immediately, mirroring
-// the bearer-token path.
+// and has not expired. Returns ErrNotFound if the session is missing or
+// expired, and ErrAccountLocked if the session is valid but the user has since
+// been locked — a locked account's sessions stop working immediately, mirroring
+// the bearer-token path. Distinguishing the two lets the middleware report the
+// reason rather than conflating a lock with an ordinary expired session.
 func (s *Service) ValidateSession(ctx context.Context, sessionID string) (*User, error) {
 	sess, err := s.sessions.Find(ctx, sessionID)
 	if err != nil {
@@ -265,7 +295,7 @@ func (s *Service) ValidateSession(ctx context.Context, sessionID string) (*User,
 		return nil, err
 	}
 	if u.LockedAt != nil {
-		return nil, ErrNotFound
+		return nil, ErrAccountLocked
 	}
 	return u, nil
 }

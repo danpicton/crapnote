@@ -112,6 +112,18 @@ func (h *Handler) RequireAuth(next http.Handler) http.Handler {
 		}
 
 		user, err := h.svc.ValidateSession(r.Context(), cookie.Value)
+		if errors.Is(err, ErrAccountLocked) {
+			// The session is valid but the account has since been locked. Keep
+			// the 401 so the SPA's existing re-auth/redirect flow still fires,
+			// but use a distinct "account locked" body and audit log so the
+			// reason is not conflated with an ordinary expired session.
+			slog.Warn("audit: session rejected — account locked",
+				"event", "session_rejected_locked",
+				"ip", httpx.ClientIP(r),
+			)
+			writeError(w, http.StatusUnauthorized, "account locked")
+			return
+		}
 		if errors.Is(err, ErrNotFound) {
 			writeError(w, http.StatusUnauthorized, "session expired or invalid")
 			return
