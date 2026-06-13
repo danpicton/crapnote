@@ -387,8 +387,8 @@ func TestService_ValidateSession_LockedUser(t *testing.T) {
 		t.Fatalf("Lock: %v", err)
 	}
 
-	if _, err := svc.ValidateSession(ctx, sess.ID); err != auth.ErrNotFound {
-		t.Fatalf("expected ErrNotFound for locked user's session, got %v", err)
+	if _, err := svc.ValidateSession(ctx, sess.ID); err != auth.ErrAccountLocked {
+		t.Fatalf("expected ErrAccountLocked for locked user's session, got %v", err)
 	}
 }
 
