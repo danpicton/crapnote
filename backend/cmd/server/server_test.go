@@ -42,9 +42,10 @@ func newTestMux(t *testing.T) *http.ServeMux {
 	t.Cleanup(func() { database.Close() })
 
 	userRepo := auth.NewUserRepo(database)
+	sessRepo := auth.NewSessionRepo(database)
 	authSvc := auth.NewService(
 		userRepo,
-		auth.NewSessionRepo(database),
+		sessRepo,
 		7*24*time.Hour,
 	)
 	notesSvc := notes.NewService(notes.NewRepo(database))
@@ -53,7 +54,7 @@ func newTestMux(t *testing.T) *http.ServeMux {
 	authH.SetBearerAuthenticator(tokens.NewBearerAuth(tokensSvc, nil))
 	return newMux(
 		authH,
-		auth.NewAdminHandler(userRepo),
+		auth.NewAdminHandler(userRepo, sessRepo),
 		auth.NewSetupHandler(authSvc),
 		notes.NewHandler(notesSvc),
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
@@ -88,7 +89,7 @@ func newAuthedMux(t *testing.T) (*http.ServeMux, *http.Cookie) {
 	authH.SetBearerAuthenticator(tokens.NewBearerAuth(tokensSvc, nil))
 	mux := newMux(
 		authH,
-		auth.NewAdminHandler(userRepo),
+		auth.NewAdminHandler(userRepo, sessRepo),
 		auth.NewSetupHandler(authSvc),
 		notes.NewHandler(notesSvc),
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
@@ -225,9 +226,10 @@ func TestLogin_RateLimited(t *testing.T) {
 	t.Cleanup(func() { database.Close() })
 
 	userRepo := auth.NewUserRepo(database)
+	sessRepo := auth.NewSessionRepo(database)
 	authSvc := auth.NewService(
 		userRepo,
-		auth.NewSessionRepo(database),
+		sessRepo,
 		7*24*time.Hour,
 	)
 	notesSvc := notes.NewService(notes.NewRepo(database))
@@ -238,7 +240,7 @@ func TestLogin_RateLimited(t *testing.T) {
 	authH.SetBearerAuthenticator(tokens.NewBearerAuth(tokensSvc, nil))
 	mux := newMux(
 		authH,
-		auth.NewAdminHandler(userRepo),
+		auth.NewAdminHandler(userRepo, sessRepo),
 		auth.NewSetupHandler(authSvc),
 		notes.NewHandler(notesSvc),
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),

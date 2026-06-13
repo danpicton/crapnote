@@ -345,6 +345,34 @@ func TestSessionRepo_Delete(t *testing.T) {
 	}
 }
 
+func TestSessionRepo_DeleteForUser(t *testing.T) {
+	database := openTestDB(t)
+	userRepo := auth.NewUserRepo(database)
+	sessRepo := auth.NewSessionRepo(database)
+	ctx := context.Background()
+
+	target, _ := userRepo.Create(ctx, "frank", "hash", false)
+	other, _ := userRepo.Create(ctx, "grace", "hash", false)
+	exp := time.Now().Add(time.Hour).UTC()
+
+	s1, _ := sessRepo.Create(ctx, target.ID, exp)
+	s2, _ := sessRepo.Create(ctx, target.ID, exp)
+	kept, _ := sessRepo.Create(ctx, other.ID, exp)
+
+	if err := sessRepo.DeleteForUser(ctx, target.ID); err != nil {
+		t.Fatalf("DeleteForUser: %v", err)
+	}
+
+	for _, id := range []string{s1.ID, s2.ID} {
+		if _, err := sessRepo.Find(ctx, id); err != auth.ErrNotFound {
+			t.Fatalf("expected target session %q to be gone, got %v", id, err)
+		}
+	}
+	if _, err := sessRepo.Find(ctx, kept.ID); err != nil {
+		t.Fatalf("expected other user's session to remain, got %v", err)
+	}
+}
+
 func TestSessionRepo_DeleteExpired(t *testing.T) {
 	database := openTestDB(t)
 	userRepo := auth.NewUserRepo(database)

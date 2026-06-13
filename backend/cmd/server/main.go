@@ -51,7 +51,7 @@ func main() {
 		time.Duration(ttlDays)*24*time.Hour,
 	)
 	authHandler := auth.NewHandler(authSvc)
-	adminHandler := auth.NewAdminHandlerWithInvites(userRepo, authSvc)
+	adminHandler := auth.NewAdminHandlerWithInvites(userRepo, sessRepo, authSvc)
 	setupHandler := auth.NewSetupHandler(authSvc)
 
 	// API tokens — bearer auth for external clients (CLIs, scripts).

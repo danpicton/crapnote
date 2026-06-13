@@ -18,18 +18,18 @@ import (
 // AdminHandler holds HTTP handlers for admin user-management endpoints.
 type AdminHandler struct {
 	users *UserRepo
-	svc   *Service // optional — required for invite endpoints
+	svc   *Service // always present; carries session access and (optionally) invites
 }
 
 // NewAdminHandler creates a new AdminHandler for the admin CRUD endpoints.
 // Invite-based endpoints are unavailable; use NewAdminHandlerWithInvites.
-func NewAdminHandler(users *UserRepo) *AdminHandler {
-	return &AdminHandler{users: users}
+func NewAdminHandler(users *UserRepo, sessions *SessionRepo) *AdminHandler {
+	return &AdminHandler{users: users, svc: NewService(users, sessions, 0)}
 }
 
 // NewAdminHandlerWithInvites creates a new AdminHandler with access to the
 // auth Service, enabling the invite endpoints.
-func NewAdminHandlerWithInvites(users *UserRepo, svc *Service) *AdminHandler {
+func NewAdminHandlerWithInvites(users *UserRepo, sessions *SessionRepo, svc *Service) *AdminHandler {
 	return &AdminHandler{users: users, svc: svc}
 }
 
@@ -117,7 +117,7 @@ func (h *AdminHandler) InviteUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
-	if h.svc == nil {
+	if h.svc.invites == nil {
 		writeError(w, http.StatusInternalServerError, "invite flow not configured")
 		return
 	}
@@ -211,7 +211,7 @@ func (h *AdminHandler) RegenerateInvite(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
-	if h.svc == nil {
+	if h.svc.invites == nil {
 		writeError(w, http.StatusInternalServerError, "invite flow not configured")
 		return
 	}
@@ -358,6 +358,17 @@ func (h *AdminHandler) SetUserPassword(w http.ResponseWriter, r *http.Request) {
 	// regain access immediately. Ignore ErrNotFound (user just deleted).
 	h.users.Unlock(r.Context(), id) //nolint:errcheck
 
+	// Revoke the user's existing sessions: a reset usually follows a
+	// compromise, and anyone holding an old cookie must be evicted. The
+	// password is already reset, so a revocation failure is logged, not fatal.
+	if err := h.svc.RevokeUserSessions(r.Context(), id); err != nil {
+		slog.Warn("audit: session revocation failed after admin password reset",
+			"event", "session_revocation_failed",
+			"target_user_id", id,
+			"error", err,
+		)
+	}
+
 	slog.Info("audit: admin password reset",
 		"event", "admin_password_reset",
 		"admin_id", caller.ID,
@@ -392,6 +403,17 @@ func (h *AdminHandler) LockUser(w http.ResponseWriter, r *http.Request) {
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
+	}
+
+	// Locking is meant to cut off access immediately — delete any established
+	// sessions rather than leaving them to expire naturally. The lock itself
+	// already took effect, so a revocation failure is logged, not fatal.
+	if err := h.svc.RevokeUserSessions(r.Context(), id); err != nil {
+		slog.Warn("audit: session revocation failed after admin lock",
+			"event", "session_revocation_failed",
+			"target_user_id", id,
+			"error", err,
+		)
 	}
 
 	slog.Info("audit: admin lock",
@@ -514,10 +536,8 @@ func toUserResponse(u *User) userResponse {
 
 func (h *AdminHandler) toUserResponseWithSetup(ctx context.Context, u *User) userResponse {
 	resp := toUserResponse(u)
-	if h.svc != nil {
-		if has, err := h.svc.HasActiveInvite(ctx, u.ID); err == nil {
-			resp.PendingSetup = has
-		}
+	if has, err := h.svc.HasActiveInvite(ctx, u.ID); err == nil {
+		resp.PendingSetup = has
 	}
 	return resp
 }
