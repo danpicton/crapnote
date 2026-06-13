@@ -72,7 +72,10 @@ func TestAudit_SuccessfulLoginIsLogged(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
 		strings.NewReader(`{"username":"admin","password":"correct"}`))
 	req.Header.Set("Content-Type", "application/json")
+	// A spoofed forwarded header must not reach the audit log — without the
+	// TrustProxy middleware the connection's RemoteAddr is recorded.
 	req.Header.Set("X-Forwarded-For", "203.0.113.9")
+	req.RemoteAddr = "198.51.100.7:2222"
 	w := httptest.NewRecorder()
 	h.Login(w, req)
 
@@ -87,8 +90,8 @@ func TestAudit_SuccessfulLoginIsLogged(t *testing.T) {
 	if !strings.Contains(out, "user_id=1") {
 		t.Fatalf("expected user_id in audit log, got: %s", out)
 	}
-	if !strings.Contains(out, "ip=203.0.113.9") {
-		t.Fatalf("expected X-Forwarded-For IP in audit log, got: %s", out)
+	if !strings.Contains(out, "ip=198.51.100.7") {
+		t.Fatalf("expected RemoteAddr IP in audit log, got: %s", out)
 	}
 }
 

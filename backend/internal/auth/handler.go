@@ -21,12 +21,16 @@ func NewHandler(svc *Service) *Handler {
 }
 
 // isHTTPS reports whether the request arrived over HTTPS — either directly
-// (r.TLS != nil) or via a reverse proxy that signals it with X-Forwarded-Proto.
-// This is used to set the Secure flag on cookies: hardcoding Secure:true breaks
-// plain-HTTP deployments because browsers silently discard secure cookies sent
-// over HTTP, making every session immediately invalid after login.
+// (r.TLS != nil) or via a trusted reverse proxy that signals it with
+// X-Forwarded-Proto. The header is only honoured when the deployment has
+// opted in via httpx.TrustProxy (TRUST_PROXY env var), since any client can
+// set it otherwise. This is used to set the Secure flag on cookies:
+// hardcoding Secure:true breaks plain-HTTP deployments because browsers
+// silently discard secure cookies sent over HTTP, making every session
+// immediately invalid after login.
 func isHTTPS(r *http.Request) bool {
-	return r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"
+	return r.TLS != nil ||
+		(httpx.ProxyTrusted(r) && r.Header.Get("X-Forwarded-Proto") == "https")
 }
 
 // Login handles POST /api/auth/login.

@@ -34,13 +34,15 @@ func TestMiddleware_Returns429WhenExhausted(t *testing.T) {
 	}
 }
 
-func TestClientIP_PrefersXForwardedFor(t *testing.T) {
+// Forwarded headers are client-controlled and must not influence the
+// rate-limit key unless the deployment opts in via httpx.TrustProxy.
+func TestClientIP_IgnoresXForwardedForByDefault(t *testing.T) {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "10.0.0.1:1234"
 	r.Header.Set("X-Forwarded-For", "203.0.113.5, 10.0.0.1")
 
-	if got := ratelimit.ClientIP(r); got != "203.0.113.5" {
-		t.Fatalf("expected 203.0.113.5, got %q", got)
+	if got := ratelimit.ClientIP(r); got != "10.0.0.1" {
+		t.Fatalf("expected RemoteAddr host 10.0.0.1, got %q", got)
 	}
 }
 

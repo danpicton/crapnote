@@ -270,6 +270,58 @@ func TestLogin_RateLimited(t *testing.T) {
 	}
 }
 
+// Without TRUST_PROXY, the limiter must key on the connection's RemoteAddr —
+// an attacker rotating X-Forwarded-For per request must not get a fresh
+// rate-limit bucket each time.
+func TestLogin_RateLimited_SpoofedForwardedForDoesNotBypass(t *testing.T) {
+	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	userRepo := auth.NewUserRepo(database)
+	sessRepo := auth.NewSessionRepo(database)
+	authSvc := auth.NewService(userRepo, sessRepo, 7*24*time.Hour)
+	notesSvc := notes.NewService(notes.NewRepo(database))
+	tightLimiter := ratelimit.New(0.01, 2)
+	authH := auth.NewHandler(authSvc)
+	tokensSvc := tokens.NewService(tokens.NewRepo(database), userRepo)
+	authH.SetBearerAuthenticator(tokens.NewBearerAuth(tokensSvc, nil))
+	mux := newMux(
+		authH,
+		auth.NewAdminHandler(userRepo, sessRepo),
+		auth.NewSetupHandler(authSvc),
+		notes.NewHandler(notesSvc),
+		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
+		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
+		export.NewHandler(notesSvc, database),
+		images.NewHandler(database),
+		tokens.NewHandler(tokensSvc),
+		tightLimiter,
+		permissiveBearerLimiter(),
+	)
+
+	send := func(spoofedIP string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+			bytes.NewBufferString(`{"username":"u","password":"p"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", spoofedIP)
+		req.RemoteAddr = "203.0.113.9:4444"
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		return w.Code
+	}
+
+	// Every request claims a different client IP, but they all arrive from
+	// the same connection — the third must still be throttled.
+	_ = send("10.0.0.1")
+	_ = send("10.0.0.2")
+	if code := send("10.0.0.3"); code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 despite rotating X-Forwarded-For, got %d", code)
+	}
+}
+
 func TestLogin_Endpoint(t *testing.T) {
 	mux := newTestMux(t)
 
