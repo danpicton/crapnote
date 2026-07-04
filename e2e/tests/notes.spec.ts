@@ -10,10 +10,22 @@ async function login(page: Page) {
 
 /** Create a note, set the title, and wait for autosave to persist it. */
 async function createNote(page: Page, title: string) {
-  await page.getByLabel('New note').click();
-  const titleInput = page.getByPlaceholder(/note title/i);
-  // Register the response listener BEFORE fill() so a fast autosave can't
+  // Register the response listener BEFORE clicking so a fast create can't
   // arrive before the listener is attached (race condition).
+  const created = page.waitForResponse(
+    (r) => r.url().includes('/api/notes') && r.request().method() === 'POST',
+  );
+  await page.getByLabel('New note').click();
+  await created;
+
+  const titleInput = page.getByPlaceholder(/note title/i);
+  // Wait for the editor to re-bind to the NEW note before typing. A fresh
+  // note's title defaults to a timestamp ("2026-07-04 …"); until that value
+  // appears, the visible title input still belongs to the previously
+  // selected note and fill() would rename that one instead (autosave
+  // captures the selected note id at input time).
+  await expect(titleInput).toHaveValue(/^\d{4}-\d{2}-\d{2}/);
+
   // fill() replaces any existing text atomically and fires Svelte's input
   // binding without needing keystroke delays or an explicit waitForTimeout.
   const saved = page.waitForResponse(

@@ -385,10 +385,22 @@
 		});
 	}
 
+	// Monotonic token guarding the notes list against stale writes. Every new
+	// load and every local list mutation (create/delete/archive) bumps it; a
+	// loadNotes() call only applies its result if no newer load or mutation
+	// happened while its response was in flight. Without this, a slow list
+	// response issued before a delete can land after it and resurrect the
+	// deleted note in the UI (the mount load and the sync heartbeat both fetch
+	// the list concurrently with user actions).
+	let listVersion = 0;
+
 	async function loadNotes() {
+		const version = ++listVersion;
 		if (!navigator.onLine) {
 			isOnline = false;
-			notes = await loadFromCache();
+			const cached = await loadFromCache();
+			if (version !== listVersion) return;
+			notes = cached;
 			return;
 		}
 		const params: { search?: string; tag?: number; starred?: boolean } = {};
@@ -398,7 +410,9 @@
 		try {
 			const fetched = await api.notes.list(params);
 			isOnline = true;
-			notes = await mergeServerWithCache(fetched);
+			const merged = await mergeServerWithCache(fetched);
+			if (version !== listVersion) return; // stale — newer load/mutation won
+			notes = merged;
 			// Cache top-N when no filter is active (we want the canonical recent list)
 			if (!search && activeTagId === null && !starredOnly) {
 				cacheNotesForOffline(fetched); // fire-and-forget
@@ -406,7 +420,9 @@
 		} catch {
 			// Network failed despite navigator.onLine — server is unreachable.
 			isOnline = false;
-			notes = await loadFromCache();
+			const cached = await loadFromCache();
+			if (version !== listVersion) return;
+			notes = cached;
 		}
 	}
 
@@ -669,6 +685,7 @@
 			starred: false, pinned: false, archived: false,
 			created_at: now, updated_at: now,
 		};
+		listVersion++; // invalidate in-flight list loads that predate the note
 		notes = [offlineNote, ...notes];
 		selectedId = tempId;
 		noteTags = [];
@@ -683,6 +700,7 @@
 		}
 		try {
 			const note = await api.notes.create(defaultNoteTitle());
+			listVersion++; // invalidate in-flight list loads that predate the note
 			const firstUnpinned = notes.findIndex((n) => !n.pinned);
 			if (firstUnpinned === -1) {
 				notes = [...notes, note];
@@ -896,11 +914,13 @@
 
 	async function toggleStar(id: number) {
 		const updated = await api.notes.toggleStar(id);
+		listVersion++; // invalidate in-flight list loads carrying the old state
 		notes = notes.map((n) => (n.id === updated.id ? updated : n));
 	}
 
 	async function togglePin(id: number) {
 		const updated = await api.notes.togglePin(id);
+		listVersion++; // invalidate in-flight list loads carrying the old state
 		const rest = notes.filter((n) => n.id !== updated.id);
 		const full = [updated, ...rest];
 		notes = [...full.filter((n) => n.pinned), ...full.filter((n) => !n.pinned)];
@@ -908,6 +928,7 @@
 
 	async function archiveNote(id: number) {
 		await api.notes.archive(id);
+		listVersion++; // invalidate any in-flight list load fetched pre-archive
 		notes = notes.filter((n) => n.id !== id);
 		if (selectedId === id) {
 			selectedId = notes.length > 0 ? notes[0].id : null;
@@ -916,6 +937,7 @@
 
 	async function deleteNote(id: number) {
 		await api.notes.delete(id);
+		listVersion++; // invalidate any in-flight list load fetched pre-delete
 		notes = notes.filter((n) => n.id !== id);
 		if (selectedId === id) {
 			selectedId = notes.length > 0 ? notes[0].id : null;
