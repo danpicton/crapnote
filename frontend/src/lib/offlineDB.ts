@@ -12,8 +12,14 @@ export interface CachedNote {
 }
 
 const DB_NAME = 'crapnote-notes-v2';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'notes';
+// Key/value store holding the id of the user the cached notes belong to.
+// The store is shared per-browser, so every read-for-display and every sync
+// push must be checked against it — otherwise user A's offline edits would
+// sync into user B's account on a shared machine.
+const META_STORE = 'meta';
+const OWNER_KEY = 'owner';
 
 export function openOfflineDB(): Promise<IDBDatabase> {
 	return new Promise((resolve, reject) => {
@@ -23,9 +29,57 @@ export function openOfflineDB(): Promise<IDBDatabase> {
 			if (!db.objectStoreNames.contains(STORE)) {
 				db.createObjectStore(STORE, { keyPath: 'id' });
 			}
+			if (!db.objectStoreNames.contains(META_STORE)) {
+				db.createObjectStore(META_STORE, { keyPath: 'key' });
+			}
 		};
 		req.onsuccess = () => resolve(req.result);
 		req.onerror = () => reject(req.error);
+	});
+}
+
+/** Deletes the entire offline database (used at logout). */
+export function deleteOfflineDB(): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const req = indexedDB.deleteDatabase(DB_NAME);
+		req.onsuccess = () => resolve();
+		// Blocked means another open connection delays the delete — it still
+		// completes once that connection closes, so don't fail the logout.
+		req.onblocked = () => resolve();
+		req.onerror = () => reject(req.error);
+	});
+}
+
+/** Returns the user id the offline store belongs to, or null if unset. */
+export function getOfflineOwner(db: IDBDatabase): Promise<number | null> {
+	return new Promise((resolve, reject) => {
+		const tx = db.transaction(META_STORE, 'readonly');
+		const req = tx.objectStore(META_STORE).get(OWNER_KEY);
+		req.onsuccess = () => {
+			const row = req.result as { key: string; userId: number } | undefined;
+			resolve(typeof row?.userId === 'number' ? row.userId : null);
+		};
+		req.onerror = () => reject(req.error);
+	});
+}
+
+/** Records which user the offline store belongs to. */
+export function setOfflineOwner(db: IDBDatabase, userId: number): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const tx = db.transaction(META_STORE, 'readwrite');
+		tx.objectStore(META_STORE).put({ key: OWNER_KEY, userId });
+		tx.oncomplete = () => resolve();
+		tx.onerror = () => reject(tx.error);
+	});
+}
+
+/** Removes every cached note (owner metadata is left as-is). */
+export function clearAllNotes(db: IDBDatabase): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const tx = db.transaction(STORE, 'readwrite');
+		tx.objectStore(STORE).clear();
+		tx.oncomplete = () => resolve();
+		tx.onerror = () => reject(tx.error);
 	});
 }
 

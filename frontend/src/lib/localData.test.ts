@@ -1,0 +1,107 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import 'fake-indexeddb/auto';
+import { clearLocalData, ensureOfflineOwner } from './localData';
+import { openOfflineDB, upsertNote, getAllNotes, getOfflineOwner, setOfflineOwner, deleteOfflineDB } from './offlineDB';
+
+const makeNote = (id: number) => ({
+	id,
+	title: 'Secret',
+	body: 'Body',
+	starred: false,
+	pinned: false,
+	tags: [],
+	server_updated_at: '2024-01-01T00:00:00Z',
+	local_updated_at: '2024-01-01T00:00:00Z',
+	is_dirty: true,
+	is_new: false,
+});
+
+function stubCaches(keys: string[]) {
+	const deleted: string[] = [];
+	const cachesStub = {
+		keys: vi.fn().mockResolvedValue(keys),
+		delete: vi.fn(async (k: string) => {
+			deleted.push(k);
+			return true;
+		}),
+	};
+	vi.stubGlobal('caches', cachesStub);
+	return { cachesStub, deleted };
+}
+
+beforeEach(async () => {
+	vi.unstubAllGlobals();
+	await deleteOfflineDB();
+});
+
+describe('clearLocalData', () => {
+	it('deletes crapnote-* Cache Storage entries and leaves others alone', async () => {
+		const { deleted } = stubCaches(['crapnote-abc123', 'other-app-cache']);
+
+		await clearLocalData();
+
+		expect(deleted).toEqual(['crapnote-abc123']);
+	});
+
+	it('deletes the offline IndexedDB store', async () => {
+		stubCaches([]);
+		let db = await openOfflineDB();
+		await upsertNote(db, makeNote(1));
+		await setOfflineOwner(db, 42);
+		db.close();
+
+		await clearLocalData();
+
+		// Re-opening creates a fresh, empty database.
+		db = await openOfflineDB();
+		expect(await getAllNotes(db)).toEqual([]);
+		expect(await getOfflineOwner(db)).toBeNull();
+		db.close();
+	});
+
+	it('does not throw when Cache Storage is unavailable', async () => {
+		vi.stubGlobal('caches', undefined);
+		await expect(clearLocalData()).resolves.toBeUndefined();
+	});
+});
+
+describe('ensureOfflineOwner', () => {
+	it('stamps the owner on a fresh store', async () => {
+		stubCaches([]);
+		await ensureOfflineOwner(7);
+
+		const db = await openOfflineDB();
+		expect(await getOfflineOwner(db)).toBe(7);
+		db.close();
+	});
+
+	it('keeps cached notes when the same user returns', async () => {
+		stubCaches([]);
+		let db = await openOfflineDB();
+		await setOfflineOwner(db, 7);
+		await upsertNote(db, makeNote(1));
+		db.close();
+
+		await ensureOfflineOwner(7);
+
+		db = await openOfflineDB();
+		expect((await getAllNotes(db)).length).toBe(1);
+		db.close();
+	});
+
+	it('wipes the previous user\'s notes and caches when a different user logs in', async () => {
+		const { deleted } = stubCaches(['crapnote-v1']);
+		let db = await openOfflineDB();
+		await setOfflineOwner(db, 7);
+		await upsertNote(db, makeNote(1));
+		db.close();
+
+		await ensureOfflineOwner(8);
+
+		db = await openOfflineDB();
+		expect(await getAllNotes(db)).toEqual([]);
+		expect(await getOfflineOwner(db)).toBe(8);
+		expect(deleted).toEqual(['crapnote-v1']);
+		db.close();
+	});
+});

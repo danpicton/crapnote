@@ -435,7 +435,7 @@
 		}
 		syncStatus = 'syncing';
 
-		const result = await syncOfflineChanges(trigger);
+		const result = await syncOfflineChanges(trigger, auth.user?.id ?? null);
 
 		// If the note we had open was a temp-ID that just got a real server ID, update selection
 		if (selectedId !== null) {
