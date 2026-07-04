@@ -10,8 +10,14 @@ vi.mock('@milkdown/kit/prose/inputrules', () => ({ InputRule: vi.fn() }));
 vi.mock('@milkdown/kit/prose/state', () => ({ Plugin: vi.fn(), PluginKey: vi.fn() }));
 vi.mock('@milkdown/kit/prose/model', () => ({ Fragment: { from: vi.fn() }, Slice: vi.fn() }));
 vi.mock('@milkdown/kit/prose/view', () => ({}));
+vi.mock('@milkdown/kit/preset/commonmark', () => ({
+	linkSchema: {
+		// Capture the extension handler so tests can exercise the wrapped spec.
+		extendSchema: vi.fn((handler: unknown) => ({ __handler: handler })),
+	},
+}));
 
-import { isUrl, normalizeUrl } from './link';
+import { isUrl, normalizeUrl, isSafeHref, sanitizeHref, safeLinkMarkSchema } from './link';
 
 describe('isUrl', () => {
 	it('accepts https URLs', () => {
@@ -74,5 +80,82 @@ describe('normalizeUrl', () => {
 
 	it('preserves paths and query strings', () => {
 		expect(normalizeUrl('https://example.com/a?b=c')).toBe('https://example.com/a?b=c');
+	});
+});
+
+describe('isSafeHref / sanitizeHref', () => {
+	it.each([
+		'javascript:alert(1)',
+		'JaVaScRiPt:alert(document.cookie)',
+		'java\nscript:alert(1)', // control chars are stripped by browsers before scheme parsing
+		' \tjavascript:alert(1)',
+		'data:text/html,<script>alert(1)</script>',
+		'vbscript:msgbox(1)',
+		'file:///etc/passwd',
+	])('neutralises %s', (href) => {
+		expect(isSafeHref(href)).toBe(false);
+		expect(sanitizeHref(href)).toBe('');
+	});
+
+	it.each([
+		'https://example.com',
+		'http://example.com/a?b=c',
+		'mailto:someone@example.com',
+		'/relative/path',
+		'relative.html',
+		'#fragment',
+		'?query=1',
+	])('preserves %s', (href) => {
+		expect(isSafeHref(href)).toBe(true);
+		expect(sanitizeHref(href)).toBe(href);
+	});
+
+	it('neutralises non-string hrefs', () => {
+		expect(sanitizeHref(null)).toBe('');
+		expect(sanitizeHref(undefined)).toBe('');
+	});
+});
+
+describe('safeLinkMarkSchema', () => {
+	type MarkLike = { attrs: Record<string, unknown> };
+	type SpecLike = {
+		parseDOM: Array<{ tag: string; getAttrs: (dom: unknown) => Record<string, unknown> | false }>;
+		toDOM: (mark: MarkLike) => unknown[];
+	};
+
+	const baseSpec = {
+		attrs: { href: {}, title: { default: null } },
+		parseDOM: [],
+		toDOM: (mark: MarkLike) => ['a', { class: 'link', ...mark.attrs }],
+	};
+	const handler = (safeLinkMarkSchema as unknown as { __handler: (prev: unknown) => (ctx: unknown) => SpecLike }).__handler;
+	const spec = handler(() => baseSpec)({});
+
+	it('toDOM drops an unsafe href but keeps the rest of the mark', () => {
+		const [tag, attrs] = spec.toDOM({ attrs: { href: 'javascript:alert(1)', title: null } }) as [string, Record<string, unknown>];
+		expect(tag).toBe('a');
+		expect('href' in attrs).toBe(false);
+		expect(attrs.class).toBe('link');
+	});
+
+	it('toDOM keeps a safe href', () => {
+		const [, attrs] = spec.toDOM({ attrs: { href: 'https://example.com', title: null } }) as [string, Record<string, unknown>];
+		expect(attrs.href).toBe('https://example.com');
+	});
+
+	it('parseDOM sanitises pasted anchors with unsafe schemes', () => {
+		const a = document.createElement('a');
+		a.setAttribute('href', 'data:text/html,<script>alert(1)</script>');
+		const attrs = spec.parseDOM[0].getAttrs(a);
+		expect(attrs && attrs.href).toBe('');
+	});
+
+	it('parseDOM keeps safe pasted hrefs', () => {
+		const a = document.createElement('a');
+		a.setAttribute('href', 'https://example.com/x');
+		a.setAttribute('title', 't');
+		const attrs = spec.parseDOM[0].getAttrs(a);
+		expect(attrs && attrs.href).toBe('https://example.com/x');
+		expect(attrs && attrs.title).toBe('t');
 	});
 });
