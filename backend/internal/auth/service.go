@@ -15,9 +15,23 @@ import (
 
 const bcryptCost = 12
 
-// MaxFailedLoginAttempts is the number of consecutive failed password attempts
-// after which a non-admin account is locked.
-const MaxFailedLoginAttempts = 3
+// DefaultMaxFailedLoginAttempts is the default number of consecutive failed
+// password attempts after which a non-admin account is auto-locked. Tunable
+// via Service.SetLockoutPolicy (MAX_FAILED_LOGIN_ATTEMPTS env var in main).
+const DefaultMaxFailedLoginAttempts = 5
+
+// DefaultLockoutCooldown is how long an automatic failed-login lock lasts
+// before it lapses on its own. Manual admin locks never lapse. Tunable via
+// Service.SetLockoutPolicy (LOCKOUT_COOLDOWN_MINUTES env var in main).
+const DefaultLockoutCooldown = 15 * time.Minute
+
+// dummyPasswordHash is a syntactically valid, precomputed cost-12 bcrypt hash
+// of a throwaway placeholder string. Login compares against it on the
+// unknown-user and locked-user branches so those paths perform the same
+// key-derivation work as a real password check — an invalid hash literal
+// would fail during parsing and return in microseconds, letting an attacker
+// enumerate usernames by response time.
+var dummyPasswordHash = []byte("$2a$12$.6Huiifna4soSOzjPCMbPuaSQLzCYttSFwT5OAZXD6c1sVEdDv1IC")
 
 // ErrInvalidCredentials is returned when username/password don't match.
 var ErrInvalidCredentials = errors.New("invalid credentials")
@@ -32,22 +46,42 @@ var ErrInviteInvalid = errors.New("invite invalid or expired")
 
 // Service implements authentication business logic.
 type Service struct {
-	users    *UserRepo
-	sessions *SessionRepo
-	invites  *InviteRepo
-	ttl      time.Duration
+	users             *UserRepo
+	sessions          *SessionRepo
+	invites           *InviteRepo
+	ttl               time.Duration
+	maxFailedAttempts int
+	lockoutCooldown   time.Duration
 }
 
 // NewService creates a new auth Service without invite support (legacy
 // callers). CreateInvite and CompleteSetup will return an error if invoked.
 func NewService(users *UserRepo, sessions *SessionRepo, sessionTTL time.Duration) *Service {
-	return &Service{users: users, sessions: sessions, ttl: sessionTTL}
+	return &Service{
+		users: users, sessions: sessions, ttl: sessionTTL,
+		maxFailedAttempts: DefaultMaxFailedLoginAttempts,
+		lockoutCooldown:   DefaultLockoutCooldown,
+	}
 }
 
 // NewServiceWithInvites creates a new auth Service that supports the admin
 // invite / first-login password setup flow.
 func NewServiceWithInvites(users *UserRepo, sessions *SessionRepo, invites *InviteRepo, sessionTTL time.Duration) *Service {
-	return &Service{users: users, sessions: sessions, invites: invites, ttl: sessionTTL}
+	return &Service{
+		users: users, sessions: sessions, invites: invites, ttl: sessionTTL,
+		maxFailedAttempts: DefaultMaxFailedLoginAttempts,
+		lockoutCooldown:   DefaultLockoutCooldown,
+	}
+}
+
+// SetLockoutPolicy overrides the automatic-lockout tuning. maxAttempts < 1
+// keeps the current threshold; cooldown <= 0 makes automatic locks indefinite
+// (pre-cool-down behaviour, admin unlock required).
+func (s *Service) SetLockoutPolicy(maxAttempts int, cooldown time.Duration) {
+	if maxAttempts >= 1 {
+		s.maxFailedAttempts = maxAttempts
+	}
+	s.lockoutCooldown = cooldown
 }
 
 // SeedAdmin creates the initial admin user if no users exist yet.
@@ -74,13 +108,14 @@ func (s *Service) SeedAdmin(ctx context.Context, username, password string) erro
 
 // Login verifies credentials and returns a new Session on success.
 // Returns ErrInvalidCredentials for unknown users or wrong passwords, and
-// ErrAccountLocked for users whose accounts have been locked (either by an
-// admin or by exceeding MaxFailedLoginAttempts).
+// ErrAccountLocked for users whose accounts are locked (either by an admin,
+// or automatically after too many failed attempts — automatic locks lapse
+// after the configured cool-down).
 func (s *Service) Login(ctx context.Context, username, password string) (*Session, error) {
 	u, err := s.users.FindByUsername(ctx, username)
 	if errors.Is(err, ErrNotFound) {
 		// Perform a dummy comparison to avoid timing attacks.
-		bcrypt.CompareHashAndPassword([]byte("$2a$12$dummy"), []byte(password)) //nolint:errcheck
+		bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password)) //nolint:errcheck
 		return nil, ErrInvalidCredentials
 	}
 	if err != nil {
@@ -88,9 +123,16 @@ func (s *Service) Login(ctx context.Context, username, password string) (*Sessio
 	}
 
 	if u.LockedAt != nil {
-		// Still perform a dummy comparison to keep timing uniform.
-		bcrypt.CompareHashAndPassword([]byte("$2a$12$dummy"), []byte(password)) //nolint:errcheck
-		return nil, ErrAccountLocked
+		if u.Locked(time.Now()) {
+			// Still perform a dummy comparison to keep timing uniform.
+			bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password)) //nolint:errcheck
+			return nil, ErrAccountLocked
+		}
+		// Automatic lock whose cool-down has lapsed — clear it (also resets
+		// the failed-attempt counter) and let this attempt proceed normally.
+		if err := s.users.Unlock(ctx, u.ID); err != nil {
+			return nil, fmt.Errorf("login: clear lapsed lock: %w", err)
+		}
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
@@ -99,11 +141,16 @@ func (s *Service) Login(ctx context.Context, username, password string) (*Sessio
 		// able to unlock anyone.
 		if !u.IsAdmin {
 			n, incErr := s.users.IncrementFailedAttempts(ctx, u.ID)
-			if incErr == nil && n >= MaxFailedLoginAttempts {
-				s.users.Lock(ctx, u.ID) //nolint:errcheck
+			if incErr == nil && n >= s.maxFailedAttempts {
+				if s.lockoutCooldown > 0 {
+					s.users.LockUntil(ctx, u.ID, time.Now().Add(s.lockoutCooldown)) //nolint:errcheck
+				} else {
+					s.users.Lock(ctx, u.ID) //nolint:errcheck
+				}
 				// Lockout implies the account may be under attack — evict any
-				// established sessions rather than leaving them live.
-				s.sessions.DeleteForUser(ctx, u.ID) //nolint:errcheck
+				// established sessions rather than leaving them live, via the
+				// revocation choke-point so audit hooks cover this path too.
+				s.RevokeUserSessions(ctx, u.ID) //nolint:errcheck
 			}
 		}
 		return nil, ErrInvalidCredentials
@@ -294,7 +341,7 @@ func (s *Service) ValidateSession(ctx context.Context, sessionID string) (*User,
 	if err != nil {
 		return nil, err
 	}
-	if u.LockedAt != nil {
+	if u.Locked(time.Now()) {
 		return nil, ErrAccountLocked
 	}
 	return u, nil

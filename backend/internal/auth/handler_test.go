@@ -188,8 +188,8 @@ func TestHandler_Login_LockedAccount_Returns403(t *testing.T) {
 	h, svc, users := newTestHandlerWithRepo(t)
 	createUser(t, users, "alice", "correctpass", false)
 
-	// Three failed attempts → locked.
-	for i := 0; i < 3; i++ {
+	// Enough failed attempts → locked.
+	for i := 0; i < auth.DefaultMaxFailedLoginAttempts; i++ {
 		svc.Login(t.Context(), "alice", "wrong") //nolint:errcheck
 	}
 

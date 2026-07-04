@@ -95,8 +95,10 @@ npm run lint      # eslint
 | `PORT` | `8080` | HTTP listen port |
 | `DATABASE_PATH` | `notes.db` | Path to SQLite file |
 | `ADMIN_USERNAME` | — | Seeded on first run if no users exist |
-| `ADMIN_PASSWORD` | — | Seeded on first run if no users exist |
+| `ADMIN_PASSWORD` | — | Seeded on first run if no users exist. **Set a strong value before first run** — the seeded credential persists in the database, and the deploy tooling (`deploy/docker-compose.yml`, `make run`) refuses to start without it |
 | `SESSION_TTL_DAYS` | `7` | Session lifetime in days; refreshed on activity |
+| `MAX_FAILED_LOGIN_ATTEMPTS` | `5` | Consecutive failed passwords before a non-admin account is auto-locked |
+| `LOCKOUT_COOLDOWN_MINUTES` | `15` | How long an automatic lockout lasts before clearing itself; manual admin locks never expire |
 | `LOGIN_RATE_PER_MINUTE` | `5` | Per-IP rate limit on `POST /api/auth/login` |
 | `LOGIN_RATE_BURST` | `5` | Burst allowance for the login limiter |
 | `BEARER_RATE_PER_MINUTE` | `600` | Per-IP rate limit applied only to requests carrying an `Authorization` header |
@@ -255,15 +257,17 @@ Multi-stage build: Node (frontend) → Go/gcc (backend + CGO + go:embed) → `di
 docker build -t crapnote .
 docker run -p 8080:8080 \
   -e ADMIN_USERNAME=admin \
-  -e ADMIN_PASSWORD=changeme \
+  -e ADMIN_PASSWORD='<strong password — seeded into the DB on first run>' \
   -v $(pwd)/data:/data \
   crapnote
 ```
 
-For local dev with observability stack (Prometheus, Loki, Grafana):
+For local dev with observability stack (Prometheus, Loki, Grafana).
+`ADMIN_PASSWORD` (app admin) and `GRAFANA_PASSWORD` (Grafana admin) must be
+set — compose fails closed rather than shipping default credentials:
 
 ```bash
-cd deploy && docker compose up
+cd deploy && ADMIN_PASSWORD='...' GRAFANA_PASSWORD='...' docker compose up
 ```
 
 ---

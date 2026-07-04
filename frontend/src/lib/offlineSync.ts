@@ -1,5 +1,5 @@
 import { api } from '$lib/api';
-import { openOfflineDB, getDirtyNotes, upsertNote, deleteNote } from '$lib/offlineDB';
+import { openOfflineDB, getDirtyNotes, upsertNote, deleteNote, getOfflineOwner, setOfflineOwner } from '$lib/offlineDB';
 import type { CachedNote } from '$lib/offlineDB';
 
 export interface IdMapping {
@@ -20,8 +20,12 @@ export interface SyncResult {
 	conflicts: number;
 	/** Notes whose push attempt threw (network error, server error). */
 	errors: number;
-	/** True if this call was a no-op because another sync was already running. */
+	/** True if this call was a no-op because another sync was already running,
+	 * or because the offline store belongs to a different user than the
+	 * current session (see `reason`). */
 	skipped: boolean;
+	/** Why the run was skipped, when it was. */
+	reason?: 'in-progress' | 'no-user' | 'owner-mismatch';
 }
 
 // Module-level mutex: prevents two concurrent sync runs from racing each other.
@@ -38,8 +42,16 @@ let syncInProgress = false;
  * The caller is expected to trigger a list-reload after this returns so
  * server-side changes made elsewhere become visible locally (see
  * `heartbeatSync` in `+page.svelte`).
+ *
+ * `currentUserId` is the id of the user the active session belongs to. Dirty
+ * notes are only pushed when the offline store's recorded owner matches it —
+ * on a shared browser, user A's offline edits must never be created inside
+ * user B's account just because B logged in next.
  */
-export async function syncOfflineChanges(trigger: SyncTrigger = 'heartbeat'): Promise<SyncResult> {
+export async function syncOfflineChanges(
+	trigger: SyncTrigger = 'heartbeat',
+	currentUserId: number | null = null
+): Promise<SyncResult> {
 	const startedAt = new Date().toISOString();
 	const start = typeof performance !== 'undefined' ? performance.now() : Date.now();
 	const result: SyncResult = {
@@ -55,6 +67,14 @@ export async function syncOfflineChanges(trigger: SyncTrigger = 'heartbeat'): Pr
 
 	if (syncInProgress) {
 		result.skipped = true;
+		result.reason = 'in-progress';
+		result.durationMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - start);
+		logSyncResult(result);
+		return result;
+	}
+	if (currentUserId === null) {
+		result.skipped = true;
+		result.reason = 'no-user';
 		result.durationMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - start);
 		logSyncResult(result);
 		return result;
@@ -63,6 +83,20 @@ export async function syncOfflineChanges(trigger: SyncTrigger = 'heartbeat'): Pr
 
 	const db = await openOfflineDB();
 	try {
+		const owner = (await getOfflineOwner(db)) ?? null;
+		if (owner === null) {
+			// Legacy store from before owner tracking — adopt it for the
+			// current user rather than stranding pre-upgrade offline edits.
+			await setOfflineOwner(db, currentUserId);
+		} else if (owner !== currentUserId) {
+			// The cached notes belong to someone else. Refuse to push: doing
+			// so would disclose their note bodies into this user's account.
+			result.skipped = true;
+			result.reason = 'owner-mismatch';
+			result.durationMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - start);
+			logSyncResult(result);
+			return result;
+		}
 		const dirty = await getDirtyNotes(db);
 		for (const note of dirty) {
 			try {
@@ -98,6 +132,7 @@ function logSyncResult(r: SyncResult): void {
 		conflicts: r.conflicts,
 		errors: r.errors,
 		skipped: r.skipped,
+		reason: r.reason,
 		mappings: r.mappings.length,
 	});
 }

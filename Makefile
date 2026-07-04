@@ -3,21 +3,30 @@ BINARY := /tmp/crapnote-server
 # Env vars (override from the shell, e.g. ADMIN_PASSWORD=hunter2 make run)
 # PUBLIC_* vars are read by Vite at build time, so they're exported to all
 # child processes — including the frontend build invoked via backend/Makefile.
+# ADMIN_PASSWORD has no default on purpose: the initial admin is seeded into
+# the database on first run, so `make run` refuses to start without one rather
+# than silently creating a well-known admin/admin login.
 ADMIN_USERNAME          ?= admin
-ADMIN_PASSWORD          ?= admin
 PUBLIC_SYNC_INTERVAL_MS ?= 20000
 export PUBLIC_SYNC_INTERVAL_MS
 
-.PHONY: build run test-e2e test-backend test-frontend ci ci-full \
-        lint-backend lint-frontend check-frontend
+.PHONY: build run require-admin-password test-e2e test-backend test-frontend \
+        ci ci-full lint-backend lint-frontend check-frontend
 
 ## build: build frontend + backend (delegates to backend/Makefile)
 build:
 	$(MAKE) -C backend build-prod
 	cp backend/server $(BINARY)
 
+require-admin-password:
+	@test -n "$(ADMIN_PASSWORD)" || { \
+		echo "ERROR: ADMIN_PASSWORD is not set. The initial admin is seeded"; \
+		echo "into the database on first run — set a strong password, e.g.:"; \
+		echo "  ADMIN_PASSWORD='...' make run"; \
+		exit 1; }
+
 ## run: build then run the embedded binary (production path)
-run: build
+run: require-admin-password build
 	ADMIN_USERNAME=$(ADMIN_USERNAME) \
 	ADMIN_PASSWORD=$(ADMIN_PASSWORD) \
 	$(BINARY)

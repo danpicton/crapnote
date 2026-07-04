@@ -711,7 +711,7 @@ describe('Offline mode', () => {
 
 		window.dispatchEvent(new Event('online'));
 
-		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalledWith('online'));
+		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalledWith('online', 1));
 		await waitFor(() => expect(api.notes.list).toHaveBeenCalled());
 	});
 
@@ -730,6 +730,6 @@ describe('Offline mode', () => {
 		);
 		await fireEvent.click(syncBtn);
 
-		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalledWith('manual'));
+		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalledWith('manual', 1));
 	});
 });

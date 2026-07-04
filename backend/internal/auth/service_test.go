@@ -121,10 +121,11 @@ func TestService_Logout(t *testing.T) {
 	}
 }
 
-func TestService_Login_NonAdmin_LocksAfterThreeFailures(t *testing.T) {
+func TestService_Login_NonAdmin_LocksAfterMaxFailures(t *testing.T) {
 	svc, users := newTestServiceWithRepo(t)
 	ctx := context.Background()
 	createUser(t, users, "alice", "correctpass", false)
+	svc.SetLockoutPolicy(3, time.Hour)
 
 	for i := 0; i < 2; i++ {
 		if _, err := svc.Login(ctx, "alice", "wrong"); err != auth.ErrInvalidCredentials {
@@ -145,6 +146,54 @@ func TestService_Login_NonAdmin_LocksAfterThreeFailures(t *testing.T) {
 	got, _ := users.FindByID(ctx, 1)
 	if got.LockedAt == nil {
 		t.Fatal("expected account to be locked in storage")
+	}
+	if got.LockedUntil == nil {
+		t.Fatal("automatic lock must carry an expiry (locked_until)")
+	}
+}
+
+func TestService_Login_AutoLock_ExpiresAfterCooldown(t *testing.T) {
+	svc, users := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	u := createUser(t, users, "alice", "correctpass", false)
+	svc.SetLockoutPolicy(3, 30*time.Millisecond)
+
+	for i := 0; i < 3; i++ {
+		svc.Login(ctx, "alice", "wrong") //nolint:errcheck
+	}
+	if _, err := svc.Login(ctx, "alice", "correctpass"); err != auth.ErrAccountLocked {
+		t.Fatalf("expected ErrAccountLocked during cool-down, got %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// After the cool-down the correct password must work without admin action.
+	if _, err := svc.Login(ctx, "alice", "correctpass"); err != nil {
+		t.Fatalf("login after cool-down: %v", err)
+	}
+	got, _ := users.FindByID(ctx, u.ID)
+	if got.LockedAt != nil || got.LockedUntil != nil {
+		t.Fatal("expected lapsed auto-lock to be cleared in storage")
+	}
+	if got.FailedLoginAttempts != 0 {
+		t.Fatalf("expected failed-attempt counter reset, got %d", got.FailedLoginAttempts)
+	}
+}
+
+func TestService_Login_ManualLock_DoesNotExpire(t *testing.T) {
+	svc, users := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	u := createUser(t, users, "alice", "correctpass", false)
+	svc.SetLockoutPolicy(3, 10*time.Millisecond)
+
+	// Manual admin lock (no expiry).
+	if err := users.Lock(ctx, u.ID); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+	time.Sleep(30 * time.Millisecond)
+
+	if _, err := svc.Login(ctx, "alice", "correctpass"); err != auth.ErrAccountLocked {
+		t.Fatalf("manual lock must not auto-expire, got %v", err)
 	}
 }
 
@@ -402,7 +451,7 @@ func TestService_Login_AutoLockout_RevokesExistingSessions(t *testing.T) {
 		t.Fatalf("Login: %v", err)
 	}
 
-	for i := 0; i < auth.MaxFailedLoginAttempts; i++ {
+	for i := 0; i < auth.DefaultMaxFailedLoginAttempts; i++ {
 		svc.Login(ctx, "alice", "wrong") //nolint:errcheck
 	}
 	got, _ := users.FindByID(ctx, u.ID)

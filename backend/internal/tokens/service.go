@@ -150,8 +150,9 @@ func (s *Service) Verify(ctx context.Context, raw string) (*VerifiedToken, error
 		return nil, ErrInvalidToken
 	}
 
-	// A locked account's tokens stop working until the account is unlocked.
-	if user.LockedAt != nil {
+	// A locked account's tokens stop working while the lock is active (a
+	// lapsed automatic cool-down no longer counts as locked).
+	if user.Locked(time.Now()) {
 		return nil, ErrInvalidToken
 	}
 
