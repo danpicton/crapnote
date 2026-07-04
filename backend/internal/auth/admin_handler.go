@@ -525,10 +525,10 @@ func toUserResponse(u *User) userResponse {
 		Username:         u.Username,
 		IsAdmin:          u.IsAdmin,
 		APITokensEnabled: u.APITokensEnabled,
-		Locked:           u.LockedAt != nil,
+		Locked:           u.Locked(time.Now()),
 		CreatedAt:        u.CreatedAt.Format("2006-01-02T15:04:05Z"),
 	}
-	if u.LockedAt != nil {
+	if u.Locked(time.Now()) {
 		resp.LockedAt = u.LockedAt.Format("2006-01-02T15:04:05Z")
 	}
 	return resp

@@ -51,11 +51,11 @@ func (r *UserRepo) Create(ctx context.Context, username, passwordHash string, is
 func (r *UserRepo) FindByUsername(ctx context.Context, username string) (*User, error) {
 	u := &User{}
 	var isAdmin, apiTokensEnabled int
-	var lockedAt sql.NullTime
+	var lockedAt, lockedUntil sql.NullTime
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, username, password_hash, is_admin, api_tokens_enabled, failed_login_attempts, locked_at, created_at FROM users WHERE username=?`,
+		`SELECT id, username, password_hash, is_admin, api_tokens_enabled, failed_login_attempts, locked_at, locked_until, created_at FROM users WHERE username=?`,
 		username,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &isAdmin, &apiTokensEnabled, &u.FailedLoginAttempts, &lockedAt, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &isAdmin, &apiTokensEnabled, &u.FailedLoginAttempts, &lockedAt, &lockedUntil, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -68,6 +68,10 @@ func (r *UserRepo) FindByUsername(ctx context.Context, username string) (*User, 
 		t := lockedAt.Time
 		u.LockedAt = &t
 	}
+	if lockedUntil.Valid {
+		t := lockedUntil.Time
+		u.LockedUntil = &t
+	}
 	return u, nil
 }
 
@@ -75,11 +79,11 @@ func (r *UserRepo) FindByUsername(ctx context.Context, username string) (*User, 
 func (r *UserRepo) FindByID(ctx context.Context, id int64) (*User, error) {
 	u := &User{}
 	var isAdmin, apiTokensEnabled int
-	var lockedAt sql.NullTime
+	var lockedAt, lockedUntil sql.NullTime
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, username, password_hash, is_admin, api_tokens_enabled, failed_login_attempts, locked_at, created_at FROM users WHERE id=?`,
+		`SELECT id, username, password_hash, is_admin, api_tokens_enabled, failed_login_attempts, locked_at, locked_until, created_at FROM users WHERE id=?`,
 		id,
-	).Scan(&u.ID, &u.Username, &u.PasswordHash, &isAdmin, &apiTokensEnabled, &u.FailedLoginAttempts, &lockedAt, &u.CreatedAt)
+	).Scan(&u.ID, &u.Username, &u.PasswordHash, &isAdmin, &apiTokensEnabled, &u.FailedLoginAttempts, &lockedAt, &lockedUntil, &u.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -91,6 +95,10 @@ func (r *UserRepo) FindByID(ctx context.Context, id int64) (*User, error) {
 	if lockedAt.Valid {
 		t := lockedAt.Time
 		u.LockedAt = &t
+	}
+	if lockedUntil.Valid {
+		t := lockedUntil.Time
+		u.LockedUntil = &t
 	}
 	return u, nil
 }
@@ -126,12 +134,28 @@ func (r *UserRepo) ResetFailedAttempts(ctx context.Context, id int64) error {
 	return nil
 }
 
-// Lock marks the account as locked (sets locked_at to now).
+// Lock marks the account as locked indefinitely (manual admin lock — sets
+// locked_at to now and clears any auto-lock expiry).
 func (r *UserRepo) Lock(ctx context.Context, id int64) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE users SET locked_at = CURRENT_TIMESTAMP WHERE id=?`, id)
+		`UPDATE users SET locked_at = CURRENT_TIMESTAMP, locked_until = NULL WHERE id=?`, id)
 	if err != nil {
 		return fmt.Errorf("lock user: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// LockUntil marks the account as locked with an automatic expiry (failed-login
+// cool-down). The lock lapses once `until` passes; see User.Locked.
+func (r *UserRepo) LockUntil(ctx context.Context, id int64, until time.Time) error {
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE users SET locked_at = CURRENT_TIMESTAMP, locked_until = ? WHERE id=?`, until.UTC(), id)
+	if err != nil {
+		return fmt.Errorf("lock user until: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
@@ -143,7 +167,7 @@ func (r *UserRepo) Lock(ctx context.Context, id int64) error {
 // Unlock clears the lock and resets the failed attempts counter.
 func (r *UserRepo) Unlock(ctx context.Context, id int64) error {
 	res, err := r.db.ExecContext(ctx,
-		`UPDATE users SET locked_at = NULL, failed_login_attempts = 0 WHERE id=?`, id)
+		`UPDATE users SET locked_at = NULL, locked_until = NULL, failed_login_attempts = 0 WHERE id=?`, id)
 	if err != nil {
 		return fmt.Errorf("unlock user: %w", err)
 	}
@@ -206,7 +230,7 @@ func (r *UserRepo) Delete(ctx context.Context, id int64) error {
 
 // List returns users ordered by created_at. limit <= 0 returns all users.
 func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]*User, error) {
-	query := `SELECT id, username, password_hash, is_admin, api_tokens_enabled, failed_login_attempts, locked_at, created_at FROM users ORDER BY created_at`
+	query := `SELECT id, username, password_hash, is_admin, api_tokens_enabled, failed_login_attempts, locked_at, locked_until, created_at FROM users ORDER BY created_at`
 	var args []any
 	if limit > 0 {
 		query += ` LIMIT ? OFFSET ?`
@@ -222,8 +246,8 @@ func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]*User, error)
 	for rows.Next() {
 		u := &User{}
 		var isAdmin, apiTokensEnabled int
-		var lockedAt sql.NullTime
-		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &isAdmin, &apiTokensEnabled, &u.FailedLoginAttempts, &lockedAt, &u.CreatedAt); err != nil {
+		var lockedAt, lockedUntil sql.NullTime
+		if err := rows.Scan(&u.ID, &u.Username, &u.PasswordHash, &isAdmin, &apiTokensEnabled, &u.FailedLoginAttempts, &lockedAt, &lockedUntil, &u.CreatedAt); err != nil {
 			return nil, err
 		}
 		u.IsAdmin = isAdmin != 0
@@ -231,6 +255,10 @@ func (r *UserRepo) List(ctx context.Context, limit, offset int) ([]*User, error)
 		if lockedAt.Valid {
 			t := lockedAt.Time
 			u.LockedAt = &t
+		}
+		if lockedUntil.Valid {
+			t := lockedUntil.Time
+			u.LockedUntil = &t
 		}
 		users = append(users, u)
 	}

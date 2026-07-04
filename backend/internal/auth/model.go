@@ -11,7 +11,23 @@ type User struct {
 	APITokensEnabled    bool
 	FailedLoginAttempts int
 	LockedAt            *time.Time
+	LockedUntil         *time.Time
 	CreatedAt           time.Time
+}
+
+// Locked reports whether the account's lock is active at the given time.
+// Manual admin locks have no LockedUntil and are indefinite; automatic
+// failed-login locks carry a LockedUntil and lapse once it passes. Callers
+// that can write (e.g. Login) should also clear a lapsed lock via
+// UserRepo.Unlock so the stored state catches up.
+func (u *User) Locked(now time.Time) bool {
+	if u.LockedAt == nil {
+		return false
+	}
+	if u.LockedUntil != nil && !now.Before(*u.LockedUntil) {
+		return false
+	}
+	return true
 }
 
 // Session represents an authenticated session stored in the database.

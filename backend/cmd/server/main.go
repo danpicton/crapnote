@@ -51,6 +51,22 @@ func main() {
 		inviteRepo,
 		time.Duration(ttlDays)*24*time.Hour,
 	)
+	// Automatic-lockout policy: after MAX_FAILED_LOGIN_ATTEMPTS consecutive
+	// failures (default 5) a non-admin account is locked for
+	// LOCKOUT_COOLDOWN_MINUTES (default 15), then unlocks itself. This keeps
+	// brute-force protection without letting three bad requests per username
+	// create a standing, admin-only-recoverable outage. Manual admin locks
+	// remain indefinite.
+	lockoutAttempts := auth.DefaultMaxFailedLoginAttempts
+	lockoutCooldown := auth.DefaultLockoutCooldown
+	if v, err := strconv.Atoi(os.Getenv("MAX_FAILED_LOGIN_ATTEMPTS")); err == nil && v > 0 {
+		lockoutAttempts = v
+	}
+	if v, err := strconv.Atoi(os.Getenv("LOCKOUT_COOLDOWN_MINUTES")); err == nil && v > 0 {
+		lockoutCooldown = time.Duration(v) * time.Minute
+	}
+	authSvc.SetLockoutPolicy(lockoutAttempts, lockoutCooldown)
+
 	authHandler := auth.NewHandler(authSvc)
 	adminHandler := auth.NewAdminHandlerWithInvites(userRepo, sessRepo, authSvc)
 	setupHandler := auth.NewSetupHandler(authSvc)
