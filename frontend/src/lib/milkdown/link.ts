@@ -49,6 +49,10 @@ const SAFE_LINK_SCHEMES = new Set(['http', 'https', 'mailto']);
 export function isSafeHref(href: string): boolean {
 	// eslint-disable-next-line no-control-regex
 	const cleaned = href.replace(/[\u0000-\u0020]/g, '');
+	// Protocol-relative URLs ("//host/…", plus the backslash variants browsers
+	// normalise to slashes) carry no scheme token but resolve OFF-origin, so
+	// they must not pass as relative links.
+	if (/^[/\\]{2}/.test(cleaned)) return false;
 	const match = /^([a-zA-Z][a-zA-Z0-9+.-]*):/.exec(cleaned);
 	if (!match) return true; // relative URL — resolves against our own origin
 	return SAFE_LINK_SCHEMES.has(match[1].toLowerCase());

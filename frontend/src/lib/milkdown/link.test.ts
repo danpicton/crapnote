@@ -92,6 +92,11 @@ describe('isSafeHref / sanitizeHref', () => {
 		'data:text/html,<script>alert(1)</script>',
 		'vbscript:msgbox(1)',
 		'file:///etc/passwd',
+		'//evil.example.com/phish', // protocol-relative resolves off-origin
+		'/\\evil.example.com', // backslash variants browsers normalise to //
+		'\\\\evil.example.com',
+		'\\/evil.example.com',
+		' //evil.example.com', // leading whitespace stripped before checking
 	])('neutralises %s', (href) => {
 		expect(isSafeHref(href)).toBe(false);
 		expect(sanitizeHref(href)).toBe('');
