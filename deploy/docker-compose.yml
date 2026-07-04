@@ -9,7 +9,10 @@ services:
       - PORT=8080
       - DATABASE_PATH=/data/notes.db
       - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme}
+      # No default on purpose: the initial admin is seeded into the database
+      # on first run, so a weak fallback would persist even after the operator
+      # later sets a real password. Compose fails fast when it is unset.
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?set a strong admin password (seeded into the app on first run)}
       - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-7}
       # Set TRUST_PROXY=1 only when a trusted reverse proxy (e.g. nginx,
       # Traefik) sits directly in front of the app; forwarded headers
@@ -85,7 +88,9 @@ services:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_USER=${GRAFANA_USER:-admin}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      # No admin/admin fallback: Grafana can read every Loki log line and
+      # Prometheus metric for the stack, so compose fails fast when unset.
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:?set a Grafana admin password}
       - GF_AUTH_ANONYMOUS_ENABLED=false
     volumes:
       - grafana-data:/var/lib/grafana
