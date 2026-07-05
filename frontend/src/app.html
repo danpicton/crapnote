@@ -3,7 +3,10 @@
 	<head>
 		<meta charset="utf-8" />
 		<link rel="icon" type="image/svg+xml" href="%sveltekit.assets%/favicon.svg" />
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<!-- interactive-widget=resizes-content: shrink the layout viewport (and dvh)
+		     when the on-screen keyboard opens, so bottom-anchored UI (mobile format
+		     bar) sits on top of the keyboard instead of underneath it. -->
+		<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
 		<meta name="theme-color" content="#faf8f4" />
 		<link rel="manifest" href="%sveltekit.assets%/manifest.json" />
 		<link rel="preconnect" href="https://fonts.googleapis.com" />

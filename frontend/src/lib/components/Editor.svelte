@@ -7,8 +7,10 @@
 	import { gfm } from '@milkdown/kit/preset/gfm';
 	import { history } from '@milkdown/kit/plugin/history';
 	import { listener, listenerCtx } from '@milkdown/kit/plugin/listener';
-	import { TextSelection } from '@milkdown/kit/prose/state';
+	import { TextSelection, Plugin } from '@milkdown/kit/prose/state';
+	import { $prose as prosePlugin } from '@milkdown/kit/utils';
 	import { underlinePlugin } from '$lib/milkdown/underline';
+	import { computeActiveFormats, type ActiveFormats } from '$lib/milkdown/formatState';
 	import { imagePlugin } from '$lib/milkdown/image';
 	import { linkPlugin } from '$lib/milkdown/link';
 	import { taskListPlugin } from '$lib/milkdown/tasklist';
@@ -24,13 +26,37 @@
 		onchange?: (markdown: string) => void;
 		ref?: EditorRef | null;
 		oninsertlink?: () => void;
+		onformatchange?: (formats: ActiveFormats) => void;
 		readonly?: boolean;
 	}
 
-	let { value = '', onchange, ref = $bindable<EditorRef | null>(null), oninsertlink, readonly = false }: Props = $props();
+	let { value = '', onchange, ref = $bindable<EditorRef | null>(null), oninsertlink, onformatchange, readonly = false }: Props = $props();
 
 	let container: HTMLDivElement;
 	let _editor: Editor | null = null;
+
+	// Reports which formats are active at the selection (drives the format-bar
+	// button highlight). Recomputes only when selection/doc/stored marks change.
+	const formatListener = prosePlugin(
+		() =>
+			new Plugin({
+				view: (view) => {
+					onformatchange?.(computeActiveFormats(view.state));
+					return {
+						update: (v, prevState) => {
+							if (
+								v.state.selection.eq(prevState.selection) &&
+								v.state.doc.eq(prevState.doc) &&
+								v.state.storedMarks === prevState.storedMarks
+							) {
+								return;
+							}
+							onformatchange?.(computeActiveFormats(v.state));
+						},
+					};
+				},
+			})
+	);
 
 	onMount(async () => {
 		_editor = await Editor.make()
@@ -47,6 +73,7 @@
 			.use(underlinePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(imagePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(linkPlugin as Parameters<typeof Editor.prototype.use>[0])
+			.use(formatListener as Parameters<typeof Editor.prototype.use>[0])
 			.use(history)
 			.use(listener)
 			.create();
