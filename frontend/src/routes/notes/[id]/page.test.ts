@@ -23,8 +23,14 @@ vi.mock('$lib/milkdown/underline', () => ({
 	underlinePlugin: [],
 	toggleUnderlineCommand: { key: 'ToggleUnderline' },
 }));
+// Capture the props the page passes to the (mocked) Editor so tests can
+// drive its callbacks, e.g. onformatchange.
+const editorProps: { current: Record<string, unknown> | null } = { current: null };
 vi.mock('$lib/components/Editor.svelte', async () => ({
-	default: (anchor: unknown, props: unknown) => { void anchor; void props; },
+	default: (anchor: unknown, props: Record<string, unknown>) => {
+		void anchor;
+		editorProps.current = props;
+	},
 }));
 
 // Override the page store to supply a real note id in params
@@ -252,6 +258,30 @@ describe('/notes/[id] offline mode', () => {
 		);
 		expect(api.notes.update).not.toHaveBeenCalled();
 		vi.useRealTimers();
+	});
+});
+
+describe('Mobile format bar active state', () => {
+	it('highlights the Bold button when the editor reports strong active', async () => {
+		const { EMPTY_FORMATS } = await import('$lib/milkdown/formatState');
+
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		const onformatchange = editorProps.current?.onformatchange as
+			| ((f: typeof EMPTY_FORMATS) => void)
+			| undefined;
+		expect(onformatchange).toBeTypeOf('function');
+
+		onformatchange!({ ...EMPTY_FORMATS, strong: true });
+
+		const boldBtn = () =>
+			document.querySelector('.mob-format-bar [aria-label="Bold"]')!;
+		await waitFor(() => expect(boldBtn()).toHaveClass('mob-tb-btn-active'));
+
+		// And it clears again when the cursor moves out of bold text
+		onformatchange!({ ...EMPTY_FORMATS });
+		await waitFor(() => expect(boldBtn()).not.toHaveClass('mob-tb-btn-active'));
 	});
 });
 

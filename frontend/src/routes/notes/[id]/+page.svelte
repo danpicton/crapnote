@@ -27,6 +27,7 @@
 		Star, Pin, Archive, Trash2, MoreHorizontal, RefreshCw, X,
 	} from 'lucide-svelte';
 	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
+	import { EMPTY_FORMATS, type ActiveFormats } from '$lib/milkdown/formatState';
 
 	const noteId = $derived(Number($page.params.id));
 
@@ -46,6 +47,7 @@
 	let showTagSheet = $state(false);
 	let editorFocused = $state(false);
 	let showMobHeadingMenu = $state(false);
+	let activeFormats = $state<ActiveFormats>({ ...EMPTY_FORMATS });
 
 	async function mobToggleStar() {
 		if (!note) return;
@@ -452,6 +454,7 @@
 				onchange={(md) => scheduleAutoSave('body', md)}
 				bind:ref={editorRef}
 				oninsertlink={openLinkDialog}
+				onformatchange={(f) => (activeFormats = f)}
 			/>
 		{/key}
 
@@ -486,25 +489,25 @@
 		<div class="mob-toolbar-scroll">
 			<!-- Heading -->
 			<div class="mob-tb-wrap">
-				<button class="mob-tb-btn" onclick={() => (showMobHeadingMenu = !showMobHeadingMenu)} aria-label="Headings" aria-expanded={showMobHeadingMenu}>H</button>
+				<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.heading !== null} onclick={() => (showMobHeadingMenu = !showMobHeadingMenu)} aria-label="Headings" aria-expanded={showMobHeadingMenu}>H{activeFormats.heading ?? ''}</button>
 				{#if showMobHeadingMenu}
 					<div class="mob-heading-backdrop" onclick={() => (showMobHeadingMenu = false)} role="presentation"></div>
 					<div class="mob-heading-menu">
 						{#each [1,2,3] as level}
-							<button class="mob-tb-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, level); showMobHeadingMenu = false; }} aria-label="Heading {level}">H{level}</button>
+							<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.heading === level} onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, level); showMobHeadingMenu = false; }} aria-label="Heading {level}">H{level}</button>
 						{/each}
 					</div>
 				{/if}
 			</div>
-			<button class="mob-tb-btn" onclick={() => cmd(toggleStrongCommand.key)} aria-label="Bold"><Bold size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} aria-label="Italic"><Italic size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} aria-label="Underline"><Underline size={20} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.strong} onclick={() => cmd(toggleStrongCommand.key)} aria-label="Bold"><Bold size={20} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.emphasis} onclick={() => cmd(toggleEmphasisCommand.key)} aria-label="Italic"><Italic size={20} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.underline} onclick={() => cmd(toggleUnderlineCommand.key)} aria-label="Underline"><Underline size={20} /></button>
 			<button class="mob-tb-btn" onclick={openLinkDialog} aria-label="Insert link"><Link size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(wrapInBlockquoteCommand.key)} aria-label="Quote"><Quote size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} aria-label="Inline code"><Code size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(wrapInBulletListCommand.key)} aria-label="Bullet list"><List size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} aria-label="Ordered list"><ListOrdered size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(wrapInTaskListCommand.key)} aria-label="Checklist"><ListTodo size={20} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.blockquote} onclick={() => cmd(wrapInBlockquoteCommand.key)} aria-label="Quote"><Quote size={20} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.inlineCode} onclick={() => cmd(toggleInlineCodeCommand.key)} aria-label="Inline code"><Code size={20} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.bulletList} onclick={() => cmd(wrapInBulletListCommand.key)} aria-label="Bullet list"><List size={20} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.orderedList} onclick={() => cmd(wrapInOrderedListCommand.key)} aria-label="Ordered list"><ListOrdered size={20} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.taskList} onclick={() => cmd(wrapInTaskListCommand.key)} aria-label="Checklist"><ListTodo size={20} /></button>
 			<button class="mob-tb-btn" onclick={() => cmd(insertHrCommand.key)} aria-label="Horizontal rule"><Minus size={20} /></button>
 			<button class="mob-tb-btn" onclick={() => cmd(undoCommand.key)} aria-label="Undo"><Undo2 size={20} /></button>
 			<button class="mob-tb-btn" onclick={() => cmd(redoCommand.key)} aria-label="Redo"><Redo2 size={20} /></button>
@@ -1071,6 +1074,13 @@
 			font-size: 15px;
 		}
 		.mob-tb-btn:hover { background: var(--bg-hover); }
+		/* Pronounced active state: accent icon on a tinted pill */
+		.mob-tb-btn-active {
+			color: var(--accent-tx);
+			background: var(--accent-lt);
+			box-shadow: inset 0 0 0 1.5px var(--accent);
+		}
+		.mob-tb-btn-active:hover { background: var(--accent-lt); }
 		.mob-heading-backdrop { position: fixed; inset: 0; z-index: 49; }
 		.mob-heading-menu {
 			position: absolute;
