@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/danpicton/crapnote/cli/client"
 )
@@ -31,7 +32,7 @@ const (
 )
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.Getenv))
+	os.Exit(runStdin(os.Args[1:], os.Stdin, os.Stdout, os.Stderr, os.Getenv))
 }
 
 // env carries everything a command needs: resolved config, output streams,
@@ -40,6 +41,7 @@ type env struct {
 	url    string
 	token  string
 	json   bool
+	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
 	client *client.Client
@@ -48,9 +50,14 @@ type env struct {
 
 // run is the testable entrypoint: args (without argv[0]) in, exit code out.
 func run(args []string, stdout, stderr io.Writer, getenv func(string) string) int {
+	return runStdin(args, strings.NewReader(""), stdout, stderr, getenv)
+}
+
+func runStdin(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv func(string) string) int {
 	e := &env{
 		url:    getenv("CRAPNOTE_URL"),
 		token:  getenv("CNP_TOKEN"),
+		stdin:  stdin,
 		stdout: stdout,
 		stderr: stderr,
 		ctx:    context.Background(),
@@ -103,6 +110,24 @@ func newFlagSet(e *env, name string) *flag.FlagSet {
 	fs.StringVar(&e.token, "token", e.token, "API token (env CNP_TOKEN); never logged")
 	fs.BoolVar(&e.json, "json", e.json, "emit structured JSON on stdout, nothing else")
 	return fs
+}
+
+// parseInterspersed parses fs but, unlike stdlib flag, allows flags to appear
+// after positional arguments ("crapnote notes get 7 --json"). Returns the
+// positional arguments in order.
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positional []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		rest := fs.Args()
+		if len(rest) == 0 {
+			return positional, nil
+		}
+		positional = append(positional, rest[0])
+		args = rest[1:]
+	}
 }
 
 // fail prints err to stderr and maps it to an exit code.
