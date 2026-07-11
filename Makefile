@@ -11,7 +11,7 @@ PUBLIC_SYNC_INTERVAL_MS ?= 20000
 export PUBLIC_SYNC_INTERVAL_MS
 
 .PHONY: build run require-admin-password test-e2e test-backend test-frontend \
-        ci ci-full lint-backend lint-frontend check-frontend
+        ci ci-full lint-backend lint-frontend check-frontend build-cli test-cli
 
 ## build: build frontend + backend (delegates to backend/Makefile)
 build:
@@ -30,6 +30,14 @@ run: require-admin-password build
 	ADMIN_USERNAME=$(ADMIN_USERNAME) \
 	ADMIN_PASSWORD=$(ADMIN_PASSWORD) \
 	$(BINARY)
+
+## build-cli: build the crapnote CLI (pure Go, static — cross-compile with GOOS/GOARCH)
+build-cli:
+	cd cli && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o crapnote ./cmd/crapnote
+
+## test-cli: vet + test the CLI module
+test-cli:
+	cd cli && go vet ./... && go test ./...
 
 ## test-e2e: build everything then run Playwright tests
 test-e2e: build
@@ -61,7 +69,7 @@ check-frontend:
 	cd frontend && npm run check
 
 ## ci: fast CI parity — lint + typecheck + unit tests (no e2e, no docker build)
-ci: lint-backend test-backend lint-frontend check-frontend test-frontend
+ci: lint-backend test-backend test-cli lint-frontend check-frontend test-frontend
 	@echo "✓ make ci passed"
 
 ## ci-full: full CI parity including Playwright e2e
