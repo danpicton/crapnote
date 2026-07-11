@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -48,5 +49,19 @@ func TestListNotesSendsBearerTokenAndParsesNotes(t *testing.T) {
 	n := notes[0]
 	if n.ID != 1 || n.Title != "First" || n.Body != "hello world" || !n.Starred {
 		t.Errorf("unexpected note: %+v", n)
+	}
+}
+
+func TestNon2xxResponsesBecomeAPIErrorsWithServerMessage(t *testing.T) {
+	c, _ := newTestServer(t, http.StatusUnauthorized, `{"error":"invalid api token"}`)
+
+	_, err := c.ListNotes(context.Background(), client.ListNotesOptions{})
+
+	var apiErr *client.APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("want *client.APIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusUnauthorized || apiErr.Message != "invalid api token" {
+		t.Errorf("got %+v, want 401 / invalid api token", apiErr)
 	}
 }
