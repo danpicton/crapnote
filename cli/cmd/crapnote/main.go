@@ -100,6 +100,7 @@ var commands = map[string]func(*env, []string) int{
 	"notes":   cmdNotes,
 	"search":  cmdSearch,
 	"archive": cmdArchive,
+	"tags":    cmdTags,
 }
 
 // newFlagSet creates a FlagSet with the global flags bound to e. Defaults are

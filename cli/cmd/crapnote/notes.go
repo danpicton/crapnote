@@ -35,6 +35,12 @@ func cmdNotes(e *env, args []string) int {
 		return notesArchiveOp(e, rest, true)
 	case "unarchive":
 		return notesArchiveOp(e, rest, false)
+	case "tags":
+		return notesTagsList(e, rest)
+	case "tag":
+		return notesTagOp(e, rest, true)
+	case "untag":
+		return notesTagOp(e, rest, false)
 	default:
 		return e.usageError("notes: unknown subcommand %q (see 'crapnote help')", sub)
 	}
