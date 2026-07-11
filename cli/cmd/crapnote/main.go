@@ -97,7 +97,9 @@ func runStdin(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv f
 
 // commands maps a top-level command to its dispatcher.
 var commands = map[string]func(*env, []string) int{
-	"notes": cmdNotes,
+	"notes":   cmdNotes,
+	"search":  cmdSearch,
+	"archive": cmdArchive,
 }
 
 // newFlagSet creates a FlagSet with the global flags bound to e. Defaults are
