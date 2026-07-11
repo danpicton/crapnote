@@ -50,7 +50,7 @@ func cmdNotes(e *env, args []string) int {
 func idArg(e *env, fs *flag.FlagSet, args []string, what string) (int64, int, bool) {
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
-		return 0, exitUsage, false
+		return 0, parseCode(err), false
 	}
 	if len(pos) != 1 {
 		return 0, e.usageError("expected exactly one %s ID argument", what), false
@@ -68,7 +68,7 @@ func notesCreate(e *env, args []string) int {
 	body := fs.String("body", "", "note body (markdown)")
 	bodyFile := fs.String("body-file", "", "read body from file, or '-' for stdin")
 	if err := fs.Parse(args); err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 	if *title == "" {
 		return e.usageError("notes create: --title is required")
@@ -135,7 +135,7 @@ func notesUpdate(e *env, args []string) int {
 	bodyFile := fs.String("body-file", "", "read new body from file, or '-' for stdin")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 	if len(pos) != 1 {
 		return e.usageError("expected exactly one note ID argument")
@@ -246,7 +246,7 @@ func notesList(e *env, args []string) int {
 	limit := fs.Int("limit", 0, "page size (server default 50, max 100)")
 	offset := fs.Int("offset", 0, "page offset")
 	if err := fs.Parse(args); err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 
 	notes, err := e.client.ListNotes(e.ctx, client.ListNotesOptions{

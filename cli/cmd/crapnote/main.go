@@ -71,7 +71,7 @@ func runStdin(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv f
 	top := newFlagSet(e, "crapnote")
 	top.Usage = func() { printUsage(stderr) }
 	if err := top.Parse(args); err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 	rest := top.Args()
 	if len(rest) == 0 {
@@ -115,7 +115,20 @@ func newFlagSet(e *env, name string) *flag.FlagSet {
 	fs.StringVar(&e.url, "url", e.url, "CrapNote server base URL (env CRAPNOTE_URL)")
 	fs.StringVar(&e.token, "token", e.token, "API token (env CNP_TOKEN); never logged")
 	fs.BoolVar(&e.json, "json", e.json, "emit structured JSON on stdout, nothing else")
+	fs.Usage = func() {
+		fmt.Fprintf(e.stderr, "Usage: crapnote %s [flags] [args]\n\nFlags:\n", name)
+		fs.PrintDefaults()
+	}
 	return fs
+}
+
+// parseCode maps a FlagSet parse error to an exit code: --help is success,
+// anything else is a usage error.
+func parseCode(err error) int {
+	if errors.Is(err, flag.ErrHelp) {
+		return exitOK
+	}
+	return exitUsage
 }
 
 // parseInterspersed parses fs but, unlike stdlib flag, allows flags to appear

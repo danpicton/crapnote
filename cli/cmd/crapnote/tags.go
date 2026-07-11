@@ -31,7 +31,7 @@ func tagsList(e *env, args []string) int {
 	limit := fs.Int("limit", 0, "page size (server default 50, max 100)")
 	offset := fs.Int("offset", 0, "page offset")
 	if _, err := parseInterspersed(fs, args); err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 
 	tags, err := e.client.ListTags(e.ctx, *limit, *offset)
@@ -49,7 +49,7 @@ func tagsCreate(e *env, args []string) int {
 	fs := newFlagSet(e, "tags create")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 	if len(pos) != 1 {
 		return e.usageError("usage: crapnote tags create NAME")
@@ -70,7 +70,7 @@ func tagsRename(e *env, args []string) int {
 	fs := newFlagSet(e, "tags rename")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 	if len(pos) != 2 {
 		return e.usageError("usage: crapnote tags rename TAG_ID NEW_NAME")
@@ -134,7 +134,7 @@ func notesTagOp(e *env, args []string, attach bool) int {
 	fs := newFlagSet(e, name)
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 	if len(pos) != 2 {
 		return e.usageError("usage: crapnote %s NOTE_ID TAG_ID", name)

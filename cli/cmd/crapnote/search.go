@@ -14,7 +14,7 @@ func cmdSearch(e *env, args []string) int {
 	offset := fs.Int("offset", 0, "page offset")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 	if len(pos) == 0 {
 		return e.usageError("search: missing query (usage: crapnote search QUERY)")
@@ -44,7 +44,7 @@ func cmdArchive(e *env, args []string) int {
 	limit := fs.Int("limit", 0, "page size (server default 50, max 100)")
 	offset := fs.Int("offset", 0, "page offset")
 	if _, err := parseInterspersed(fs, args[1:]); err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 
 	notes, err := e.client.ListArchived(e.ctx, *limit, *offset)

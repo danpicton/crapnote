@@ -31,7 +31,7 @@ func trashList(e *env, args []string) int {
 	limit := fs.Int("limit", 0, "page size (server default 50, max 100)")
 	offset := fs.Int("offset", 0, "page offset")
 	if _, err := parseInterspersed(fs, args); err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 
 	entries, err := e.client.ListTrash(e.ctx, *limit, *offset)
@@ -87,7 +87,7 @@ func trashPurge(e *env, args []string) int {
 func trashEmpty(e *env, args []string) int {
 	fs := newFlagSet(e, "trash empty")
 	if _, err := parseInterspersed(fs, args); err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 	if err := e.client.EmptyTrash(e.ctx); err != nil {
 		return e.fail(err)
@@ -104,7 +104,7 @@ func cmdExport(e *env, args []string) int {
 	out := fs.String("o", "", "output file (default crapnote-export-YYYY-MM-DD.zip)")
 	password := fs.String("password", "", "encrypt the ZIP with this password")
 	if _, err := parseInterspersed(fs, args); err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 
 	path := *out
@@ -155,7 +155,7 @@ func cmdTokens(e *env, args []string) int {
 func tokensList(e *env, args []string) int {
 	fs := newFlagSet(e, "tokens list")
 	if _, err := parseInterspersed(fs, args); err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 	tokens, err := e.client.ListTokens(e.ctx)
 	if err != nil {
@@ -203,7 +203,7 @@ func tokensRevoke(e *env, args []string) int {
 func tokensRevokeAll(e *env, args []string) int {
 	fs := newFlagSet(e, "tokens revoke-all")
 	if _, err := parseInterspersed(fs, args); err != nil {
-		return exitUsage
+		return parseCode(err)
 	}
 	if err := e.client.RevokeAllTokens(e.ctx); err != nil {
 		return e.fail(err)
