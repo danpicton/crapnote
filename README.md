@@ -227,6 +227,14 @@ Every command takes `--json` (structured output, nothing else on stdout) and
 returns distinct exit codes (0 ok · 2 usage · 3 auth · 4 forbidden · 5 not
 found). See `docs/cli-plan.md` for the full surface.
 
+Because the CLI lives in a Go submodule (`cli/`), its releases are tagged
+`cli/vX.Y.Z` — mirrored automatically from each root `vX.Y.Z` tag by CI.
+`go install` maps the module's versions to those prefixed tags, so `@latest`
+and pinned installs like `@v1.1.1` resolve to real releases. If
+`crapnote version` prints a `v0.0.0-<date>-<commit>` pseudo-version, the
+binary was installed before the prefixed tag existed; reinstall with
+`@latest`.
+
 ### Scopes and restrictions
 
 | Scope | Reads | Writes | Admin routes | Creating more tokens |

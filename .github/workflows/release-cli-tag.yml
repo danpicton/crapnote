@@ -1,0 +1,32 @@
+name: Mirror CLI release tag
+
+# The CLI is a Go submodule at cli/, so `go install .../cli/cmd/crapnote@latest`
+# resolves versions from tags named cli/vX.Y.Z, not the repo-root vX.Y.Z tags.
+# Without the prefixed tag, Go falls back to a v0.0.0 pseudo-version. This
+# workflow mirrors every root release tag to its cli/-prefixed twin.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  mirror:
+    name: Create cli/${{ github.ref_name }} tag
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Push cli/${{ github.ref_name }} if missing
+        run: |
+          set -euo pipefail
+          cli_tag="cli/${GITHUB_REF_NAME}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${cli_tag}" >/dev/null; then
+            echo "${cli_tag} already exists, nothing to do"
+            exit 0
+          fi
+          git tag "${cli_tag}" "${GITHUB_SHA}"
+          git push origin "refs/tags/${cli_tag}"
