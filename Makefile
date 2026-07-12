@@ -32,8 +32,10 @@ run: require-admin-password build
 	$(BINARY)
 
 ## build-cli: build the crapnote CLI (pure Go, static — cross-compile with GOOS/GOARCH)
+CLI_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 build-cli:
-	cd cli && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o crapnote ./cmd/crapnote
+	cd cli && CGO_ENABLED=0 go build -trimpath \
+		-ldflags "-s -w -X main.version=$(CLI_VERSION)" -o crapnote ./cmd/crapnote
 
 ## test-cli: vet + test the CLI module
 test-cli:

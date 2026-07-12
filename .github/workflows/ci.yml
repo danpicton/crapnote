@@ -40,6 +40,33 @@ jobs:
       - name: Test (with FTS5)
         run: CGO_ENABLED=1 go test -tags sqlite_fts5 -race ./...
 
+  # ── Go CLI ──────────────────────────────────────────────────────────────────
+  # Separate module from backend/: pure Go, no CGO, no dependencies (no go.sum,
+  # hence cache: false).
+  cli:
+    name: CLI (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+          cache: false
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Build (static)
+        run: CGO_ENABLED=0 go build ./...
+
+      - name: Test
+        run: go test -race ./...
+
   # ── Svelte / TypeScript frontend ────────────────────────────────────────────
   frontend:
     name: Frontend (Node)
