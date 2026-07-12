@@ -10,7 +10,7 @@ func TestHelpCommandPrintsCommandSummaryAndExitsZero(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	for _, want := range []string{"notes", "search", "tags", "trash", "export", "tokens", "Exit codes", "--json", "crapnote help <command>"} {
+	for _, want := range []string{"notes", "search", "tags", "trash", "export", "tokens", "version", "Exit codes", "--json", "crapnote help <command>"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("help output missing %q", want)
 		}
@@ -58,9 +58,6 @@ func TestHelpUnknownTopicExits2(t *testing.T) {
 
 func TestEveryCommandHasAHelpTopic(t *testing.T) {
 	for cmd := range commands {
-		if cmd == "version" {
-			continue // deliberately undocumented in help: it just prints the version
-		}
 		if _, ok := helpTopics[cmd]; !ok {
 			t.Errorf("command %q has no help topic", cmd)
 		}

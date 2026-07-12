@@ -21,6 +21,7 @@ Commands:
   trash    list, restore, or permanently delete trashed notes
   export   download all notes and images as a ZIP
   tokens   list and revoke API tokens
+  version  print the CLI version
   help     show this summary, or details for one command
 
 Global flags (valid in any position):
@@ -140,6 +141,10 @@ Subcommands:
 Tokens cannot be created from the CLI by design: the API only mints tokens
 over a browser session. Create one in the web UI under Settings → Developer
 (scope "read" or "read_write"), then pass it via CNP_TOKEN or --token.
+`,
+	// version needs no detail beyond its summary line, so its "topic" is
+	// exactly that line.
+	"version": `  version  print the CLI version
 `,
 	"help": `Show help.
 

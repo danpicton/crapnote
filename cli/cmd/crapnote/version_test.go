@@ -40,6 +40,20 @@ func TestVersionJSONEmitsStructuredOutput(t *testing.T) {
 	}
 }
 
+// version's help is deliberately just its summary line — the command needs
+// no more explanation than that.
+func TestVersionHelpShowsOnlySummaryLine(t *testing.T) {
+	for _, args := range [][]string{{"help", "version"}, {"version", "--help"}, {"version", "help"}} {
+		stdout, _, code := runCLI(t, nil, args...)
+		if code != 0 {
+			t.Errorf("%v: exit = %d, want 0", args, code)
+		}
+		if want := "  version  print the CLI version\n"; stdout != want {
+			t.Errorf("%v: stdout = %q, want %q", args, stdout, want)
+		}
+	}
+}
+
 func TestVersionRejectsPositionalArgs(t *testing.T) {
 	_, _, code := runCLI(t, nil, "version", "extra")
 	if code != 2 {
