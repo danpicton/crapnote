@@ -43,9 +43,14 @@ cli/
 | `search QUERY` | `GET /api/notes?search=…` (FTS5 — no separate endpoint) |
 | `notes tags ID` / `notes tag ID TAG_ID` / `notes untag ID TAG_ID` | `GET/POST /api/notes/{id}/tags`, `DELETE …/tags/{tid}` |
 | `tags list` / `tags create NAME` / `tags rename ID NAME` / `tags delete ID` | `/api/tags…` |
-| `trash list` / `trash restore ID` / `trash purge ID` / `trash empty` | `/api/trash…` |
-| `export [-o FILE] [--password P]` | `POST /api/export` (ZIP stream) |
-| `tokens list` / `tokens revoke ID` / `tokens revoke-all` | `/api/tokens…` |
+| `trash list` / `trash restore ID` / `trash purge ID --yes` / `trash empty --yes` | `/api/trash…` |
+| `export [-o FILE] [--password P]` (or env `CNP_EXPORT_PASSWORD`) | `POST /api/export` (ZIP stream) |
+| `tokens list` / `tokens revoke ID` / `tokens revoke-all --yes` | `/api/tokens…` |
+
+Irreversible commands (`trash purge`, `trash empty`, `tokens revoke-all`)
+require `--yes`, mirroring the web UI's confirm dialogs. The export password
+can come from `CNP_EXPORT_PASSWORD` so it stays out of `ps` output and shell
+history.
 
 Token **creation** is deliberately unsupported: the server only mints tokens
 over a cookie session (`cookieOnly` in `backend/cmd/server/server.go`), so the

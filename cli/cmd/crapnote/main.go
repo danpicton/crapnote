@@ -44,6 +44,7 @@ type env struct {
 	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
+	getenv func(string) string
 	client *client.Client
 	ctx    context.Context
 }
@@ -60,6 +61,7 @@ func runStdin(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv f
 		stdin:  stdin,
 		stdout: stdout,
 		stderr: stderr,
+		getenv: getenv,
 		ctx:    context.Background(),
 	}
 	if e.url == "" {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -69,11 +70,29 @@ func trashRestore(e *env, args []string) int {
 	return exitOK
 }
 
+// confirmYes registers --yes on fs and returns a check to run after parsing:
+// destructive commands refuse to fire without it, mirroring the web UI's
+// confirm dialogs.
+func confirmYes(e *env, fs *flag.FlagSet, what string) func() bool {
+	yes := fs.Bool("yes", false, "confirm this irreversible action")
+	return func() bool {
+		if !*yes {
+			e.usageError("%s is irreversible — re-run with --yes to confirm", what)
+			return false
+		}
+		return true
+	}
+}
+
 func trashPurge(e *env, args []string) int {
 	fs := newFlagSet(e, "trash purge")
+	confirmed := confirmYes(e, fs, "trash purge (permanently deleting a note)")
 	id, code, ok := idArg(e, fs, args, "note")
 	if !ok {
 		return code
+	}
+	if !confirmed() {
+		return exitUsage
 	}
 	if err := e.client.PurgeNote(e.ctx, id); err != nil {
 		return e.fail(err)
@@ -86,8 +105,12 @@ func trashPurge(e *env, args []string) int {
 
 func trashEmpty(e *env, args []string) int {
 	fs := newFlagSet(e, "trash empty")
+	confirmed := confirmYes(e, fs, "trash empty (permanently deleting every trashed note)")
 	if _, err := parseInterspersed(fs, args); err != nil {
 		return parseCode(err)
+	}
+	if !confirmed() {
+		return exitUsage
 	}
 	if err := e.client.EmptyTrash(e.ctx); err != nil {
 		return e.fail(err)
@@ -102,9 +125,15 @@ func trashEmpty(e *env, args []string) int {
 func cmdExport(e *env, args []string) int {
 	fs := newFlagSet(e, "export")
 	out := fs.String("o", "", "output file (default crapnote-export-YYYY-MM-DD.zip)")
-	password := fs.String("password", "", "encrypt the ZIP with this password")
+	password := fs.String("password", "",
+		"encrypt the ZIP with this password (prefer env CNP_EXPORT_PASSWORD — flags leak via ps and shell history)")
 	if _, err := parseInterspersed(fs, args); err != nil {
 		return parseCode(err)
+	}
+	// Env fallback keeps the password out of process listings and history.
+	pw := *password
+	if pw == "" {
+		pw = e.getenv("CNP_EXPORT_PASSWORD")
 	}
 
 	path := *out
@@ -115,7 +144,7 @@ func cmdExport(e *env, args []string) int {
 	if err != nil {
 		return e.fail(err)
 	}
-	if err := e.client.Export(e.ctx, *password, f); err != nil {
+	if err := e.client.Export(e.ctx, pw, f); err != nil {
 		f.Close()           //nolint:errcheck,gosec
 		_ = os.Remove(path) // don't leave a partial archive behind
 		return e.fail(err)
@@ -202,8 +231,12 @@ func tokensRevoke(e *env, args []string) int {
 
 func tokensRevokeAll(e *env, args []string) int {
 	fs := newFlagSet(e, "tokens revoke-all")
+	confirmed := confirmYes(e, fs, "tokens revoke-all (revoking every API token, including this one)")
 	if _, err := parseInterspersed(fs, args); err != nil {
 		return parseCode(err)
+	}
+	if !confirmed() {
+		return exitUsage
 	}
 	if err := e.client.RevokeAllTokens(e.ctx); err != nil {
 		return e.fail(err)

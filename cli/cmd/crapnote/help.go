@@ -43,16 +43,18 @@ Tags:
 Trash (notes are auto-purged ~7 days after deletion):
   trash list                           list trashed notes with purge deadline
   trash restore NOTE_ID
-  trash purge NOTE_ID                  permanently delete one note (irreversible)
-  trash empty                          permanently delete everything in trash
+  trash purge NOTE_ID --yes            permanently delete one note (irreversible)
+  trash empty --yes                    permanently delete everything in trash
 
 Export:
   export [-o FILE] [--password P]      download all notes + images as a ZIP
+    Prefer env CNP_EXPORT_PASSWORD over --password: flags are visible in
+    process listings and shell history.
 
 API tokens:
   tokens list                          list your tokens (metadata only)
   tokens revoke TOKEN_ID
-  tokens revoke-all                    revoke every token, including this one
+  tokens revoke-all --yes              revoke every token, including this one
 
 Examples:
   export CNP_TOKEN=cnp_xxx

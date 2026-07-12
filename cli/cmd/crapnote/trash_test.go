@@ -35,8 +35,8 @@ func TestTrashRestorePurgeAndEmpty(t *testing.T) {
 
 	for _, args := range [][]string{
 		{"trash", "restore", "7"},
-		{"trash", "purge", "7"},
-		{"trash", "empty"},
+		{"trash", "purge", "7", "--yes"},
+		{"trash", "empty", "--yes"},
 	} {
 		if _, stderr, code := runCLI(t, nil, append([]string{"--url", srv.URL, "--token", "t"}, args...)...); code != 0 {
 			t.Fatalf("%v exit = %d, stderr: %s", args, code, stderr)
@@ -103,7 +103,7 @@ func TestTokensRevokeAndRevokeAll(t *testing.T) {
 	if _, _, code := runCLI(t, nil, "--url", srv.URL, "--token", "t", "tokens", "revoke", "1"); code != 0 {
 		t.Fatalf("revoke exit = %d", code)
 	}
-	if _, _, code := runCLI(t, nil, "--url", srv.URL, "--token", "t", "tokens", "revoke-all"); code != 0 {
+	if _, _, code := runCLI(t, nil, "--url", srv.URL, "--token", "t", "tokens", "revoke-all", "--yes"); code != 0 {
 		t.Fatalf("revoke-all exit = %d", code)
 	}
 	want := []string{"DELETE /api/tokens/1", "POST /api/tokens/revoke-all"}
