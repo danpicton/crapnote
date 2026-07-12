@@ -21,7 +21,6 @@ Commands:
   trash    list, restore, or permanently delete trashed notes
   export   download all notes and images as a ZIP
   tokens   list and revoke API tokens
-  version  print the CLI version
   help     show this summary, or details for one command
 
 Global flags (valid in any position):
@@ -141,14 +140,6 @@ Subcommands:
 Tokens cannot be created from the CLI by design: the API only mints tokens
 over a browser session. Create one in the web UI under Settings → Developer
 (scope "read" or "read_write"), then pass it via CNP_TOKEN or --token.
-`,
-	"version": `Print the CLI version.
-
-Usage:
-  crapnote version [--json]
-
-Human output is a single line; --json emits version, commit, build date,
-and Go version as a JSON object.
 `,
 	"help": `Show help.
 
