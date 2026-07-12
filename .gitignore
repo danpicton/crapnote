@@ -54,3 +54,4 @@ backend/cmd/server/ui/build/index.html
 # Migrations (generated)
 # migrations/*.sql kept in VCS intentionally
 node_modules/
+cli/crapnote

@@ -208,6 +208,23 @@ CNP_TOKEN=cnp_xxx curl -H "Authorization: Bearer $CNP_TOKEN" \
   http://localhost:8080/api/notes
 ```
 
+### CLI
+
+A Go CLI wraps the API for shells and AI agents (module `cli/`, pure Go, no
+CGO):
+
+```bash
+go install github.com/danpicton/crapnote/cli/cmd/crapnote@latest   # or: make build-cli
+export CNP_TOKEN=cnp_xxx           # CRAPNOTE_URL defaults to http://localhost:8080
+crapnote notes create --title "Idea" --body-file -   # body from stdin
+crapnote search "quarterly report" --json            # FTS5, agent-friendly output
+crapnote help                                        # full command reference
+```
+
+Every command takes `--json` (structured output, nothing else on stdout) and
+returns distinct exit codes (0 ok · 2 usage · 3 auth · 4 forbidden · 5 not
+found). See `docs/cli-plan.md` for the full surface.
+
 ### Scopes and restrictions
 
 | Scope | Reads | Writes | Admin routes | Creating more tokens |
