@@ -52,10 +52,6 @@ func versionInfo() buildVersion {
 }
 
 func cmdVersion(e *env, args []string) int {
-	if len(args) > 0 && isHelpArg(args[0]) {
-		printTopicHelp(e.stdout, "version")
-		return exitOK
-	}
 	fs := newFlagSet(e, "version")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
