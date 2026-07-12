@@ -13,9 +13,13 @@ import (
 
 func cmdNotes(e *env, args []string) int {
 	if len(args) == 0 {
-		return e.usageError("notes: missing subcommand (see 'crapnote help')")
+		return e.topicUsageError("notes", "notes: missing subcommand")
 	}
 	sub, rest := args[0], args[1:]
+	if isHelpArg(sub) {
+		printTopicHelp(e.stdout, "notes")
+		return exitOK
+	}
 	switch sub {
 	case "list":
 		return notesList(e, rest)
@@ -42,7 +46,7 @@ func cmdNotes(e *env, args []string) int {
 	case "untag":
 		return notesTagOp(e, rest, false)
 	default:
-		return e.usageError("notes: unknown subcommand %q (see 'crapnote help')", sub)
+		return e.topicUsageError("notes", "notes: unknown subcommand %q", sub)
 	}
 }
 

@@ -9,9 +9,13 @@ import (
 
 func cmdTags(e *env, args []string) int {
 	if len(args) == 0 {
-		return e.usageError("tags: missing subcommand (see 'crapnote help')")
+		return e.topicUsageError("tags", "tags: missing subcommand")
 	}
 	sub, rest := args[0], args[1:]
+	if isHelpArg(sub) {
+		printTopicHelp(e.stdout, "tags")
+		return exitOK
+	}
 	switch sub {
 	case "list":
 		return tagsList(e, rest)
@@ -22,7 +26,7 @@ func cmdTags(e *env, args []string) int {
 	case "delete":
 		return tagsDelete(e, rest)
 	default:
-		return e.usageError("tags: unknown subcommand %q (see 'crapnote help')", sub)
+		return e.topicUsageError("tags", "tags: unknown subcommand %q", sub)
 	}
 }
 

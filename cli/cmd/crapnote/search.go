@@ -9,6 +9,10 @@ import (
 // cmdSearch full-text-searches notes (FTS5 on the server). Multiple
 // positional words are joined into one query.
 func cmdSearch(e *env, args []string) int {
+	if len(args) == 1 && isHelpArg(args[0]) {
+		printTopicHelp(e.stdout, "search")
+		return exitOK
+	}
 	fs := newFlagSet(e, "search")
 	limit := fs.Int("limit", 0, "page size (server default 50, max 100)")
 	offset := fs.Int("offset", 0, "page offset")
@@ -17,7 +21,7 @@ func cmdSearch(e *env, args []string) int {
 		return parseCode(err)
 	}
 	if len(pos) == 0 {
-		return e.usageError("search: missing query (usage: crapnote search QUERY)")
+		return e.topicUsageError("search", "search: missing query")
 	}
 
 	notes, err := e.client.ListNotes(e.ctx, client.ListNotesOptions{
@@ -37,8 +41,12 @@ func cmdSearch(e *env, args []string) int {
 
 // cmdArchive lists archived notes.
 func cmdArchive(e *env, args []string) int {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		printTopicHelp(e.stdout, "archive")
+		return exitOK
+	}
 	if len(args) == 0 || args[0] != "list" {
-		return e.usageError("archive: expected 'list' subcommand")
+		return e.topicUsageError("archive", "archive: expected 'list' subcommand")
 	}
 	fs := newFlagSet(e, "archive list")
 	limit := fs.Int("limit", 0, "page size (server default 50, max 100)")

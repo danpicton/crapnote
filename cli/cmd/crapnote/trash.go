@@ -10,9 +10,13 @@ import (
 
 func cmdTrash(e *env, args []string) int {
 	if len(args) == 0 {
-		return e.usageError("trash: missing subcommand (see 'crapnote help')")
+		return e.topicUsageError("trash", "trash: missing subcommand")
 	}
 	sub, rest := args[0], args[1:]
+	if isHelpArg(sub) {
+		printTopicHelp(e.stdout, "trash")
+		return exitOK
+	}
 	switch sub {
 	case "list":
 		return trashList(e, rest)
@@ -23,7 +27,7 @@ func cmdTrash(e *env, args []string) int {
 	case "empty":
 		return trashEmpty(e, rest)
 	default:
-		return e.usageError("trash: unknown subcommand %q (see 'crapnote help')", sub)
+		return e.topicUsageError("trash", "trash: unknown subcommand %q", sub)
 	}
 }
 
@@ -123,6 +127,10 @@ func trashEmpty(e *env, args []string) int {
 
 // cmdExport downloads the notes+images ZIP export.
 func cmdExport(e *env, args []string) int {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		printTopicHelp(e.stdout, "export")
+		return exitOK
+	}
 	fs := newFlagSet(e, "export")
 	out := fs.String("o", "", "output file (default crapnote-export-YYYY-MM-DD.zip)")
 	password := fs.String("password", "",
@@ -163,9 +171,13 @@ func cmdExport(e *env, args []string) int {
 // unsupported: the server only mints tokens over a cookie session.
 func cmdTokens(e *env, args []string) int {
 	if len(args) == 0 {
-		return e.usageError("tokens: missing subcommand (see 'crapnote help')")
+		return e.topicUsageError("tokens", "tokens: missing subcommand")
 	}
 	sub, rest := args[0], args[1:]
+	if isHelpArg(sub) {
+		printTopicHelp(e.stdout, "tokens")
+		return exitOK
+	}
 	switch sub {
 	case "list":
 		return tokensList(e, rest)
@@ -177,7 +189,7 @@ func cmdTokens(e *env, args []string) int {
 		return e.usageError("tokens create: the API only mints tokens over a browser session — " +
 			"create one in the web UI under Settings → Developer, then pass it via CNP_TOKEN or --token")
 	default:
-		return e.usageError("tokens: unknown subcommand %q (see 'crapnote help')", sub)
+		return e.topicUsageError("tokens", "tokens: unknown subcommand %q", sub)
 	}
 }
 

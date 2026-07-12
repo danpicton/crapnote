@@ -218,7 +218,9 @@ go install github.com/danpicton/crapnote/cli/cmd/crapnote@latest   # or: make bu
 export CNP_TOKEN=cnp_xxx           # CRAPNOTE_URL defaults to http://localhost:8080
 crapnote notes create --title "Idea" --body-file -   # body from stdin
 crapnote search "quarterly report" --json            # FTS5, agent-friendly output
-crapnote help                                        # full command reference
+crapnote help                                        # command summary
+crapnote help notes                                  # details for one command
+crapnote version                                     # CLI version (also --json)
 ```
 
 Every command takes `--json` (structured output, nothing else on stdout) and

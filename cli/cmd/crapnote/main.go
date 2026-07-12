@@ -71,9 +71,13 @@ func runStdin(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv f
 	// Global flags may appear before the command; they are also re-registered
 	// on every subcommand FlagSet so they work in any position.
 	top := newFlagSet(e, "crapnote")
+	topVersion := top.Bool("version", false, "print the CLI version and exit")
 	top.Usage = func() { printUsage(stderr) }
 	if err := top.Parse(args); err != nil {
 		return parseCode(err)
+	}
+	if *topVersion {
+		return cmdVersion(e, nil)
 	}
 	rest := top.Args()
 	if len(rest) == 0 {
@@ -82,9 +86,8 @@ func runStdin(args []string, stdin io.Reader, stdout, stderr io.Writer, getenv f
 	}
 
 	cmd, rest := rest[0], rest[1:]
-	if cmd == "help" || cmd == "--help" || cmd == "-h" {
-		printUsage(stdout)
-		return exitOK
+	if isHelpArg(cmd) {
+		return cmdHelp(e, rest)
 	}
 
 	dispatch, ok := commands[cmd]
@@ -106,6 +109,22 @@ var commands = map[string]func(*env, []string) int{
 	"trash":   cmdTrash,
 	"export":  cmdExport,
 	"tokens":  cmdTokens,
+	"version": cmdVersion,
+}
+
+// cmdHelp implements 'crapnote help [command]': the top-level summary with
+// no argument, detailed per-command help with one.
+func cmdHelp(e *env, args []string) int {
+	if len(args) == 0 {
+		printUsage(e.stdout)
+		return exitOK
+	}
+	if printTopicHelp(e.stdout, args[0]) {
+		return exitOK
+	}
+	fmt.Fprintf(e.stderr, "crapnote: unknown help topic %q\n\n", args[0])
+	printUsage(e.stderr)
+	return exitUsage
 }
 
 // newFlagSet creates a FlagSet with the global flags bound to e. Defaults are
