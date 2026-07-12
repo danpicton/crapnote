@@ -40,6 +40,18 @@ func TestVersionJSONEmitsStructuredOutput(t *testing.T) {
 	}
 }
 
+func TestVersionHelpShowsTopicHelp(t *testing.T) {
+	for _, arg := range []string{"help", "--help"} {
+		stdout, _, code := runCLI(t, nil, "version", arg)
+		if code != 0 {
+			t.Errorf("version %s: exit = %d, want 0", arg, code)
+		}
+		if !strings.Contains(stdout, "crapnote version [--json]") {
+			t.Errorf("version %s: output missing topic help:\n%s", arg, stdout)
+		}
+	}
+}
+
 func TestVersionRejectsPositionalArgs(t *testing.T) {
 	_, _, code := runCLI(t, nil, "version", "extra")
 	if code != 2 {
