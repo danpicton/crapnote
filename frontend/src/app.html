@@ -99,7 +99,7 @@
 			   plates, chrome-indigo bevel seams, carbon-navy command layer,
 			   and warm colour rationed strictly for action (signal orange /
 			   amber / nav gold). Era-faithful Arial voice throughout. */
-			[data-theme="nintendo-2001"] {
+			[data-theme="console-2001"] {
 				/* The era's web-safe reality: Arial everywhere */
 				--serif: Arial, Helvetica, sans-serif;
 				--sans:  Arial, Helvetica, sans-serif;
@@ -136,7 +136,7 @@
 			}
 
 			/* Brushed-metal faceplate: faint vertical machining lines */
-			[data-theme="nintendo-2001"] body {
+			[data-theme="console-2001"] body {
 				background-image: repeating-linear-gradient(
 					90deg,
 					rgba(255, 255, 255, 0.05) 0px, rgba(255, 255, 255, 0.05) 1px,
@@ -147,7 +147,7 @@
 			/* Silkscreen-legend voice: uppercase Arial Bold with tracking on
 			   every control; beveled-chip depth (bright top edge, hard indigo
 			   shadow line beneath) instead of flat fills. */
-			[data-theme="nintendo-2001"] button {
+			[data-theme="console-2001"] button {
 				text-transform: uppercase;
 				letter-spacing: 0.5px;
 				font-weight: 700;
@@ -157,16 +157,16 @@
 					inset 0 -1px 0 rgba(33, 36, 46, 0.3),
 					0 1px 0 #3d4f97;
 			}
-			[data-theme="nintendo-2001"] button:active {
+			[data-theme="console-2001"] button:active {
 				box-shadow:
 					inset 0 1px 0 rgba(33, 36, 46, 0.3),
 					inset 0 -1px 0 rgba(255, 255, 255, 0.35);
 			}
 
 			/* Inputs are inset white plates with a chrome-indigo recess edge */
-			[data-theme="nintendo-2001"] input:not([type="checkbox"]):not([type="radio"]),
-			[data-theme="nintendo-2001"] textarea,
-			[data-theme="nintendo-2001"] select {
+			[data-theme="console-2001"] input:not([type="checkbox"]):not([type="radio"]),
+			[data-theme="console-2001"] textarea,
+			[data-theme="console-2001"] select {
 				background-color: #ffffff;
 				border-radius: 2px;
 				box-shadow: inset 1px 1px 0 rgba(61, 79, 151, 0.3);
@@ -176,10 +176,10 @@
 			   outline and hard indigo drop shadow — never flat. */
 			/* html prefix outranks the component stylesheets, which load after
 			   this inline block and would otherwise win the specificity tie */
-			html[data-theme="nintendo-2001"] .wordmark,
-			html[data-theme="nintendo-2001"] .mob-wordmark,
-			html[data-theme="nintendo-2001"] .page-title,
-			html[data-theme="nintendo-2001"] .mob-page-title {
+			html[data-theme="console-2001"] .wordmark,
+			html[data-theme="console-2001"] .mob-wordmark,
+			html[data-theme="console-2001"] .page-title,
+			html[data-theme="console-2001"] .mob-page-title {
 				color: #ffffff;
 				font-style: italic;
 				font-weight: 900;
@@ -190,17 +190,106 @@
 			}
 
 			/* Panel headers get the uppercase chrome-label treatment */
-			[data-theme="nintendo-2001"] h2 {
+			[data-theme="console-2001"] h2 {
 				text-transform: uppercase;
 				letter-spacing: 0.5px;
 			}
 
 			/* Editor keeps the Arial-era voice */
-			[data-theme="nintendo-2001"] .ProseMirror,
-			[data-theme="nintendo-2001"] .ProseMirror h1,
-			[data-theme="nintendo-2001"] .ProseMirror h2,
-			[data-theme="nintendo-2001"] .ProseMirror h3 {
+			[data-theme="console-2001"] .ProseMirror,
+			[data-theme="console-2001"] .ProseMirror h1,
+			[data-theme="console-2001"] .ProseMirror h2,
+			[data-theme="console-2001"] .ProseMirror h3 {
 				font-family: Arial, Helvetica, sans-serif;
+			}
+
+			/* ── Rosso — cinematic near-black editorial ────────────────────
+			   Luxury-magazine restraint: a warm near-black canvas (never pure
+			   black), white display type at weight 500 (never bold), grey
+			   running text, and a single scarce accent — racing red — spent
+			   only on primary actions. Depth is brightness-step, not shadow;
+			   corners are sharp; CTA labels run uppercase with wide tracking. */
+			[data-theme="rosso"] {
+				/* Single sans family across every text role (Inter stands in
+				   for the licensed face; already loaded for the base theme) */
+				--serif: "Inter", -apple-system, system-ui, sans-serif;
+				--sans:  "Inter", -apple-system, system-ui, sans-serif;
+
+				--bg:         #181818;   /* near-black canvas, slight warmth */
+				--bg-alt:     #202020;   /* one brightness step up */
+				--bg-toolbar: #303030;   /* canvas-elevated */
+				--bg-hover:   #303030;
+				--bg-select:  #303030;
+				--bg-active:  #3c3c3c;
+
+				--border:     #303030;   /* 1px hairline on dark */
+				--border-md:  #3c3c3c;
+				--border-hi:  #666666;
+
+				--text:       #ffffff;   /* ink */
+				--text-2:     #969696;   /* default running text */
+				--text-3:     #8f8f8f;   /* muted-soft */
+				--text-4:     #666666;   /* muted captions */
+
+				--accent:     #da291c;   /* racing red — used scarcely */
+				--accent-dk:  #b01e0a;   /* press state */
+				--accent-lt:  rgba(218, 41, 28, 0.12);
+				--accent-tx:  #da291c;
+
+				--danger:     #f13a2c;   /* validation warning */
+				--danger-bg:  #2a1210;
+				--danger-bd:  #7a221b;
+
+				--focus-ring: rgba(246, 229, 0, 0.4);  /* brand yellow focus ring */
+				/* Single soft shadow tier — no Material elevation ladder */
+				--shadow:     0 4px 8px rgba(0, 0, 0, 0.4);
+			}
+
+			/* CTA voice: uppercase, 1.4px tracking, sharp 0px corners */
+			[data-theme="rosso"] button {
+				text-transform: uppercase;
+				letter-spacing: 1.4px;
+				font-weight: 700;
+				border-radius: 0;
+			}
+
+			/* Form inputs are the one place a small radius is allowed (4px) */
+			[data-theme="rosso"] input:not([type="checkbox"]):not([type="radio"]),
+			[data-theme="rosso"] textarea,
+			[data-theme="rosso"] select {
+				border-radius: 4px;
+			}
+
+			/* Display type stays at weight 500 with negative tracking —
+			   editorial confidence, never bold. html prefix outranks the
+			   component stylesheets that load after this inline block. */
+			html[data-theme="rosso"] .wordmark,
+			html[data-theme="rosso"] .mob-wordmark,
+			html[data-theme="rosso"] .page-title,
+			html[data-theme="rosso"] .mob-page-title {
+				font-weight: 500;
+				font-style: normal;
+				letter-spacing: -0.02em;
+			}
+			html[data-theme="rosso"] h2 {
+				font-weight: 500;
+				letter-spacing: -0.01em;
+			}
+
+			/* Editor follows the single-sans editorial voice */
+			[data-theme="rosso"] .ProseMirror,
+			[data-theme="rosso"] .ProseMirror h1,
+			[data-theme="rosso"] .ProseMirror h2,
+			[data-theme="rosso"] .ProseMirror h3 {
+				font-family: "Inter", -apple-system, system-ui, sans-serif;
+			}
+			[data-theme="rosso"] .ProseMirror h1 {
+				font-weight: 500;
+				letter-spacing: -0.02em;
+			}
+			[data-theme="rosso"] .ProseMirror h2,
+			[data-theme="rosso"] .ProseMirror h3 {
+				font-weight: 500;
 			}
 
 			/* Base colours on the root so the background is always themed */

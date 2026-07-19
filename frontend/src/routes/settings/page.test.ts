@@ -39,7 +39,8 @@ const mockTheme = vi.hoisted(() => ({
 	themes: [
 		{ id: 'light', label: 'Light' },
 		{ id: 'dark', label: 'Dark' },
-		{ id: 'nintendo-2001', label: 'Nintendo 2001' },
+		{ id: 'console-2001', label: 'Console 2001' },
+		{ id: 'rosso', label: 'Rosso' },
 	],
 	set: vi.fn(),
 	toggle: vi.fn(),
@@ -105,14 +106,14 @@ describe('Settings — Appearance', () => {
 		render(SettingsPage);
 		const select = screen.getByRole('combobox', { name: /theme/i });
 		const options = Array.from(select.querySelectorAll('option')).map((o) => o.value);
-		expect(options).toEqual(['light', 'dark', 'nintendo-2001']);
+		expect(options).toEqual(['light', 'dark', 'console-2001', 'rosso']);
 	});
 
 	it('selects the current theme', () => {
-		mockTheme.current = 'nintendo-2001';
+		mockTheme.current = 'console-2001';
 		render(SettingsPage);
 		const select = screen.getByRole('combobox', { name: /theme/i }) as HTMLSelectElement;
-		expect(select.value).toBe('nintendo-2001');
+		expect(select.value).toBe('console-2001');
 	});
 
 	it('calls theme.set() with the chosen theme on change', async () => {
@@ -120,8 +121,8 @@ describe('Settings — Appearance', () => {
 		mockTheme.set = vi.fn();
 		render(SettingsPage);
 		const select = screen.getByRole('combobox', { name: /theme/i });
-		await fireEvent.change(select, { target: { value: 'nintendo-2001' } });
-		expect(mockTheme.set).toHaveBeenCalledWith('nintendo-2001');
+		await fireEvent.change(select, { target: { value: 'console-2001' } });
+		expect(mockTheme.set).toHaveBeenCalledWith('console-2001');
 	});
 });
 

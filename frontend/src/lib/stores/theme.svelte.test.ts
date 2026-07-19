@@ -45,11 +45,18 @@ describe('theme store', () => {
 		expect(theme.current).toBe('light');
 	});
 
-	it('reads "nintendo-2001" theme from localStorage on init', async () => {
-		localStorage.setItem(STORAGE_KEY, 'nintendo-2001');
+	it('reads "console-2001" theme from localStorage on init', async () => {
+		localStorage.setItem(STORAGE_KEY, 'console-2001');
 		const theme = await freshTheme();
 		theme.init();
-		expect(theme.current).toBe('nintendo-2001');
+		expect(theme.current).toBe('console-2001');
+	});
+
+	it('reads "rosso" theme from localStorage on init', async () => {
+		localStorage.setItem(STORAGE_KEY, 'rosso');
+		const theme = await freshTheme();
+		theme.init();
+		expect(theme.current).toBe('rosso');
 	});
 
 	it('defaults to dark when system prefers-color-scheme is dark and no stored preference', async () => {
@@ -74,17 +81,20 @@ describe('theme store', () => {
 
 	it('exposes the list of available themes with ids and labels', async () => {
 		const theme = await freshTheme();
-		expect(theme.themes.map((t) => t.id)).toEqual(['light', 'dark', 'nintendo-2001']);
-		for (const t of theme.themes) {
-			expect(t.label).toBeTruthy();
-		}
+		expect(theme.themes.map((t) => t.id)).toEqual(['light', 'dark', 'console-2001', 'rosso']);
+		expect(theme.themes.map((t) => t.label)).toEqual([
+			'Claude',
+			'Claude Dark',
+			'Console 2001',
+			'Rosso',
+		]);
 	});
 
 	it('set() switches to the requested theme', async () => {
 		const theme = await freshTheme();
 		theme.init();
-		theme.set('nintendo-2001');
-		expect(theme.current).toBe('nintendo-2001');
+		theme.set('console-2001');
+		expect(theme.current).toBe('console-2001');
 	});
 
 	it('set() persists the new theme to localStorage', async () => {
@@ -97,8 +107,8 @@ describe('theme store', () => {
 	it('set() updates the data-theme attribute', async () => {
 		const theme = await freshTheme();
 		theme.init();
-		theme.set('nintendo-2001');
-		expect(document.documentElement.getAttribute('data-theme')).toBe('nintendo-2001');
+		theme.set('console-2001');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('console-2001');
 	});
 
 	it('set() ignores unknown theme ids', async () => {
@@ -125,8 +135,8 @@ describe('theme store', () => {
 		expect(theme.current).toBe('light');
 	});
 
-	it('toggle from nintendo-2001 goes to light', async () => {
-		localStorage.setItem(STORAGE_KEY, 'nintendo-2001');
+	it('toggle from console-2001 goes to light', async () => {
+		localStorage.setItem(STORAGE_KEY, 'console-2001');
 		const theme = await freshTheme();
 		theme.init();
 		theme.toggle();
