@@ -94,6 +94,115 @@
 				--shadow:     0 4px 24px rgba(0, 0, 0, 0.5);
 			}
 
+			/* ── Nintendo 2001 — brushed-periwinkle console chrome ─────────
+			   The web rendered as console hardware: cool periwinkle metal
+			   plates, chrome-indigo bevel seams, carbon-navy command layer,
+			   and warm colour rationed strictly for action (signal orange /
+			   amber / nav gold). Era-faithful Arial voice throughout. */
+			[data-theme="nintendo-2001"] {
+				/* The era's web-safe reality: Arial everywhere */
+				--serif: Arial, Helvetica, sans-serif;
+				--sans:  Arial, Helvetica, sans-serif;
+				--mono:  "Courier New", ui-monospace, monospace;
+
+				--bg:         #7a8aba;   /* periwinkle metallic canvas */
+				--bg-alt:     #8ba1d4;   /* light periwinkle raised plates */
+				--bg-toolbar: #9fbee7;   /* pale-sky strip */
+				--bg-hover:   #9fbee7;
+				--bg-select:  #acace7;   /* pale lavender */
+				--bg-active:  #c0d5e6;   /* pale ice */
+
+				--border:     #3d4f97;   /* chrome-indigo bevel seams */
+				--border-md:  #3d4f97;
+				--border-hi:  #21242e;   /* carbon navy */
+
+				--text:       #21242e;   /* carbon navy on light chrome */
+				--text-2:     #21242e;
+				--text-3:     #3d4f97;   /* chrome-indigo secondary labels */
+				--text-4:     #60619c;   /* muted indigo, recessed chrome */
+
+				--accent:     #f68d1f;   /* signal orange — every "forward" cue */
+				--accent-dk:  #e48600;   /* nav gold — pressed state */
+				--accent-lt:  rgba(236, 171, 55, 0.25);  /* amber wash */
+				--accent-tx:  #21242e;
+
+				--danger:     #e60012;   /* Nintendo red doubles as alert */
+				--danger-bg:  #f6ccd0;
+				--danger-bd:  #e60012;
+
+				--focus-ring: rgba(246, 141, 31, 0.4);
+				/* Hard offset shadow — no soft Material blur in this system */
+				--shadow:     3px 3px 0 rgba(33, 36, 46, 0.35);
+			}
+
+			/* Brushed-metal faceplate: faint vertical machining lines */
+			[data-theme="nintendo-2001"] body {
+				background-image: repeating-linear-gradient(
+					90deg,
+					rgba(255, 255, 255, 0.05) 0px, rgba(255, 255, 255, 0.05) 1px,
+					transparent 1px, transparent 3px
+				);
+			}
+
+			/* Silkscreen-legend voice: uppercase Arial Bold with tracking on
+			   every control; beveled-chip depth (bright top edge, hard indigo
+			   shadow line beneath) instead of flat fills. */
+			[data-theme="nintendo-2001"] button {
+				text-transform: uppercase;
+				letter-spacing: 0.5px;
+				font-weight: 700;
+				border-radius: 2px;
+				box-shadow:
+					inset 0 1px 0 rgba(255, 255, 255, 0.5),
+					inset 0 -1px 0 rgba(33, 36, 46, 0.3),
+					0 1px 0 #3d4f97;
+			}
+			[data-theme="nintendo-2001"] button:active {
+				box-shadow:
+					inset 0 1px 0 rgba(33, 36, 46, 0.3),
+					inset 0 -1px 0 rgba(255, 255, 255, 0.35);
+			}
+
+			/* Inputs are inset white plates with a chrome-indigo recess edge */
+			[data-theme="nintendo-2001"] input:not([type="checkbox"]):not([type="radio"]),
+			[data-theme="nintendo-2001"] textarea,
+			[data-theme="nintendo-2001"] select {
+				background-color: #ffffff;
+				border-radius: 2px;
+				box-shadow: inset 1px 1px 0 rgba(61, 79, 151, 0.3);
+			}
+
+			/* Box-art wordmarks: white display type with a heavy carbon
+			   outline and hard indigo drop shadow — never flat. */
+			/* html prefix outranks the component stylesheets, which load after
+			   this inline block and would otherwise win the specificity tie */
+			html[data-theme="nintendo-2001"] .wordmark,
+			html[data-theme="nintendo-2001"] .mob-wordmark,
+			html[data-theme="nintendo-2001"] .page-title,
+			html[data-theme="nintendo-2001"] .mob-page-title {
+				color: #ffffff;
+				font-style: italic;
+				font-weight: 900;
+				letter-spacing: 0;
+				-webkit-text-stroke: 1px #21242e;
+				paint-order: stroke fill;
+				text-shadow: 2px 2px 0 #3d4f97;
+			}
+
+			/* Panel headers get the uppercase chrome-label treatment */
+			[data-theme="nintendo-2001"] h2 {
+				text-transform: uppercase;
+				letter-spacing: 0.5px;
+			}
+
+			/* Editor keeps the Arial-era voice */
+			[data-theme="nintendo-2001"] .ProseMirror,
+			[data-theme="nintendo-2001"] .ProseMirror h1,
+			[data-theme="nintendo-2001"] .ProseMirror h2,
+			[data-theme="nintendo-2001"] .ProseMirror h3 {
+				font-family: Arial, Helvetica, sans-serif;
+			}
+
 			/* Base colours on the root so the background is always themed */
 			body {
 				background: var(--bg);

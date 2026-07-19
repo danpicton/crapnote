@@ -204,16 +204,18 @@
 				<p>How Crapnote looks on this device.</p>
 			</div>
 			<div class="section-body">
-				<label class="theme-toggle-row">
-					<input
-						type="checkbox"
-						role="switch"
-						aria-label="Dark mode"
-						checked={theme.current === 'dark'}
-						onchange={() => theme.toggle()}
-					/>
-					<span class="toggle-track" aria-hidden="true"><span class="toggle-thumb"></span></span>
-					<span class="toggle-text">Dark mode</span>
+				<label class="theme-select-row">
+					<span class="theme-select-label">Theme</span>
+					<select
+						class="theme-select"
+						aria-label="Theme"
+						value={theme.current}
+						onchange={(e) => theme.set(e.currentTarget.value as (typeof theme.themes)[number]['id'])}
+					>
+						{#each theme.themes as option (option.id)}
+							<option value={option.id}>{option.label}</option>
+						{/each}
+					</select>
 				</label>
 			</div>
 		</section>
@@ -424,37 +426,26 @@
 
 	.export-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
 
-	/* Dark mode toggle switch */
-	.theme-toggle-row {
+	/* Theme selector */
+	.theme-select-row {
 		display: inline-flex;
 		align-items: center;
 		gap: 0.625rem;
 		cursor: pointer;
 		user-select: none;
 	}
-	.theme-toggle-row input[type="checkbox"] { position: absolute; opacity: 0; width: 0; height: 0; }
-	.toggle-track {
-		position: relative;
-		width: 2.25rem;
-		height: 1.25rem;
-		border-radius: 9999px;
-		background: var(--border-md);
-		flex-shrink: 0;
-		transition: background 0.15s;
+	.theme-select-label { font-size: 0.875rem; color: var(--text); font-family: var(--sans); }
+	.theme-select {
+		padding: 0.4rem 0.625rem;
+		border: 1px solid var(--border-md);
+		font-size: 0.875rem;
+		font-family: var(--sans);
+		background: var(--bg);
+		color: var(--text);
+		outline: none;
+		cursor: pointer;
 	}
-	.theme-toggle-row input:checked ~ .toggle-track { background: var(--accent); }
-	.toggle-thumb {
-		position: absolute;
-		top: 0.1875rem;
-		left: 0.1875rem;
-		width: 0.875rem;
-		height: 0.875rem;
-		border-radius: 50%;
-		background: white;
-		transition: transform 0.15s;
-	}
-	.theme-toggle-row input:checked ~ .toggle-track .toggle-thumb { transform: translateX(1rem); }
-	.toggle-text { font-size: 0.875rem; color: var(--text); font-family: var(--sans); }
+	.theme-select:focus { border-color: var(--accent); }
 
 	.hint { font-size: 0.8125rem; color: var(--text-3); margin: 0; line-height: 1.5; }
 	.hint code { font-family: var(--mono); font-size: 0.75rem; background: var(--bg-hover); padding: 1px 5px; color: var(--text-2); }
@@ -609,8 +600,8 @@
 		.field-input { width: 100%; border-radius: 0; padding: 14px 16px; font-size: 16px; border: none; border-bottom: 1px solid var(--border); background: transparent; outline: none; box-sizing: border-box; }
 		.field-input:focus { border-bottom-color: var(--accent); }
 
-		/* Theme toggle row: full-width list item */
-		.theme-toggle-row {
+		/* Theme selector row: full-width list item */
+		.theme-select-row {
 			display: flex;
 			align-items: center;
 			justify-content: space-between;
@@ -619,12 +610,8 @@
 			width: 100%;
 			box-sizing: border-box;
 		}
-
-		/* Dark mode toggle: make it larger */
-		.toggle-track { width: 46px; height: 28px; border-radius: 14px; }
-		.toggle-thumb { width: 24px; height: 24px; top: 2px; left: 2px; }
-		.theme-toggle-row input:checked ~ .toggle-track .toggle-thumb { transform: translateX(18px); }
-		.toggle-text { font-size: 16px; }
+		.theme-select-label { font-size: 16px; }
+		.theme-select { font-size: 16px; min-height: 44px; }
 
 		/* PasswordInput: flat borderless rows inside card */
 		.section :global(.pw-wrap) { width: 100%; }

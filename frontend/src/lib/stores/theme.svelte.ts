@@ -1,10 +1,26 @@
 const STORAGE_KEY = 'crapnote-theme';
-type Theme = 'light' | 'dark';
+
+export type ThemeId = 'light' | 'dark' | 'nintendo-2001';
+
+export interface ThemeOption {
+	id: ThemeId;
+	label: string;
+}
+
+const THEMES: ThemeOption[] = [
+	{ id: 'light', label: 'Light' },
+	{ id: 'dark', label: 'Dark' },
+	{ id: 'nintendo-2001', label: 'Nintendo 2001' },
+];
+
+function isThemeId(value: unknown): value is ThemeId {
+	return THEMES.some((t) => t.id === value);
+}
 
 function createThemeStore() {
-	let current = $state<Theme>('light');
+	let current = $state<ThemeId>('light');
 
-	function applyToDOM(t: Theme) {
+	function applyToDOM(t: ThemeId) {
 		document.documentElement.setAttribute('data-theme', t);
 	}
 
@@ -16,7 +32,7 @@ function createThemeStore() {
 	 */
 	function init() {
 		const stored = localStorage.getItem(STORAGE_KEY);
-		if (stored === 'light' || stored === 'dark') {
+		if (isThemeId(stored)) {
 			current = stored;
 		} else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
 			current = 'dark';
@@ -26,15 +42,23 @@ function createThemeStore() {
 		applyToDOM(current);
 	}
 
-	function toggle() {
-		current = current === 'light' ? 'dark' : 'light';
+	function set(id: ThemeId) {
+		if (!isThemeId(id)) return;
+		current = id;
 		localStorage.setItem(STORAGE_KEY, current);
 		applyToDOM(current);
 	}
 
+	/** Cycle light ↔ dark; any other theme returns to light. */
+	function toggle() {
+		set(current === 'light' ? 'dark' : 'light');
+	}
+
 	return {
 		get current() { return current; },
+		get themes() { return THEMES; },
 		init,
+		set,
 		toggle,
 	};
 }

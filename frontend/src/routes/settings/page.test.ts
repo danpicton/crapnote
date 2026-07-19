@@ -35,7 +35,13 @@ vi.mock('$lib/components/MobileTabBar.svelte', () => ({
 
 // vi.mock is hoisted; use vi.hoisted so mockTheme is available inside the factory.
 const mockTheme = vi.hoisted(() => ({
-	current: 'light' as 'light' | 'dark',
+	current: 'light' as string,
+	themes: [
+		{ id: 'light', label: 'Light' },
+		{ id: 'dark', label: 'Dark' },
+		{ id: 'nintendo-2001', label: 'Nintendo 2001' },
+	],
+	set: vi.fn(),
 	toggle: vi.fn(),
 	init: vi.fn(),
 }));
@@ -90,29 +96,32 @@ describe('Settings — Appearance', () => {
 		expect(screen.getByRole('heading', { name: /appearance/i })).toBeInTheDocument();
 	});
 
-	it('shows a Dark mode toggle switch', () => {
+	it('shows a theme selector', () => {
 		render(SettingsPage);
-		expect(screen.getByRole('switch', { name: /dark mode/i })).toBeInTheDocument();
+		expect(screen.getByRole('combobox', { name: /theme/i })).toBeInTheDocument();
 	});
 
-	it('toggle is unchecked when theme is light', () => {
+	it('lists all available themes as options', () => {
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /theme/i });
+		const options = Array.from(select.querySelectorAll('option')).map((o) => o.value);
+		expect(options).toEqual(['light', 'dark', 'nintendo-2001']);
+	});
+
+	it('selects the current theme', () => {
+		mockTheme.current = 'nintendo-2001';
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /theme/i }) as HTMLSelectElement;
+		expect(select.value).toBe('nintendo-2001');
+	});
+
+	it('calls theme.set() with the chosen theme on change', async () => {
 		mockTheme.current = 'light';
+		mockTheme.set = vi.fn();
 		render(SettingsPage);
-		expect(screen.getByRole('switch', { name: /dark mode/i })).not.toBeChecked();
-	});
-
-	it('toggle is checked when theme is dark', () => {
-		mockTheme.current = 'dark';
-		render(SettingsPage);
-		expect(screen.getByRole('switch', { name: /dark mode/i })).toBeChecked();
-	});
-
-	it('calls theme.toggle() when the switch is clicked', async () => {
-		mockTheme.current = 'light';
-		mockTheme.toggle = vi.fn();
-		render(SettingsPage);
-		await fireEvent.click(screen.getByRole('switch', { name: /dark mode/i }));
-		expect(mockTheme.toggle).toHaveBeenCalledOnce();
+		const select = screen.getByRole('combobox', { name: /theme/i });
+		await fireEvent.change(select, { target: { value: 'nintendo-2001' } });
+		expect(mockTheme.set).toHaveBeenCalledWith('nintendo-2001');
 	});
 });
 
