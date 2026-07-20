@@ -1,6 +1,6 @@
 const STORAGE_KEY = 'crapnote-theme';
 
-export type ThemeId = 'light' | 'dark' | 'console-2001' | 'rosso';
+export type ThemeId = 'light' | 'dark' | 'console-2001' | 'rosso' | 'bianco';
 
 export interface ThemeOption {
 	id: ThemeId;
@@ -12,6 +12,7 @@ const THEMES: ThemeOption[] = [
 	{ id: 'dark', label: 'Claude Dark' },
 	{ id: 'console-2001', label: 'Console 2001' },
 	{ id: 'rosso', label: 'Rosso' },
+	{ id: 'bianco', label: 'Bianco' },
 ];
 
 function isThemeId(value: unknown): value is ThemeId {

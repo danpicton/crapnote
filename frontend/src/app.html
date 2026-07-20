@@ -245,8 +245,46 @@
 				--shadow:     0 4px 8px rgba(0, 0, 0, 0.4);
 			}
 
+			/* ── Bianco — the same editorial system on its white canvas ────
+			   The light-band counterpart to Rosso: white editorial surfaces,
+			   near-black ink, soft-grey alternating panels, hairlines-on-light,
+			   and the identical scarce racing-red accent and CTA voice. */
+			[data-theme="bianco"] {
+				--serif: "Inter", -apple-system, system-ui, sans-serif;
+				--sans:  "Inter", -apple-system, system-ui, sans-serif;
+
+				--bg:         #ffffff;   /* white editorial canvas */
+				--bg-alt:     #f7f7f7;   /* soft alternating band */
+				--bg-toolbar: #f7f7f7;
+				--bg-hover:   #f7f7f7;
+				--bg-select:  #ebebeb;   /* strong light surface */
+				--bg-active:  #ebebeb;
+
+				--border:     #ebebeb;   /* soft hairline */
+				--border-md:  #d2d2d2;   /* 1px hairline on light */
+				--border-hi:  #969696;
+
+				--text:       #181818;   /* ink on light */
+				--text-2:     #303030;
+				--text-3:     #666666;   /* muted captions */
+				--text-4:     #969696;
+
+				--accent:     #da291c;   /* racing red — used scarcely */
+				--accent-dk:  #b01e0a;   /* press state */
+				--accent-lt:  rgba(218, 41, 28, 0.08);
+				--accent-tx:  #b01e0a;
+
+				--danger:     #f13a2c;
+				--danger-bg:  #fdeae8;
+				--danger-bd:  #f0b3ac;
+
+				--focus-ring: rgba(246, 229, 0, 0.55);  /* brand yellow focus ring */
+				--shadow:     0 4px 8px rgba(0, 0, 0, 0.1);  /* single soft tier */
+			}
+
 			/* CTA voice: uppercase, 1.4px tracking, sharp 0px corners */
-			[data-theme="rosso"] button {
+			[data-theme="rosso"] button,
+			[data-theme="bianco"] button {
 				text-transform: uppercase;
 				letter-spacing: 1.4px;
 				font-weight: 700;
@@ -256,7 +294,10 @@
 			/* Form inputs are the one place a small radius is allowed (4px) */
 			[data-theme="rosso"] input:not([type="checkbox"]):not([type="radio"]),
 			[data-theme="rosso"] textarea,
-			[data-theme="rosso"] select {
+			[data-theme="rosso"] select,
+			[data-theme="bianco"] input:not([type="checkbox"]):not([type="radio"]),
+			[data-theme="bianco"] textarea,
+			[data-theme="bianco"] select {
 				border-radius: 4px;
 			}
 
@@ -266,12 +307,17 @@
 			html[data-theme="rosso"] .wordmark,
 			html[data-theme="rosso"] .mob-wordmark,
 			html[data-theme="rosso"] .page-title,
-			html[data-theme="rosso"] .mob-page-title {
+			html[data-theme="rosso"] .mob-page-title,
+			html[data-theme="bianco"] .wordmark,
+			html[data-theme="bianco"] .mob-wordmark,
+			html[data-theme="bianco"] .page-title,
+			html[data-theme="bianco"] .mob-page-title {
 				font-weight: 500;
 				font-style: normal;
 				letter-spacing: -0.02em;
 			}
-			html[data-theme="rosso"] h2 {
+			html[data-theme="rosso"] h2,
+			html[data-theme="bianco"] h2 {
 				font-weight: 500;
 				letter-spacing: -0.01em;
 			}
@@ -280,15 +326,22 @@
 			[data-theme="rosso"] .ProseMirror,
 			[data-theme="rosso"] .ProseMirror h1,
 			[data-theme="rosso"] .ProseMirror h2,
-			[data-theme="rosso"] .ProseMirror h3 {
+			[data-theme="rosso"] .ProseMirror h3,
+			[data-theme="bianco"] .ProseMirror,
+			[data-theme="bianco"] .ProseMirror h1,
+			[data-theme="bianco"] .ProseMirror h2,
+			[data-theme="bianco"] .ProseMirror h3 {
 				font-family: "Inter", -apple-system, system-ui, sans-serif;
 			}
-			[data-theme="rosso"] .ProseMirror h1 {
+			[data-theme="rosso"] .ProseMirror h1,
+			[data-theme="bianco"] .ProseMirror h1 {
 				font-weight: 500;
 				letter-spacing: -0.02em;
 			}
 			[data-theme="rosso"] .ProseMirror h2,
-			[data-theme="rosso"] .ProseMirror h3 {
+			[data-theme="rosso"] .ProseMirror h3,
+			[data-theme="bianco"] .ProseMirror h2,
+			[data-theme="bianco"] .ProseMirror h3 {
 				font-weight: 500;
 			}
 

@@ -59,6 +59,13 @@ describe('theme store', () => {
 		expect(theme.current).toBe('rosso');
 	});
 
+	it('reads "bianco" theme from localStorage on init', async () => {
+		localStorage.setItem(STORAGE_KEY, 'bianco');
+		const theme = await freshTheme();
+		theme.init();
+		expect(theme.current).toBe('bianco');
+	});
+
 	it('defaults to dark when system prefers-color-scheme is dark and no stored preference', async () => {
 		vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }));
 		const theme = await freshTheme();
@@ -81,12 +88,13 @@ describe('theme store', () => {
 
 	it('exposes the list of available themes with ids and labels', async () => {
 		const theme = await freshTheme();
-		expect(theme.themes.map((t) => t.id)).toEqual(['light', 'dark', 'console-2001', 'rosso']);
+		expect(theme.themes.map((t) => t.id)).toEqual(['light', 'dark', 'console-2001', 'rosso', 'bianco']);
 		expect(theme.themes.map((t) => t.label)).toEqual([
 			'Claude',
 			'Claude Dark',
 			'Console 2001',
 			'Rosso',
+			'Bianco',
 		]);
 	});
 
