@@ -28,6 +28,17 @@
 	let pwSuccess = $state('');
 	let pwSubmitting = $state(false);
 
+	let globalThemeError = $state('');
+
+	async function saveGlobalTheme(value: string) {
+		globalThemeError = '';
+		try {
+			await theme.setGlobal(value as (typeof theme.themes)[number]['id']);
+		} catch {
+			globalThemeError = 'Failed to save the global theme.';
+		}
+	}
+
 	const canCreateTokens = $derived(
 		!auth.loading && !!auth.user && (auth.user.is_admin || !!auth.user.api_tokens_enabled),
 	);
@@ -217,6 +228,24 @@
 						{/each}
 					</select>
 				</label>
+				{#if !auth.loading && auth.user?.is_admin}
+					{#if globalThemeError}<p role="alert" class="msg-error">{globalThemeError}</p>{/if}
+					<label class="theme-select-row global-theme-row">
+						<span class="theme-select-label">Global theme</span>
+						<select
+							class="theme-select"
+							aria-label="Global theme"
+							value={theme.globalTheme ?? ''}
+							onchange={(e) => saveGlobalTheme(e.currentTarget.value)}
+						>
+							<option value="" disabled>Not set</option>
+							{#each theme.themes as option (option.id)}
+								<option value={option.id}>{option.label}</option>
+							{/each}
+						</select>
+					</label>
+					<p class="hint">The default every user sees until they pick their own theme above.</p>
+				{/if}
 			</div>
 		</section>
 
@@ -446,6 +475,8 @@
 		cursor: pointer;
 	}
 	.theme-select:focus { border-color: var(--accent); }
+	.global-theme-row { margin-top: 0.875rem; }
+	.theme-select-row + .hint { margin-top: 0.375rem; }
 
 	.hint { font-size: 0.8125rem; color: var(--text-3); margin: 0; line-height: 1.5; }
 	.hint code { font-family: var(--mono); font-size: 0.75rem; background: var(--bg-hover); padding: 1px 5px; color: var(--text-2); }

@@ -1,3 +1,5 @@
+import { api } from '$lib/api';
+
 const STORAGE_KEY = 'crapnote-theme';
 
 export type ThemeId = 'light' | 'dark' | 'console-2001' | 'rosso' | 'bianco';
@@ -21,18 +23,31 @@ function isThemeId(value: unknown): value is ThemeId {
 
 function createThemeStore() {
 	let current = $state<ThemeId>('light');
+	let globalTheme = $state<ThemeId | null>(null);
 
 	function applyToDOM(t: ThemeId) {
 		document.documentElement.setAttribute('data-theme', t);
 	}
 
+	// A user-level preference exists only when the user has explicitly picked
+	// a theme on this device (set() writes it). Without one, the admin-chosen
+	// global theme applies.
+	function hasUserPreference(): boolean {
+		return isThemeId(localStorage.getItem(STORAGE_KEY));
+	}
+
 	/**
 	 * Resolve the initial theme.  Priority order:
-	 *   1. Stored user preference in localStorage
-	 *   2. OS prefers-color-scheme
-	 *   3. Default: light
+	 *   1. Stored user preference in localStorage (survives logout, so a
+	 *      returning user's login screen keeps their theme)
+	 *   2. Admin-set global theme from the server
+	 *   3. OS prefers-color-scheme
+	 *   4. Default: light
+	 *
+	 * Local sources apply synchronously so first paint never waits on the
+	 * network; the global theme lands when the fetch resolves.
 	 */
-	function init() {
+	async function init() {
 		const stored = localStorage.getItem(STORAGE_KEY);
 		if (isThemeId(stored)) {
 			current = stored;
@@ -42,6 +57,19 @@ function createThemeStore() {
 			current = 'light';
 		}
 		applyToDOM(current);
+
+		try {
+			const { theme: global } = await api.theme.get();
+			if (isThemeId(global)) {
+				globalTheme = global;
+				if (!hasUserPreference()) {
+					current = global;
+					applyToDOM(current);
+				}
+			}
+		} catch {
+			// Offline or server error — the local fallback already applied.
+		}
 	}
 
 	function set(id: ThemeId) {
@@ -51,6 +79,18 @@ function createThemeStore() {
 		applyToDOM(current);
 	}
 
+	/** Persist the global default (admin only) and apply it locally unless
+	 *  this device has its own user-level preference. */
+	async function setGlobal(id: ThemeId) {
+		if (!isThemeId(id)) return;
+		await api.theme.setGlobal(id);
+		globalTheme = id;
+		if (!hasUserPreference()) {
+			current = id;
+			applyToDOM(current);
+		}
+	}
+
 	/** Cycle light ↔ dark; any other theme returns to light. */
 	function toggle() {
 		set(current === 'light' ? 'dark' : 'light');
@@ -58,9 +98,11 @@ function createThemeStore() {
 
 	return {
 		get current() { return current; },
+		get globalTheme() { return globalTheme; },
 		get themes() { return THEMES; },
 		init,
 		set,
+		setGlobal,
 		toggle,
 	};
 }

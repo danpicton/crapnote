@@ -14,7 +14,9 @@
 
 	onMount(async () => {
 		registerSW();
-		theme.init();
+		// Fire-and-forget: init paints the local theme synchronously, then
+		// fetches the admin-set global default without blocking auth/redirects.
+		void theme.init();
 		await auth.init();
 		const currentPath = $page.url.pathname;
 		if (!auth.user && !isPublicPath(currentPath)) {

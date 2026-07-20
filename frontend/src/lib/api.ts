@@ -135,6 +135,14 @@ export const api = {
 		revokeAll: () => request<void>('POST', '/api/tokens/revoke-all'),
 	},
 
+	theme: {
+		// Public — the login screen fetches this before any session exists.
+		get: () => request<{ theme: string }>('GET', '/api/theme'),
+		// Admin only — sets the default theme every client sees until a user
+		// picks their own.
+		setGlobal: (theme: string) => request<void>('PUT', '/api/admin/theme', { theme }),
+	},
+
 	admin: {
 		setApiTokensEnabled: (userId: number, enabled: boolean) =>
 			request<User>('PATCH', `/api/admin/users/${userId}/api-tokens`, { enabled }),

@@ -15,6 +15,7 @@ import (
 	"github.com/danpicton/crapnote/internal/images"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/ratelimit"
+	"github.com/danpicton/crapnote/internal/settings"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/tokens"
 	"github.com/danpicton/crapnote/internal/trash"
@@ -62,6 +63,7 @@ func newTestMux(t *testing.T) *http.ServeMux {
 		export.NewHandler(notesSvc, database),
 		images.NewHandler(database),
 		tokens.NewHandler(tokensSvc),
+		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
 		permissiveLoginLimiter(),
 		permissiveBearerLimiter(),
 	)
@@ -97,6 +99,7 @@ func newAuthedMux(t *testing.T) (*http.ServeMux, *http.Cookie) {
 		export.NewHandler(notesSvc, database),
 		images.NewHandler(database),
 		tokens.NewHandler(tokensSvc),
+		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
 		permissiveLoginLimiter(),
 		permissiveBearerLimiter(),
 	)
@@ -203,6 +206,63 @@ func TestAllProtectedRoutesRequireAuth(t *testing.T) {
 	}
 }
 
+// The global theme must be readable without a session — the login screen
+// renders it before any auth exists.
+func TestGlobalThemeIsPubliclyReadable(t *testing.T) {
+	mux := newTestMux(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/theme", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for public /api/theme, got %d", w.Code)
+	}
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("expected JSON body, got error: %v", err)
+	}
+	if body["theme"] != "" {
+		t.Fatalf("expected empty default theme, got %q", body["theme"])
+	}
+}
+
+func TestSetGlobalThemeRequiresAuth(t *testing.T) {
+	mux := newTestMux(t)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/theme",
+		bytes.NewBufferString(`{"theme":"rosso"}`))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unauthenticated PUT /api/admin/theme, got %d", w.Code)
+	}
+}
+
+func TestAdminCanSetGlobalTheme(t *testing.T) {
+	mux, cookie := newAuthedMux(t)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/admin/theme",
+		bytes.NewBufferString(`{"theme":"rosso"}`))
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// The public endpoint now reports the new global theme.
+	req = httptest.NewRequest(http.MethodGet, "/api/theme", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	var body map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("expected JSON body, got error: %v", err)
+	}
+	if body["theme"] != "rosso" {
+		t.Fatalf("expected rosso, got %q", body["theme"])
+	}
+}
+
 func TestAdminRouteRequiresAdmin(t *testing.T) {
 	mux := newTestMux(t)
 
@@ -248,6 +308,7 @@ func TestLogin_RateLimited(t *testing.T) {
 		export.NewHandler(notesSvc, database),
 		images.NewHandler(database),
 		tokens.NewHandler(tokensSvc),
+		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
 		tightLimiter,
 		permissiveBearerLimiter(),
 	)
@@ -298,6 +359,7 @@ func TestLogin_RateLimited_SpoofedForwardedForDoesNotBypass(t *testing.T) {
 		export.NewHandler(notesSvc, database),
 		images.NewHandler(database),
 		tokens.NewHandler(tokensSvc),
+		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
 		tightLimiter,
 		permissiveBearerLimiter(),
 	)

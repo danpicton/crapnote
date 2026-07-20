@@ -10,6 +10,7 @@ import (
 	"github.com/danpicton/crapnote/internal/middleware"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/ratelimit"
+	"github.com/danpicton/crapnote/internal/settings"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/tokens"
 	"github.com/danpicton/crapnote/internal/trash"
@@ -25,6 +26,7 @@ func newMux(
 	exportHandler  *export.Handler,
 	imagesHandler  *images.Handler,
 	tokensHandler  *tokens.Handler,
+	settingsHandler *settings.Handler,
 	loginLimiter   *ratelimit.Limiter,
 	bearerLimiter  *ratelimit.Limiter,
 ) *http.ServeMux {
@@ -35,6 +37,9 @@ func newMux(
 
 	// Public.
 	mux.HandleFunc("GET /api/health", handleHealth)
+	// Global theme is public: the login screen must be able to render the
+	// admin-chosen default before any session exists.
+	mux.HandleFunc("GET /api/theme", settingsHandler.GetTheme)
 	mux.Handle("POST /api/auth/login",
 		ratelimit.Middleware(loginLimiter, ratelimit.ClientIP)(http.HandlerFunc(authHandler.Login)),
 	)
@@ -81,6 +86,7 @@ func newMux(
 	admin("POST", "/api/admin/users/{id}/unlock", adminHandler.UnlockUser)
 	admin("POST", "/api/admin/users/invite", adminHandler.InviteUser)
 	admin("POST", "/api/admin/users/{id}/invite", adminHandler.RegenerateInvite)
+	admin("PUT", "/api/admin/theme", settingsHandler.SetTheme)
 
 	// Public — setup-token flow. Rate-limited by IP so the token's 256 bits
 	// of entropy plus the limiter make brute force infeasible.
