@@ -11,7 +11,7 @@
 		<link rel="manifest" href="%sveltekit.assets%/manifest.json" />
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-		<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400..700;1,400..700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+		<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400..700;1,400..700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Archivo+Black&family=Work+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
 		<style>
 			/* Remove default browser margin so the app fills the viewport exactly.
 			   overflow is NOT set here — the main .app container handles its own
@@ -343,6 +343,112 @@
 			[data-theme="bianco"] .ProseMirror h2,
 			[data-theme="bianco"] .ProseMirror h3 {
 				font-weight: 500;
+			}
+
+			/* ── Rawblock — brutalist black-on-white ───────────────────────
+			   Anti-design: interfaces stripped to their structural bones.
+			   Pure black on pure white, thick borders instead of shadows,
+			   zero rounding, hyperlink blue reserved for links, Archivo Black
+			   headlines over Work Sans body and Space Mono inputs. If it
+			   looks too "designed", strip it back further. */
+			[data-theme="rawblock"] {
+				--serif: "Archivo Black", "Arial Black", sans-serif;
+				--sans:  "Work Sans", -apple-system, sans-serif;
+				--mono:  "Space Mono", ui-monospace, monospace;
+
+				--bg:         #ffffff;   /* surface base */
+				--bg-alt:     #ffffff;   /* hierarchy comes from borders, not tints */
+				--bg-toolbar: #ffffff;
+				--bg-hover:   #f0f0f0;   /* surface-sunken */
+				--bg-select:  #e8e8e8;
+				--bg-active:  #e8e8e8;
+
+				--border:     #000000;   /* borders ARE the design */
+				--border-md:  #000000;
+				--border-hi:  #000000;
+
+				--text:       #000000;
+				--text-2:     #000000;
+				--text-3:     #555555;
+				--text-4:     #999999;   /* disabled-adjacent grey */
+
+				--accent:     #000000;   /* primary action = black block, white text */
+				--accent-dk:  #333333;
+				--accent-lt:  #f0f0f0;
+				--accent-tx:  #000000;
+
+				--danger:     #ff0000;   /* pure red */
+				--danger-bg:  #ffffff;
+				--danger-bd:  #ff0000;
+
+				--focus-ring: rgba(0, 0, 0, 0.4);
+				--shadow:     none;      /* no shadows — ever */
+			}
+
+			/* Buttons: square blocks, uppercase with 2px tracking */
+			[data-theme="rawblock"] button {
+				text-transform: uppercase;
+				letter-spacing: 2px;
+				font-weight: 600;
+				border-radius: 0;
+			}
+			/* The signature full inversion on the primary action: black block
+			   flips to white-on-black-border. html prefix outranks component
+			   stylesheets, which load after this inline block. */
+			html[data-theme="rawblock"] .btn-primary {
+				border: 3px solid #000000;
+			}
+			html[data-theme="rawblock"] .btn-primary:hover:not(:disabled) {
+				background: #ffffff;
+				color: #000000;
+			}
+
+			/* Inputs: sunken grey blocks with thick black borders, Space Mono */
+			[data-theme="rawblock"] input:not([type="checkbox"]):not([type="radio"]),
+			[data-theme="rawblock"] textarea,
+			[data-theme="rawblock"] select {
+				background-color: #f0f0f0;
+				border: 3px solid #000000;
+				border-radius: 0;
+				font-family: "Space Mono", ui-monospace, monospace;
+			}
+
+			/* Hyperlink blue is reserved for bare links (styled anchors keep
+			   their component colours via higher-specificity class rules) */
+			[data-theme="rawblock"] a {
+				color: #0000ff;
+			}
+
+			/* Headlines are Archivo Black at its single native weight —
+			   synthetic bolding just muddies it */
+			html[data-theme="rawblock"] .wordmark,
+			html[data-theme="rawblock"] .mob-wordmark,
+			html[data-theme="rawblock"] .page-title,
+			html[data-theme="rawblock"] .mob-page-title {
+				font-weight: 400;
+				font-style: normal;
+				letter-spacing: 0;
+			}
+			html[data-theme="rawblock"] h2 {
+				font-weight: 400;
+				letter-spacing: 0;
+			}
+
+			/* Editor: Archivo Black headings over Work Sans body */
+			[data-theme="rawblock"] .ProseMirror {
+				font-family: "Work Sans", sans-serif;
+			}
+			[data-theme="rawblock"] .ProseMirror h1,
+			[data-theme="rawblock"] .ProseMirror h2,
+			[data-theme="rawblock"] .ProseMirror h3 {
+				font-family: "Archivo Black", "Arial Black", sans-serif;
+				font-weight: 400;
+				letter-spacing: 0;
+			}
+			[data-theme="rawblock"] .ProseMirror h1 { line-height: 1.0; }
+			[data-theme="rawblock"] .ProseMirror blockquote {
+				border-left: 5px solid #000000 !important;
+				font-style: normal;
 			}
 
 			/* Base colours on the root so the background is always themed */

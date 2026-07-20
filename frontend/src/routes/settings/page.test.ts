@@ -42,6 +42,7 @@ const mockTheme = vi.hoisted(() => ({
 		{ id: 'console-2001', label: 'Console 2001' },
 		{ id: 'rosso', label: 'Rosso' },
 		{ id: 'bianco', label: 'Bianco' },
+		{ id: 'rawblock', label: 'Rawblock' },
 	],
 	globalTheme: null as string | null,
 	set: vi.fn(),
@@ -109,7 +110,7 @@ describe('Settings — Appearance', () => {
 		render(SettingsPage);
 		const select = screen.getByRole('combobox', { name: /theme/i });
 		const options = Array.from(select.querySelectorAll('option')).map((o) => o.value);
-		expect(options).toEqual(['light', 'dark', 'console-2001', 'rosso', 'bianco']);
+		expect(options).toEqual(['light', 'dark', 'console-2001', 'rosso', 'bianco', 'rawblock']);
 	});
 
 	it('selects the current theme', () => {
