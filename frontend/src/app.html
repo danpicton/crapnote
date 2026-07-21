@@ -403,14 +403,20 @@
 				color: #000000;
 			}
 
-			/* Inputs: sunken grey blocks with thick black borders, Space Mono */
-			[data-theme="rawblock"] input:not([type="checkbox"]):not([type="radio"]),
+			/* Inputs: sunken grey blocks with thick black borders, Space Mono.
+			   The note-title input is exempt — it reads as a headline, not a
+			   form field, so the weight goes on its containing bar instead. */
+			[data-theme="rawblock"] input:not([type="checkbox"]):not([type="radio"]):not(.title-input),
 			[data-theme="rawblock"] textarea,
 			[data-theme="rawblock"] select {
 				background-color: #f0f0f0;
 				border: 3px solid #000000;
 				border-radius: 0;
 				font-family: "Space Mono", ui-monospace, monospace;
+			}
+			/* The heavy border goes on the title bar itself */
+			html[data-theme="rawblock"] .editor-header {
+				border-bottom: 5px solid #000000;
 			}
 
 			/* Hyperlink blue is reserved for bare links (styled anchors keep
@@ -449,6 +455,40 @@
 			[data-theme="rawblock"] .ProseMirror blockquote {
 				border-left: 5px solid #000000 !important;
 				font-style: normal;
+			}
+
+			/* Sub-screen typemark mask: on settings/archive/admin the wordmark
+			   is position:fixed while the body scrolls beneath it. A fixed
+			   strip in the page background colour sits between them
+			   (z-index 9, wordmark is 10) so scrolling content slides under a
+			   clean band instead of colliding with the typemark — works for
+			   every theme's typemark size. Desktop only: mobile hides the
+			   wordmark and uses its own top bar. */
+			@media (min-width: 641px) {
+				.settings-page::before,
+				.archive-page::before,
+				.admin-page::before {
+					content: "";
+					position: fixed;
+					top: 0;
+					left: 0;
+					right: 0;
+					height: 3.25rem;
+					background: var(--bg);
+					z-index: 9;
+					pointer-events: none;
+				}
+				/* Console 2001 carries its brushed-metal texture on the strip
+				   so the mask is seamless against the body */
+				[data-theme="console-2001"] .settings-page::before,
+				[data-theme="console-2001"] .archive-page::before,
+				[data-theme="console-2001"] .admin-page::before {
+					background-image: repeating-linear-gradient(
+						90deg,
+						rgba(255, 255, 255, 0.05) 0px, rgba(255, 255, 255, 0.05) 1px,
+						transparent 1px, transparent 3px
+					);
+				}
 			}
 
 			/* Base colours on the root so the background is always themed */
