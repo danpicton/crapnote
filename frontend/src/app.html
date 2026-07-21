@@ -163,8 +163,10 @@
 					inset 0 -1px 0 rgba(255, 255, 255, 0.35);
 			}
 
-			/* Inputs are inset white plates with a chrome-indigo recess edge */
-			[data-theme="console-2001"] input:not([type="checkbox"]):not([type="radio"]),
+			/* Inputs are inset white plates with a chrome-indigo recess edge.
+			   The note-title input is exempt — it's a headline sitting on the
+			   chrome, not a form field, so it stays transparent. */
+			[data-theme="console-2001"] input:not([type="checkbox"]):not([type="radio"]):not(.title-input),
 			[data-theme="console-2001"] textarea,
 			[data-theme="console-2001"] select {
 				background-color: #ffffff;
@@ -514,7 +516,7 @@
 			[data-theme="verdana"] .mob-tab {
 				border-radius: 0;
 			}
-			[data-theme="verdana"] input:not([type="checkbox"]):not([type="radio"]),
+			[data-theme="verdana"] input:not([type="checkbox"]):not([type="radio"]):not(.title-input),
 			[data-theme="verdana"] textarea,
 			[data-theme="verdana"] select {
 				border-radius: 8px;
@@ -536,6 +538,21 @@
 			[data-theme="verdana"] .ProseMirror h3 {
 				font-family: "Plus Jakarta Sans", -apple-system, sans-serif;
 				letter-spacing: -0.01em;
+			}
+
+			/* Sidebar note titles: the base 1.1rem is sized for the compact
+			   Claude serif; the newer themes' heading faces run wider, so
+			   titles that fit the pane in Claude overflow in them. Step the
+			   size down per face so the pane fits comparable text. */
+			html[data-theme="rosso"] .note-title,
+			html[data-theme="bianco"] .note-title,
+			html[data-theme="verdana"] .note-title {
+				font-size: 0.9375rem;
+			}
+			/* Arial Bold and Work Sans Bold are the widest — one step smaller */
+			html[data-theme="console-2001"] .note-title,
+			html[data-theme="rawblock"] .note-title {
+				font-size: 0.875rem;
 			}
 
 			/* Sub-screen typemark mask: on settings/archive/admin the wordmark
