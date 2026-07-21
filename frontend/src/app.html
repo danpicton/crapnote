@@ -484,10 +484,10 @@
 				--text-3:     #64748b;
 				--text-4:     #94a3b8;
 
-				--accent:     #0f172a;   /* navy primary actions */
-				--accent-dk:  #020617;   /* hover fill */
+				--accent:     #059669;   /* sage — CTAs, highlights, interactive */
+				--accent-dk:  #047857;   /* hover fill */
 				--accent-lt:  rgba(5, 150, 105, 0.1);  /* sage tint for positive states */
-				--accent-tx:  #059669;   /* sage — links and highlights */
+				--accent-tx:  #059669;   /* sage links */
 
 				--danger:     #ef4444;
 				--danger-bg:  #fef2f2;
@@ -502,6 +502,12 @@
 			[data-theme="verdana"] button {
 				border-radius: 8px;
 				font-weight: 500;
+			}
+			/* Tab buttons keep square edges so their active underline stays
+			   a clean bar rather than curving with the button radius */
+			[data-theme="verdana"] .pane-tab,
+			[data-theme="verdana"] .mob-tab {
+				border-radius: 0;
 			}
 			[data-theme="verdana"] input:not([type="checkbox"]):not([type="radio"]),
 			[data-theme="verdana"] textarea,
