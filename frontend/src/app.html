@@ -352,7 +352,10 @@
 			   headlines over Work Sans body and Space Mono inputs. If it
 			   looks too "designed", strip it back further. */
 			[data-theme="rawblock"] {
-				--serif: "Archivo Black", "Arial Black", sans-serif;
+				/* Archivo Black is reserved for the large display marks (see
+				   the wordmark rule below) — at UI heading sizes it sets too
+				   dense, so the heading slot runs Work Sans bold instead */
+				--serif: "Work Sans", -apple-system, sans-serif;
 				--sans:  "Work Sans", -apple-system, sans-serif;
 				--mono:  "Space Mono", ui-monospace, monospace;
 
@@ -425,33 +428,35 @@
 				color: #0000ff;
 			}
 
-			/* Headlines are Archivo Black at its single native weight —
-			   synthetic bolding just muddies it */
+			/* Display marks (typemark, page titles) keep Archivo Black at its
+			   single native weight — synthetic bolding just muddies it */
 			html[data-theme="rawblock"] .wordmark,
 			html[data-theme="rawblock"] .mob-wordmark,
 			html[data-theme="rawblock"] .page-title,
 			html[data-theme="rawblock"] .mob-page-title {
+				font-family: "Archivo Black", "Arial Black", sans-serif;
 				font-weight: 400;
 				font-style: normal;
 				letter-spacing: 0;
 			}
 			html[data-theme="rawblock"] h2 {
-				font-weight: 400;
+				font-weight: 700;
 				letter-spacing: 0;
 			}
 
-			/* Editor: Archivo Black headings over Work Sans body */
-			[data-theme="rawblock"] .ProseMirror {
+			/* Editor: Work Sans throughout — bold headings, regular body */
+			[data-theme="rawblock"] .ProseMirror,
+			[data-theme="rawblock"] .ProseMirror h1,
+			[data-theme="rawblock"] .ProseMirror h2,
+			[data-theme="rawblock"] .ProseMirror h3 {
 				font-family: "Work Sans", sans-serif;
 			}
 			[data-theme="rawblock"] .ProseMirror h1,
 			[data-theme="rawblock"] .ProseMirror h2,
 			[data-theme="rawblock"] .ProseMirror h3 {
-				font-family: "Archivo Black", "Arial Black", sans-serif;
-				font-weight: 400;
+				font-weight: 700;
 				letter-spacing: 0;
 			}
-			[data-theme="rawblock"] .ProseMirror h1 { line-height: 1.0; }
 			[data-theme="rawblock"] .ProseMirror blockquote {
 				border-left: 5px solid #000000 !important;
 				font-style: normal;
