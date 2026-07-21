@@ -167,7 +167,7 @@
 					</div>
 					<div class="field-group">
 						<span class="field-label">Scope</span>
-						<select bind:value={newScope}>
+						<select bind:value={newScope} aria-label="Scope">
 							<option value="read_write">Read + write</option>
 							<option value="read">Read only</option>
 						</select>

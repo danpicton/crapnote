@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import SettingsPage from './+page.svelte';
 
 const mockApi = vi.hoisted(() => ({
@@ -35,7 +35,19 @@ vi.mock('$lib/components/MobileTabBar.svelte', () => ({
 
 // vi.mock is hoisted; use vi.hoisted so mockTheme is available inside the factory.
 const mockTheme = vi.hoisted(() => ({
-	current: 'light' as 'light' | 'dark',
+	current: 'light' as string,
+	themes: [
+		{ id: 'light', label: 'Light' },
+		{ id: 'dark', label: 'Dark' },
+		{ id: 'console-2001', label: 'Console 2001' },
+		{ id: 'rosso', label: 'Rosso' },
+		{ id: 'bianco', label: 'Bianco' },
+		{ id: 'rawblock', label: 'Rawblock' },
+		{ id: 'verdana', label: 'Verdana' },
+	],
+	globalTheme: null as string | null,
+	set: vi.fn(),
+	setGlobal: vi.fn(),
 	toggle: vi.fn(),
 	init: vi.fn(),
 }));
@@ -90,29 +102,78 @@ describe('Settings — Appearance', () => {
 		expect(screen.getByRole('heading', { name: /appearance/i })).toBeInTheDocument();
 	});
 
-	it('shows a Dark mode toggle switch', () => {
+	it('shows a theme selector', () => {
 		render(SettingsPage);
-		expect(screen.getByRole('switch', { name: /dark mode/i })).toBeInTheDocument();
+		expect(screen.getByRole('combobox', { name: /theme/i })).toBeInTheDocument();
 	});
 
-	it('toggle is unchecked when theme is light', () => {
+	it('lists all available themes as options', () => {
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /theme/i });
+		const options = Array.from(select.querySelectorAll('option')).map((o) => o.value);
+		expect(options).toEqual(['light', 'dark', 'console-2001', 'rosso', 'bianco', 'rawblock', 'verdana']);
+	});
+
+	it('selects the current theme', () => {
+		mockTheme.current = 'console-2001';
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /theme/i }) as HTMLSelectElement;
+		expect(select.value).toBe('console-2001');
+	});
+
+	it('calls theme.set() with the chosen theme on change', async () => {
 		mockTheme.current = 'light';
+		mockTheme.set = vi.fn();
 		render(SettingsPage);
-		expect(screen.getByRole('switch', { name: /dark mode/i })).not.toBeChecked();
+		const select = screen.getByRole('combobox', { name: /^theme$/i });
+		await fireEvent.change(select, { target: { value: 'console-2001' } });
+		expect(mockTheme.set).toHaveBeenCalledWith('console-2001');
+	});
+});
+
+describe('Settings — Global theme (admin)', () => {
+	beforeEach(() => {
+		mockAuth.user = { id: 1, username: 'admin', is_admin: true, created_at: '' };
+		mockTheme.globalTheme = null;
+		mockTheme.setGlobal = vi.fn().mockResolvedValue(undefined);
 	});
 
-	it('toggle is checked when theme is dark', () => {
-		mockTheme.current = 'dark';
-		render(SettingsPage);
-		expect(screen.getByRole('switch', { name: /dark mode/i })).toBeChecked();
+	afterEach(() => {
+		// Later suites assume a plain logged-in user.
+		mockAuth.user = { id: 1, username: 'alice', is_admin: false, created_at: '' };
 	});
 
-	it('calls theme.toggle() when the switch is clicked', async () => {
-		mockTheme.current = 'light';
-		mockTheme.toggle = vi.fn();
+	it('shows the global theme selector for admins', () => {
 		render(SettingsPage);
-		await fireEvent.click(screen.getByRole('switch', { name: /dark mode/i }));
-		expect(mockTheme.toggle).toHaveBeenCalledOnce();
+		expect(screen.getByRole('combobox', { name: /global theme/i })).toBeInTheDocument();
+	});
+
+	it('hides the global theme selector for non-admins', () => {
+		mockAuth.user = { id: 2, username: 'alice', is_admin: false, created_at: '' };
+		render(SettingsPage);
+		expect(screen.queryByRole('combobox', { name: /global theme/i })).toBeNull();
+	});
+
+	it('shows "Not set" when no global theme is stored', () => {
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+		expect(select.value).toBe('');
+	});
+
+	it('selects the stored global theme', () => {
+		mockTheme.globalTheme = 'rosso';
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+		expect(select.value).toBe('rosso');
+	});
+
+	it('calls theme.setGlobal() with the chosen theme on change', async () => {
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i });
+		await fireEvent.change(select, { target: { value: 'bianco' } });
+		await waitFor(() => {
+			expect(mockTheme.setGlobal).toHaveBeenCalledWith('bianco');
+		});
 	});
 });
 

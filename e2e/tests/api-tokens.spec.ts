@@ -62,7 +62,9 @@ test.describe('API tokens', () => {
 
     const tokenName = `readonly-${Date.now()}`;
     await page.getByPlaceholder(/token name/i).fill(tokenName);
-    await page.locator('select').selectOption('read');
+    // The settings page has several selects (theme pickers); target the
+    // token scope select by its accessible label.
+    await page.getByLabel('Scope').selectOption('read');
     await page.getByRole('button', { name: /create token/i }).click();
 
     const raw = (await page.locator('code.token-value').textContent())?.trim() ?? '';

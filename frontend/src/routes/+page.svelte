@@ -2251,6 +2251,31 @@
 		gap: 1rem;
 		font-family: var(--sans);
 	}
+
+	/* Starred/empty list state — base styles so desktop gets the same
+	   centred treatment as mobile (the media query below only adjusts
+	   sizing). Without these the block rendered unstyled on desktop. */
+	.mob-empty-state {
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 10px;
+		padding: 40px 20px;
+		text-align: center;
+	}
+	.mob-empty-icon {
+		width: 56px;
+		height: 56px;
+		border-radius: 50%;
+		background: var(--bg-hover);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--text-3);
+	}
+	.mob-empty-title { font-family: var(--serif); font-size: 18px; color: var(--text); margin: 0; }
+	.mob-empty-sub { font-family: var(--sans); font-size: 13px; color: var(--text-3); margin: 0; max-width: 220px; line-height: 1.4; }
 	.empty-state p { font-size: 0.875rem; }
 	.empty-state button {
 		display: flex;

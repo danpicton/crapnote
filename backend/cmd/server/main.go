@@ -17,6 +17,7 @@ import (
 	"github.com/danpicton/crapnote/internal/middleware"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/ratelimit"
+	"github.com/danpicton/crapnote/internal/settings"
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/tokens"
 	"github.com/danpicton/crapnote/internal/trash"
@@ -86,6 +87,18 @@ func main() {
 	trashRepo := trash.NewRepo(database)
 	trashSvc := trash.NewService(trashRepo)
 	trashHandler := trash.NewHandler(trashSvc)
+
+	// Global-theme setting (admin-set default theme for all clients).
+	settingsSvc := settings.NewService(settings.NewRepo(database))
+	settingsHandler := settings.NewHandler(settingsSvc)
+	// DEFAULT_THEME seeds the global theme on first run only — once an admin
+	// picks a theme in the UI, the stored value wins over the env var.
+	if v := os.Getenv("DEFAULT_THEME"); v != "" {
+		if err := settingsSvc.SeedGlobalTheme(context.Background(), v); err != nil {
+			logger.Error("seed default theme", "error", err, "theme", v)
+			os.Exit(1)
+		}
+	}
 
 	// Seed initial admin if no users exist.
 	adminUser := os.Getenv("ADMIN_USERNAME")
@@ -162,7 +175,7 @@ func main() {
 	bearerLimiter := ratelimit.New(bearerRate, bearerBurst)
 
 	port := envOrDefault("PORT", "8080")
-	mux := newMux(authHandler, adminHandler, setupHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, tokensHandler, loginLimiter, bearerLimiter)
+	mux := newMux(authHandler, adminHandler, setupHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, tokensHandler, settingsHandler, loginLimiter, bearerLimiter)
 
 	// Wrap with observability middleware (metrics outermost, then logging, then security headers).
 	handler := middleware.Metrics()(middleware.Logging(logger)(middleware.SecurityHeaders()(mux)))
