@@ -543,11 +543,11 @@
 			/* Tag surfaces show user-authored names — they are content, not
 			   chrome. Exempt them from the themes' uppercase CTA button
 			   voice (transform, tracking, and bolding) so tags read exactly
-			   as the user typed them. */
+			   as the user typed them. Rawblock is deliberately NOT exempted:
+			   block-caps tags fit its brutalist voice. */
 			[data-theme="console-2001"] :is(.tag-panel-item, .note-tag-chip, .status-add-tag, .tag-chip-btn, .tag-popover button),
 			[data-theme="rosso"] :is(.tag-panel-item, .note-tag-chip, .status-add-tag, .tag-chip-btn, .tag-popover button),
-			[data-theme="bianco"] :is(.tag-panel-item, .note-tag-chip, .status-add-tag, .tag-chip-btn, .tag-popover button),
-			[data-theme="rawblock"] :is(.tag-panel-item, .note-tag-chip, .status-add-tag, .tag-chip-btn, .tag-popover button) {
+			[data-theme="bianco"] :is(.tag-panel-item, .note-tag-chip, .status-add-tag, .tag-chip-btn, .tag-popover button) {
 				text-transform: none;
 				letter-spacing: normal;
 				font-weight: 400;
