@@ -568,6 +568,21 @@
 				box-sizing: border-box;
 			}
 
+			/* Mobile note-edit title: the 28px mobile size suits the compact
+			   Claude serif; the newer themes' wider faces truncate at that
+			   size, so step them down to fit comparable titles. */
+			@media (max-width: 640px) {
+				html[data-theme="rosso"] .title-input,
+				html[data-theme="bianco"] .title-input,
+				html[data-theme="verdana"] .title-input {
+					font-size: 22px;
+				}
+				html[data-theme="console-2001"] .title-input,
+				html[data-theme="rawblock"] .title-input {
+					font-size: 20px;
+				}
+			}
+
 			/* Sidebar note titles: the base 1.1rem is sized for the compact
 			   Claude serif; the newer themes' heading faces run wider, so
 			   titles that fit the pane in Claude overflow in them. Step the
