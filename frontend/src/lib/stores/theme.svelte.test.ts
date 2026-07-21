@@ -77,6 +77,13 @@ describe('theme store', () => {
 		expect(theme.current).toBe('bianco');
 	});
 
+	it('reads "verdana" theme from localStorage on init', async () => {
+		localStorage.setItem(STORAGE_KEY, 'verdana');
+		const theme = await freshTheme();
+		await theme.init();
+		expect(theme.current).toBe('verdana');
+	});
+
 	it('reads "rawblock" theme from localStorage on init', async () => {
 		localStorage.setItem(STORAGE_KEY, 'rawblock');
 		const theme = await freshTheme();
@@ -106,7 +113,7 @@ describe('theme store', () => {
 
 	it('exposes the list of available themes with ids and labels', async () => {
 		const theme = await freshTheme();
-		expect(theme.themes.map((t) => t.id)).toEqual(['light', 'dark', 'console-2001', 'rosso', 'bianco', 'rawblock']);
+		expect(theme.themes.map((t) => t.id)).toEqual(['light', 'dark', 'console-2001', 'rosso', 'bianco', 'rawblock', 'verdana']);
 		expect(theme.themes.map((t) => t.label)).toEqual([
 			'Claude',
 			'Claude Dark',
@@ -114,6 +121,7 @@ describe('theme store', () => {
 			'Rosso',
 			'Bianco',
 			'Rawblock',
+			'Verdana',
 		]);
 	});
 

@@ -2,7 +2,7 @@ import { api } from '$lib/api';
 
 const STORAGE_KEY = 'crapnote-theme';
 
-export type ThemeId = 'light' | 'dark' | 'console-2001' | 'rosso' | 'bianco' | 'rawblock';
+export type ThemeId = 'light' | 'dark' | 'console-2001' | 'rosso' | 'bianco' | 'rawblock' | 'verdana';
 
 export interface ThemeOption {
 	id: ThemeId;
@@ -16,6 +16,7 @@ const THEMES: ThemeOption[] = [
 	{ id: 'rosso', label: 'Rosso' },
 	{ id: 'bianco', label: 'Bianco' },
 	{ id: 'rawblock', label: 'Rawblock' },
+	{ id: 'verdana', label: 'Verdana' },
 ];
 
 function isThemeId(value: unknown): value is ThemeId {

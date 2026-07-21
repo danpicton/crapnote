@@ -11,7 +11,7 @@
 		<link rel="manifest" href="%sveltekit.assets%/manifest.json" />
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-		<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400..700;1,400..700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Archivo+Black&family=Work+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+		<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400..700;1,400..700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Archivo+Black&family=Work+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=DM+Sans:wght@400;500;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
 		<style>
 			/* Remove default browser margin so the app fills the viewport exactly.
 			   overflow is NOT set here — the main .app container handles its own
@@ -455,6 +455,76 @@
 			[data-theme="rawblock"] .ProseMirror blockquote {
 				border-left: 5px solid #000000 !important;
 				font-style: normal;
+			}
+
+			/* ── Verdana — calm clinical navy and sage ─────────────────────
+			   Digital-health reassurance: a soft slate-white canvas, white
+			   card surfaces, deep navy for primary actions and headers, sage
+			   green reserved for links and positive highlights, gentle 8px
+			   rounding, and diffused low-opacity shadows. Plus Jakarta Sans
+			   headlines over DM Sans body with Fira Code for monospace. */
+			[data-theme="verdana"] {
+				--serif: "Plus Jakarta Sans", -apple-system, sans-serif;
+				--sans:  "DM Sans", -apple-system, sans-serif;
+				--mono:  "Fira Code", ui-monospace, monospace;
+
+				--bg:         #f8fafc;   /* slate-white page floor */
+				--bg-alt:     #ffffff;   /* card surfaces */
+				--bg-toolbar: #ffffff;
+				--bg-hover:   #f1f5f9;
+				--bg-select:  #f1f5f9;
+				--bg-active:  #e2e8f0;
+
+				--border:     #e2e8f0;   /* card outline */
+				--border-md:  #cbd5e1;
+				--border-hi:  #64748b;   /* secondary slate */
+
+				--text:       #0f172a;   /* primary navy */
+				--text-2:     #475569;
+				--text-3:     #64748b;
+				--text-4:     #94a3b8;
+
+				--accent:     #0f172a;   /* navy primary actions */
+				--accent-dk:  #020617;   /* hover fill */
+				--accent-lt:  rgba(5, 150, 105, 0.1);  /* sage tint for positive states */
+				--accent-tx:  #059669;   /* sage — links and highlights */
+
+				--danger:     #ef4444;
+				--danger-bg:  #fef2f2;
+				--danger-bd:  #fecaca;
+
+				--focus-ring: rgba(15, 23, 42, 0.09);  /* #0F172A18 ring */
+				/* Diffused md shadow — clinical yet approachable */
+				--shadow:     0 4px 16px rgba(15, 23, 42, 0.07);
+			}
+
+			/* Soft 8px rounding on every control conveys approachable calm */
+			[data-theme="verdana"] button {
+				border-radius: 8px;
+				font-weight: 500;
+			}
+			[data-theme="verdana"] input:not([type="checkbox"]):not([type="radio"]),
+			[data-theme="verdana"] textarea,
+			[data-theme="verdana"] select {
+				border-radius: 8px;
+				background-color: #ffffff;
+			}
+
+			/* Sage is the interactive voice on bare links (styled anchors
+			   keep their component colours via higher-specificity rules) */
+			[data-theme="verdana"] a {
+				color: #059669;
+			}
+
+			/* Editor: Plus Jakarta Sans headings over DM Sans body */
+			[data-theme="verdana"] .ProseMirror {
+				font-family: "DM Sans", -apple-system, sans-serif;
+			}
+			[data-theme="verdana"] .ProseMirror h1,
+			[data-theme="verdana"] .ProseMirror h2,
+			[data-theme="verdana"] .ProseMirror h3 {
+				font-family: "Plus Jakarta Sans", -apple-system, sans-serif;
+				letter-spacing: -0.01em;
 			}
 
 			/* Sub-screen typemark mask: on settings/archive/admin the wordmark
