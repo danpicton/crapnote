@@ -16,7 +16,7 @@ vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 import { api } from '$lib/api';
 
 const mockNote = (overrides = {}) => ({
-	id: 1, title: 'Archived Note', body: '', starred: false, pinned: false, archived: true,
+	id: 1, title: 'Archived Note', body: '', starred: false, pinned: false, archived: true, locked: false,
 	created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z',
 	...overrides,
 });
@@ -71,6 +71,31 @@ describe('Archive page', () => {
 		render(ArchivePage);
 		await waitFor(() => screen.getByText('Archived Note'));
 		await fireEvent.click(screen.getByRole('button', { name: /delete permanently/i }));
+		await waitFor(() => expect(api.notes.delete).toHaveBeenCalledWith(1));
+	});
+});
+
+describe('Locked archived notes', () => {
+	it('refuses to delete a locked note and says why', async () => {
+		vi.mocked(api.notes.listArchived).mockResolvedValue([mockNote({ locked: true })]);
+		const alerts: string[] = [];
+		vi.stubGlobal('alert', (m: string) => alerts.push(m));
+
+		render(ArchivePage);
+		await waitFor(() => screen.getByText('Archived Note'));
+
+		await fireEvent.click(screen.getByTitle('Delete permanently'));
+
+		expect(api.notes.delete).not.toHaveBeenCalled();
+		expect(alerts.join(' ')).toMatch(/locked/i);
+	});
+
+	it('still deletes an unlocked note', async () => {
+		render(ArchivePage);
+		await waitFor(() => screen.getByText('Archived Note'));
+
+		await fireEvent.click(screen.getByTitle('Delete permanently'));
+
 		await waitFor(() => expect(api.notes.delete).toHaveBeenCalledWith(1));
 	});
 });

@@ -24,7 +24,7 @@
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Link,
 		Plus, ChevronLeft, Tag as TagIcon,
-		Star, Pin, Archive, Trash2, MoreHorizontal, RefreshCw, X,
+		Star, Pin, Lock, LockOpen, Archive, Trash2, MoreHorizontal, RefreshCw, X,
 	} from 'lucide-svelte';
 	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
 	import { EMPTY_FORMATS, type ActiveFormats } from '$lib/milkdown/formatState';
@@ -58,6 +58,13 @@
 	async function mobTogglePin() {
 		if (!note) return;
 		const updated = await api.notes.togglePin(noteId);
+		note = updated;
+		showActionSheet = false;
+	}
+
+	async function toggleLock() {
+		if (!note) return;
+		const updated = await api.notes.toggleLock(noteId);
 		note = updated;
 		showActionSheet = false;
 	}
@@ -158,6 +165,7 @@
 				note = {
 					id: cached.id, title: cached.title, body: cached.body,
 					starred: cached.starred, pinned: cached.pinned, archived: false,
+					locked: cached.locked ?? false,
 					created_at: cached.server_updated_at, updated_at: cached.local_updated_at,
 				};
 				noteTags = (cached.tags ?? []) as Tag[];
@@ -200,6 +208,7 @@
 				note = {
 					id: cached.id, title: cached.title, body: cached.body,
 					starred: cached.starred, pinned: cached.pinned, archived: false,
+					locked: cached.locked ?? false,
 					created_at: cached.server_updated_at, updated_at: cached.local_updated_at,
 				};
 				noteTags = (cached.tags ?? []) as Tag[];
@@ -238,6 +247,7 @@
 	}
 
 	function scheduleAutoSave(field: 'title' | 'body', value: string) {
+		if (note?.locked) return;
 		if (saveTimer) clearTimeout(saveTimer);
 		saveTimer = setTimeout(async () => {
 			saving = true;
@@ -373,6 +383,10 @@
 		<span class="tb-sep"></span>
 		<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={14} /></button>
 		<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo"><Redo2 size={14} /></button>
+		<span class="tb-sep"></span>
+		<button class="tb-btn" class:tb-lock-on={note.locked} onclick={toggleLock} title={note.locked ? 'Unlock note' : 'Lock note'} aria-pressed={note.locked}>
+			{#if note.locked}<Lock size={14} />{:else}<LockOpen size={14} />{/if}
+		</button>
 		<span class="tb-spacer"></span>
 		<span class="save-status">{saving ? 'Saving…' : ''}</span>
 	</div>
@@ -403,6 +417,7 @@
 			value={note.title}
 			oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
 			placeholder="Note title"
+			readonly={note.locked}
 		/>
 		<!-- Desktop tag popover -->
 		<div class="tag-popover-wrap">
@@ -455,6 +470,7 @@
 				bind:ref={editorRef}
 				oninsertlink={openLinkDialog}
 				onformatchange={(f) => (activeFormats = f)}
+				readonly={note.locked}
 			/>
 		{/key}
 
@@ -541,6 +557,10 @@
 				<TagIcon size={18} aria-hidden="true" />
 				<span>Edit tags</span>
 			</button>
+			<button class="mob-sheet-row" onclick={toggleLock} title={note.locked ? 'Unlock note' : 'Lock note'}>
+				{#if note.locked}<Lock size={18} aria-hidden="true" />{:else}<LockOpen size={18} aria-hidden="true" />{/if}
+				<span>{note.locked ? 'Unlock note' : 'Lock note'}</span>
+			</button>
 			<button class="mob-sheet-row" onclick={mobArchive}>
 				<Archive size={18} aria-hidden="true" />
 				<span>Archive</span>
@@ -549,7 +569,7 @@
 				<RefreshCw size={18} aria-hidden="true" />
 				<span>Force sync</span>
 			</button>
-			<button class="mob-sheet-row mob-sheet-danger" onclick={mobDelete}>
+			<button class="mob-sheet-row mob-sheet-danger" onclick={mobDelete} disabled={note.locked}>
 				<Trash2 size={18} aria-hidden="true" />
 				<span>Delete</span>
 			</button>
@@ -655,6 +675,7 @@
 	}
 	.tb-spacer { flex: 1; }
 	.save-status { font-size: 0.75rem; color: var(--text-4); white-space: nowrap; }
+	.tb-lock-on { color: var(--accent) !important; }
 
 	.link-btn-wrap {
 		position: relative;

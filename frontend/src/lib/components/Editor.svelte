@@ -34,7 +34,16 @@
 	let { value = '', onchange, ref = $bindable<EditorRef | null>(null), oninsertlink, onformatchange, readonly = false }: Props = $props();
 
 	let container: HTMLDivElement;
-	let _editor: Editor | null = null;
+	let _editor = $state<Editor | null>(null);
+
+	// Lock/unlock can flip `readonly` on a mounted editor, so editability is
+	// applied reactively rather than only at creation time.
+	$effect(() => {
+		const editable = !readonly;
+		_editor?.action((ctx) => {
+			ctx.get(editorViewCtx).setProps({ editable: () => editable });
+		});
+	});
 
 	// Reports which formats are active at the selection (drives the format-bar
 	// button highlight). Recomputes only when selection/doc/stored marks change.
@@ -79,13 +88,6 @@
 			.use(history)
 			.use(listener)
 			.create();
-
-		if (readonly) {
-			_editor.action((ctx) => {
-				const view = ctx.get(editorViewCtx);
-				view.setProps({ editable: () => false });
-			});
-		}
 
 		container.addEventListener('crapnote:insert-link', () => oninsertlink?.());
 

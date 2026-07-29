@@ -42,7 +42,7 @@
 		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Image, Link,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search,
-		CloudUpload, CheckCircle2, Lock, MoreHorizontal,
+		CloudUpload, CheckCircle2, Lock, LockOpen, MoreHorizontal,
 		RefreshCw, WifiOff, X,
 	} from 'lucide-svelte';
 	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
@@ -266,6 +266,7 @@
 			starred: c.starred,
 			pinned: c.pinned,
 			archived: false,
+			locked: c.locked ?? false,
 			created_at: c.server_updated_at,
 			updated_at: c.local_updated_at,
 		};
@@ -320,6 +321,7 @@
 				body: note.body,
 				starred: note.starred,
 				pinned: note.pinned,
+				locked: note.locked,
 				tags: noteTags.map(t => ({ id: t.id, name: t.name })),
 				server_updated_at: note.updated_at,
 				local_updated_at: note.updated_at,
@@ -682,7 +684,7 @@
 		db.close();
 		const offlineNote: Note = {
 			id: tempId, title, body: '',
-			starred: false, pinned: false, archived: false,
+			starred: false, pinned: false, archived: false, locked: false,
 			created_at: now, updated_at: now,
 		};
 		listVersion++; // invalidate in-flight list loads that predate the note
@@ -828,6 +830,7 @@
 
 	function scheduleAutoSave(field: 'title' | 'body', value: string) {
 		if (!selectedId) return;
+		if (selectedNote?.locked) return;
 		if (saveTimer) clearTimeout(saveTimer);
 		const idAtSchedule = selectedId;
 		saveTimer = setTimeout(async () => {
@@ -924,6 +927,12 @@
 		const rest = notes.filter((n) => n.id !== updated.id);
 		const full = [updated, ...rest];
 		notes = [...full.filter((n) => n.pinned), ...full.filter((n) => !n.pinned)];
+	}
+
+	async function toggleLock(id: number) {
+		const updated = await api.notes.toggleLock(id);
+		listVersion++; // invalidate in-flight list loads carrying the old state
+		notes = notes.map((n) => (n.id === updated.id ? updated : n));
 	}
 
 	async function archiveNote(id: number) {
@@ -1388,6 +1397,9 @@
 						<button class="tb-btn" onclick={() => cmd(insertImageCommand.key)} title="Insert image"><Image size={13} /></button>
 						<span class="tb-spacer"></span>
 						<button class="tb-btn tb-star" class:tb-star-on={selectedNote.starred} onclick={() => toggleStar(selectedNote.id)} title={selectedNote.starred ? 'Unstar' : 'Star'}><Star size={13} /></button>
+						<button class="tb-btn tb-lock" class:tb-lock-on={selectedNote.locked} onclick={() => toggleLock(selectedNote.id)} title={selectedNote.locked ? 'Unlock note' : 'Lock note'} aria-pressed={selectedNote.locked}>
+							{#if selectedNote.locked}<Lock size={13} />{:else}<LockOpen size={13} />{/if}
+						</button>
 						<div class="note-menu-wrap">
 							<button class="tb-btn" onclick={() => (showNoteMenu = !showNoteMenu)} title="More actions" aria-label="More actions"><MoreHorizontal size={13} /></button>
 							{#if showNoteMenu}
@@ -1399,7 +1411,7 @@
 									<button class="note-menu-item" role="menuitem" onclick={() => duplicateNote(selectedNote.id)}>
 										<Plus size={13} />Duplicate note
 									</button>
-									<button class="note-menu-item danger" role="menuitem" onclick={() => { deleteNote(selectedNote.id); showNoteMenu = false; }}>
+									<button class="note-menu-item danger" role="menuitem" disabled={selectedNote.locked} title={selectedNote.locked ? 'Unlock the note first' : undefined} onclick={() => { deleteNote(selectedNote.id); showNoteMenu = false; }}>
 										<Trash2 size={13} />Move to trash
 									</button>
 								</div>
@@ -1413,15 +1425,16 @@
 							bind:this={titleInput}
 							class="title-input"
 							type="text"
-							value={selectedNote.title}
+						value={selectedNote.title}
 							oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
 							placeholder="Note title"
+							readonly={selectedNote.locked}
 						/>
 					</div>
 				</div>
 
 				{#key selectedId}
-					<Editor value={selectedNote.body} onchange={(md) => scheduleAutoSave('body', md)} bind:ref={editorRef} oninsertlink={openLinkDialog} />
+				<Editor value={selectedNote.body} onchange={(md) => scheduleAutoSave('body', md)} bind:ref={editorRef} oninsertlink={openLinkDialog} readonly={selectedNote.locked} />
 				{/key}
 			</div>
 			{#if !isOnline && noteHasImages(selectedNote.body)}
@@ -1936,6 +1949,7 @@
 	}
 	.tb-btn:hover { background: var(--bg-hover); color: var(--text-2); }
 	.tb-star-on { color: var(--accent) !important; }
+	.tb-lock-on { color: var(--accent) !important; }
 
 	.tb-sep {
 		width: 1px;

@@ -145,6 +145,7 @@ async function syncNewNote(db: IDBDatabase, note: CachedNote, result: SyncResult
 		title: serverNote.title,
 		body: serverNote.body,
 		starred: serverNote.starred,
+		locked: serverNote.locked,
 		pinned: serverNote.pinned,
 		tags: note.tags, // preserve any tags the user added offline
 		server_updated_at: serverNote.updated_at,
@@ -201,6 +202,7 @@ async function syncDirtyNote(db: IDBDatabase, note: CachedNote, result: SyncResu
 			title: serverNote.title,
 			body: serverNote.body,
 			starred: serverNote.starred,
+			locked: serverNote.locked,
 			pinned: serverNote.pinned,
 			tags: note.tags,
 			server_updated_at: serverNote.updated_at,

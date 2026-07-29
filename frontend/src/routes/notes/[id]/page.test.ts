@@ -56,7 +56,7 @@ vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
 vi.mock('$lib/api', () => ({
 	api: {
-		notes: { get: vi.fn(), update: vi.fn() },
+		notes: { get: vi.fn(), update: vi.fn(), toggleLock: vi.fn() },
 		tags: {
 			list: vi.fn(),
 			listForNote: vi.fn(),
@@ -82,7 +82,7 @@ import { goto } from '$app/navigation';
 
 const mockNote = (overrides = {}) => ({
 	id: 42, title: 'My Note', body: '# Hello',
-	starred: false, pinned: false, archived: false,
+	starred: false, pinned: false, archived: false, locked: false,
 	created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z',
 	...overrides,
 });
@@ -212,7 +212,7 @@ describe('/notes/[id] offline mode', () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: true });
 		vi.mocked(api.notes.get).mockResolvedValue({
 			id: 42, title: 'Stale Server', body: 'Stale body',
-			starred: false, pinned: false, archived: false,
+			starred: false, pinned: false, archived: false, locked: false,
 			created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z',
 		});
 		vi.mocked(offlineDB.getNote).mockResolvedValue({
@@ -348,5 +348,55 @@ describe('Link toolbar', () => {
 		await fireEvent.click(screen.getAllByRole('button', { name: /apply/i })[0]);
 
 		expect(screen.queryByPlaceholderText(/https/i)).not.toBeInTheDocument();
+	});
+});
+
+describe('Note locking', () => {
+	// An earlier test stubs navigator offline and never restores it; these
+	// tests exercise the online load path.
+	beforeEach(() => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+	});
+
+	it('makes the title read-only while the note is locked', async () => {
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ locked: true }));
+
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		expect((title as HTMLInputElement).readOnly).toBe(true);
+	});
+
+	it('leaves the title editable when the note is unlocked', async () => {
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		expect((title as HTMLInputElement).readOnly).toBe(false);
+	});
+
+	it('does not save edits made to a locked note', async () => {
+		vi.useFakeTimers();
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ locked: true }));
+
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.input(title, { target: { value: 'changed' } });
+		await vi.advanceTimersByTimeAsync(1000); // well past the 800ms debounce
+
+		expect(api.notes.update).not.toHaveBeenCalled();
+		vi.useRealTimers();
+	});
+
+	it('offers a lock toggle that calls the API', async () => {
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ locked: true }));
+
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.click(screen.getByTitle('Lock note'));
+
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(42));
+		await waitFor(() => expect(screen.getByTitle('Unlock note')).toBeTruthy());
 	});
 });

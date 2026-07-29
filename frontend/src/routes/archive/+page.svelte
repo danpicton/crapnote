@@ -29,6 +29,12 @@
 	}
 
 	async function deleteNote(id: number) {
+		// The API rejects deletes on locked notes with 423; say so up front
+		// rather than letting the request fail silently.
+		if (notes.find((n) => n.id === id)?.locked) {
+			alert('This note is locked. Unlock it before deleting.');
+			return;
+		}
 		if (!confirm('Permanently delete this note?')) return;
 		await api.notes.delete(id);
 		notes = notes.filter((n) => n.id !== id);
