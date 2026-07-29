@@ -42,7 +42,11 @@ func (s *Service) List(ctx context.Context, userID int64, filter ListFilter) ([]
 
 // Update performs a partial update. Only non-nil fields are written.
 // If title is provided as an empty string it is replaced with a timestamp default.
+// Returns ErrLocked if the note is locked.
 func (s *Service) Update(ctx context.Context, id, userID int64, title, body *string) (*Note, error) {
+	if err := s.ensureUnlocked(ctx, id, userID); err != nil {
+		return nil, err
+	}
 	if title != nil && *title == "" {
 		t := defaultTitle(time.Now().UTC())
 		title = &t
@@ -50,9 +54,25 @@ func (s *Service) Update(ctx context.Context, id, userID int64, title, body *str
 	return s.repo.Update(ctx, id, userID, title, body)
 }
 
-// Delete moves a note to the trash.
+// Delete moves a note to the trash. Returns ErrLocked if the note is locked.
 func (s *Service) Delete(ctx context.Context, id, userID int64) error {
+	if err := s.ensureUnlocked(ctx, id, userID); err != nil {
+		return err
+	}
 	return s.repo.SoftDelete(ctx, id, userID)
+}
+
+// ensureUnlocked returns ErrLocked if the note is locked, ErrNotFound if it
+// does not belong to the user.
+func (s *Service) ensureUnlocked(ctx context.Context, id, userID int64) error {
+	locked, err := s.repo.IsLocked(ctx, id, userID)
+	if err != nil {
+		return err
+	}
+	if locked {
+		return ErrLocked
+	}
+	return nil
 }
 
 // ToggleStar flips the starred flag and returns the updated note.
@@ -81,6 +101,26 @@ func (s *Service) Unarchive(ctx context.Context, id, userID int64) error {
 // limit <= 0 disables pagination.
 func (s *Service) ListArchived(ctx context.Context, userID int64, limit, offset int) ([]*Note, error) {
 	return s.repo.ListArchived(ctx, userID, limit, offset)
+}
+
+// ToggleLock flips the locked flag and returns the updated note. This is the
+// only content-protecting operation that is itself allowed on a locked note —
+// otherwise a locked note could never be unlocked.
+func (s *Service) ToggleLock(ctx context.Context, id, userID int64) (*Note, error) {
+	locked, err := s.repo.IsLocked(ctx, id, userID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.SetLocked(ctx, id, userID, !locked); err != nil {
+		return nil, err
+	}
+	return s.repo.Get(ctx, id, userID)
+}
+
+// AutoLockStale locks notes whose content has not been updated within the given
+// window, returning the number newly locked.
+func (s *Service) AutoLockStale(ctx context.Context, olderThan time.Duration) (int64, error) {
+	return s.repo.AutoLockStale(ctx, olderThan)
 }
 
 // TogglePin flips the pinned flag and returns the updated note.
