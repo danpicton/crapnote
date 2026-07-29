@@ -179,3 +179,44 @@ describe('shortcuts ignore events inside text inputs', () => {
 
 // Prevent vitest environment leaks.
 vi.useRealTimers();
+
+describe('list reorder shortcuts', () => {
+	it('registers all four list-move actions', () => {
+		const ids = shortcuts.list.map((a) => a.id);
+		expect(ids).toContain('list-move-up');
+		expect(ids).toContain('list-move-down');
+		expect(ids).toContain('list-move-top');
+		expect(ids).toContain('list-move-bottom');
+	});
+
+	it('matches Alt+Arrow for single-step moves', () => {
+		expect(matchShortcut(ev('ArrowUp', { altKey: true }))).toBe('list-move-up');
+		expect(matchShortcut(ev('ArrowDown', { altKey: true }))).toBe('list-move-down');
+	});
+
+	// The shift variants must not be swallowed by the unshifted bindings, which
+	// are declared first in the action list.
+	it('distinguishes Alt+Shift+Arrow from Alt+Arrow', () => {
+		expect(matchShortcut(ev('ArrowUp', { altKey: true, shiftKey: true }))).toBe('list-move-top');
+		expect(matchShortcut(ev('ArrowDown', { altKey: true, shiftKey: true }))).toBe(
+			'list-move-bottom'
+		);
+	});
+
+	it('applies inside the editor, which is a contenteditable text target', () => {
+		const el = document.createElement('div');
+		el.contentEditable = 'true';
+		document.body.appendChild(el);
+		const event = ev('ArrowUp', { altKey: true });
+		Object.defineProperty(event, 'target', { value: el });
+
+		expect(matchShortcut(event, { skipInInputs: true })).toBe('list-move-up');
+
+		el.remove();
+	});
+
+	it('leaves bare arrow keys alone', () => {
+		expect(matchShortcut(ev('ArrowUp'))).toBeNull();
+		expect(matchShortcut(ev('ArrowDown'))).toBeNull();
+	});
+});

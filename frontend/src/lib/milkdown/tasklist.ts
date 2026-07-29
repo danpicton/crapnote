@@ -5,6 +5,7 @@ import { extendListItemSchemaForTask } from '@milkdown/kit/preset/gfm';
 import type { Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
 import type { EditorView } from '@milkdown/kit/prose/view';
 import type { Transaction } from '@milkdown/kit/prose/state';
+import { createDragHandle, enableListItemDrag } from './listdrag';
 
 export const wrapInTaskListCommand = $command('WrapInTaskList', (ctx) => () => {
 	return (state, dispatch) => {
@@ -63,6 +64,17 @@ export const taskListItemView = $view(
 			const contentDOM = document.createElement('div');
 			contentDOM.className = 'task-content';
 
+			// Drag-to-reorder grip, shown in the list gutter on hover. Applies to
+			// plain bullets and ordered items as well as task items.
+			const handle = createDragHandle();
+			const teardownDrag = enableListItemDrag({
+				handle,
+				dom,
+				view,
+				getPos: () => (typeof getPos === 'function' ? getPos() : undefined),
+			});
+			dom.appendChild(handle);
+
 			let checkbox: HTMLInputElement | null = null;
 
 			if (isTaskItem) {
@@ -108,7 +120,9 @@ export const taskListItemView = $view(
 					}
 					return true;
 				},
-				destroy() {},
+				destroy() {
+					teardownDrag();
+				},
 			};
 		},
 );
