@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { ApiError } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { hasStashedShare } from '$lib/share';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 
 	let username = $state('');
@@ -15,7 +16,9 @@
 		submitting = true;
 		try {
 			await auth.login(username, password);
-			goto('/');
+			// A share that arrived while signed out is waiting to be filed —
+			// finish it rather than dropping the user on the notes list.
+			goto(hasStashedShare() ? '/share?restore=1' : '/');
 		} catch (err) {
 			if (err instanceof ApiError) {
 				if (err.status === 403) {

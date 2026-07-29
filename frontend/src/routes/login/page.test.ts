@@ -116,3 +116,35 @@ describe('Login page', () => {
 		});
 	});
 });
+
+describe('Pending share', () => {
+	it('returns to the share handler after signing in', async () => {
+		const { PENDING_SHARE_KEY } = await import('$lib/share');
+		sessionStorage.setItem(PENDING_SHARE_KEY, JSON.stringify({ text: 'shared thing' }));
+		vi.mocked(api.auth.login).mockResolvedValue({
+			id: 1, username: 'alice', is_admin: false, created_at: '2024-01-01T00:00:00Z',
+		});
+
+		render(LoginPage);
+		await fireEvent.input(screen.getByLabelText(/username/i), { target: { value: 'u' } });
+		await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'p' } });
+		await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
+
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/share?restore=1'));
+		sessionStorage.clear();
+	});
+
+	it('goes to the notes list when no share is pending', async () => {
+		sessionStorage.clear();
+		vi.mocked(api.auth.login).mockResolvedValue({
+			id: 1, username: 'alice', is_admin: false, created_at: '2024-01-01T00:00:00Z',
+		});
+
+		render(LoginPage);
+		await fireEvent.input(screen.getByLabelText(/username/i), { target: { value: 'u' } });
+		await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'p' } });
+		await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
+
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
+	});
+});

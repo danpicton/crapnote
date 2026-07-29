@@ -57,6 +57,21 @@ func TestUIHandler_SPA_Route(t *testing.T) {
 	}
 }
 
+// The manifest registers /share as a Web Share Target, so the share sheet
+// navigates there with the shared fields in the query string. It must reach the
+// SPA shell rather than 404.
+func TestUIHandler_ShareTarget_Route(t *testing.T) {
+	mux := newTestMux(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/share?title=Hi&text=There&url=https://example.com", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("share target route: expected 200, got %d", w.Code)
+	}
+}
+
 func TestUIHandler_Asset_Route(t *testing.T) {
 	mux := newTestMux(t)
 
