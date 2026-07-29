@@ -42,7 +42,7 @@
 		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Image, Link,
 		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search,
-		CloudUpload, CheckCircle2, Lock, LockOpen, MoreHorizontal,
+		CloudUpload, CheckCircle2, Lock, LockOpen, ImageOff, MoreHorizontal,
 		RefreshCw, WifiOff, X,
 	} from 'lucide-svelte';
 	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
@@ -92,6 +92,12 @@
 		swipeAxisLocked = false;
 	}
 
+	// Resting offsets for the swipe panels, sized to the actions each holds:
+	// pin + star + lock on the left, archive + delete on the right.
+	const SWIPE_BTN_W = 64;
+	const SWIPE_LEFT_REST = SWIPE_BTN_W * 3;
+	const SWIPE_RIGHT_REST = SWIPE_BTN_W * 2;
+
 	function onSwipeMove(e: TouchEvent, noteId: number) {
 		if (swipeActive !== noteId) return;
 		const rawDx = e.touches[0].clientX - swipeStartX;
@@ -102,14 +108,17 @@
 			swipeAxisLocked = true;
 		}
 		e.preventDefault();
-		swipeX = { ...swipeX, [noteId]: Math.max(-180, Math.min(180, swipeBaseX + rawDx)) };
+		swipeX = {
+			...swipeX,
+			[noteId]: Math.max(-(SWIPE_RIGHT_REST + 40), Math.min(SWIPE_LEFT_REST + 40, swipeBaseX + rawDx)),
+		};
 	}
 
 	function onSwipeEnd(noteId: number) {
 		if (swipeActive !== noteId) return;
 		swipeActive = null;
 		const x = swipeX[noteId] ?? 0;
-		swipeX = { ...swipeX, [noteId]: x >= 60 ? 140 : x <= -60 ? -140 : 0 };
+		swipeX = { ...swipeX, [noteId]: x >= 60 ? SWIPE_LEFT_REST : x <= -60 ? -SWIPE_RIGHT_REST : 0 };
 	}
 
 	function resetSwipe(noteId: number) {
@@ -1198,6 +1207,14 @@
 							<Star size={20} aria-hidden="true" />
 							<span>{note.starred ? 'Unstar' : 'Star'}</span>
 						</button>
+						<button
+							class="mob-swipe-btn mob-swipe-lock"
+							onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void toggleLock(note.id); }}
+							aria-label="{note.locked ? 'Unlock' : 'Lock'} note"
+						>
+							{#if note.locked}<Lock size={20} aria-hidden="true" />{:else}<LockOpen size={20} aria-hidden="true" />{/if}
+							<span>{note.locked ? 'Unlock' : 'Lock'}</span>
+						</button>
 					</div>
 					<div class="mob-swipe-right" class:mob-swipe-visible={(swipeX[note.id] ?? 0) < -4}>
 						<button
@@ -1243,8 +1260,11 @@
 									{#if note.starred}
 										<button class="meta-icon-btn" onclick={(e) => { e.stopPropagation(); void toggleStar(note.id); }} title="Unstar" aria-label="Unstar"><Star size={11} /></button>
 									{/if}
+									{#if note.locked}
+										<button class="meta-icon-btn" onclick={(e) => { e.stopPropagation(); void toggleLock(note.id); }} title="Unlock" aria-label="Unlock"><Lock size={11} /></button>
+									{/if}
 									{#if !isOnline && noteHasImages(note.body)}
-										<span title="Images unavailable offline"><Lock size={11} /></span>
+										<span title="Images unavailable offline"><ImageOff size={11} /></span>
 									{/if}
 								</span>
 							</div>
@@ -1263,8 +1283,11 @@
 							{#if !note.pinned}
 								<button class="act-btn" onclick={() => void togglePin(note.id)} title="Pin"><Pin size={12} /></button>
 							{/if}
+							{#if !note.locked}
+								<button class="act-btn" onclick={() => void toggleLock(note.id)} title="Lock"><LockOpen size={12} /></button>
+							{/if}
 							<button class="act-btn" onclick={() => void archiveNote(note.id)} title="Move to archive" aria-label="Move to archive"><Archive size={12} /></button>
-							<button class="act-btn danger" onclick={() => void deleteNote(note.id)} title="Delete"><Trash2 size={12} /></button>
+							<button class="act-btn danger" onclick={() => void deleteNote(note.id)} title="Delete" disabled={note.locked} aria-label={note.locked ? 'Delete (unlock the note first)' : 'Delete'}><Trash2 size={12} /></button>
 						</div>
 					</div>
 				</li>
@@ -2469,7 +2492,8 @@
 			flex-direction: column;
 			align-items: center;
 			justify-content: center;
-			width: 72px;
+			/* Keep in step with SWIPE_BTN_W above. */
+			width: 64px;
 			gap: 4px;
 			border: none;
 			cursor: pointer;
@@ -2481,8 +2505,10 @@
 		}
 		.mob-swipe-pin    { background: var(--gesture-pin); }
 		.mob-swipe-star   { background: var(--gesture-star); }
+		.mob-swipe-lock   { background: var(--gesture-lock); }
 		.mob-swipe-archive { background: var(--gesture-archive); }
 		.mob-swipe-delete  { background: var(--gesture-delete); }
+		.mob-swipe-btn span { font-size: 10px; }
 
 		/* Row body translates on swipe */
 		.note-row-body {

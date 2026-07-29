@@ -806,3 +806,69 @@ describe('Note locking', () => {
 		await waitFor(() => expect((title as HTMLInputElement).readOnly).toBe(false));
 	});
 });
+
+describe('Lock controls in the note list', () => {
+	beforeEach(() => mockViewport(false));
+
+	function row() {
+		return screen.getByText('Test Note').closest('.note-row-body') as HTMLElement;
+	}
+
+	it('offers a lock action on hover for an unlocked note', async () => {
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ locked: true }));
+
+		const lockBtn = row().querySelector('.note-hover-actions [title="Lock"]') as HTMLElement;
+		expect(lockBtn).toBeTruthy();
+
+		await fireEvent.click(lockBtn);
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(1));
+	});
+
+	it('marks a locked note with a lock icon that unlocks it', async () => {
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ locked: true })]);
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ locked: false }));
+
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		const indicator = row().querySelector('.note-meta-icons [title="Unlock"]') as HTMLElement;
+		expect(indicator).toBeTruthy();
+
+		await fireEvent.click(indicator);
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(1));
+	});
+
+	it('does not show a lock indicator on an unlocked note', async () => {
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		expect(row().querySelector('.note-meta-icons [title="Unlock"]')).toBeNull();
+	});
+
+	// Deleting a locked note is rejected by the API with 423.
+	it('disables delete in the hover actions while a note is locked', async () => {
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ locked: true })]);
+
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		const del = row().querySelector('.note-hover-actions [title="Delete"]') as HTMLButtonElement;
+		expect(del.disabled).toBe(true);
+	});
+
+	it('offers lock alongside pin and star in the mobile swipe panel', async () => {
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ locked: true }));
+
+		const item = screen.getByText('Test Note').closest('.note-item') as HTMLElement;
+		const panel = item.querySelector('.mob-swipe-left') as HTMLElement;
+		const labels = [...panel.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'));
+		expect(labels).toEqual(['Pin note', 'Star note', 'Lock note']);
+
+		await fireEvent.click(panel.querySelector('.mob-swipe-lock') as HTMLElement);
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(1));
+	});
+});

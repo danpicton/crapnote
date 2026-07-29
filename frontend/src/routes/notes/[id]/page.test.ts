@@ -400,3 +400,33 @@ describe('Note locking', () => {
 		await waitFor(() => expect(screen.getByTitle('Unlock note')).toBeTruthy());
 	});
 });
+
+describe('Mobile lock control', () => {
+	beforeEach(() => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+	});
+
+	it('puts a lock toggle in the mobile top bar, not just the action sheet', async () => {
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ locked: true }));
+
+		const { container } = render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		const btn = container.querySelector(
+			'.mob-topbar button[aria-label="Lock note"]'
+		) as HTMLElement;
+		expect(btn).toBeTruthy();
+
+		await fireEvent.click(btn);
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(42));
+	});
+
+	it('reflects the locked state in the mobile top bar', async () => {
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ locked: true }));
+
+		const { container } = render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		expect(container.querySelector('.mob-topbar button[aria-label="Unlock note"]')).toBeTruthy();
+	});
+});

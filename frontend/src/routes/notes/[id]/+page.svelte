@@ -405,6 +405,14 @@
 		>
 			<Star size={20} aria-hidden="true" />
 		</button>
+		<button
+			class="mob-topbar-btn"
+			class:mob-lock-on={note.locked}
+			onclick={toggleLock}
+			aria-label={note.locked ? 'Unlock note' : 'Lock note'}
+		>
+			{#if note.locked}<Lock size={20} aria-hidden="true" />{:else}<LockOpen size={20} aria-hidden="true" />{/if}
+		</button>
 	</div>
 
 	<!-- ── Editor header (title + tags) ─────────────────── -->
@@ -928,6 +936,9 @@
 		}
 		.mob-topbar-btn:hover { color: var(--text); }
 		.mob-star-on { color: var(--text-3); }
+		/* Unlike the star, the lock changes whether the note can be edited at
+		   all, so it gets a state colour the user can actually see. */
+		.mob-lock-on { color: var(--accent); }
 
 		/* Editor header */
 		.editor-header {
