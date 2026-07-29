@@ -39,12 +39,12 @@ frontend/.svelte-kit/
 # Backend binary
 backend/server
 
-# Frontend build artifacts copied into embed dir (run `make build` to populate)
-backend/cmd/server/ui/build/_app/
-backend/cmd/server/ui/build/manifest.json
-backend/cmd/server/ui/build/service-worker.js
-backend/cmd/server/ui/build/favicon.svg
-backend/cmd/server/ui/build/index.html
+# Frontend build artifacts copied into embed dir (run `make build` to populate).
+# Ignore everything the frontend emits — listing files individually meant each
+# new static asset had to be added by hand. .gitkeep stays so go:embed always
+# has a directory to read.
+backend/cmd/server/ui/build/*
+!backend/cmd/server/ui/build/.gitkeep
 
 # SQLite database
 *.db
