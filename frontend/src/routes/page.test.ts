@@ -37,6 +37,7 @@ vi.mock('$lib/api', () => ({
 			delete: vi.fn(),
 			toggleStar: vi.fn(),
 			togglePin: vi.fn(),
+			toggleLock: vi.fn(),
 			archive: vi.fn(),
 			listArchived: vi.fn(),
 		},
@@ -118,7 +119,7 @@ function mockViewport(mobile: boolean) {
 
 const mockNote = (overrides = {}) => ({
 	id: 1, title: 'Test Note', body: '# Hello',
-	starred: false, pinned: false, archived: false,
+	starred: false, pinned: false, archived: false, locked: false,
 	created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z',
 	...overrides,
 });
@@ -223,7 +224,7 @@ describe('Mobile navigation', () => {
 	it('new note navigates to /notes/[id] on mobile', async () => {
 		const { goto } = await import('$app/navigation');
 		vi.mocked(api.notes.create).mockResolvedValueOnce(
-			{ id: 99, title: '', body: '', starred: false, pinned: false, archived: false,
+			{ id: 99, title: '', body: '', starred: false, pinned: false, archived: false, locked: false,
 			  created_at: '', updated_at: '' }
 		);
 
@@ -532,7 +533,7 @@ describe('Offline mode', () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: true });
 		vi.mocked(api.notes.list).mockResolvedValue([
 			{ id: 5, title: 'Online Note', body: '', starred: false, pinned: false,
-			  archived: false, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+			  archived: false, locked: false, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
 		]);
 
 		render(Page);
@@ -605,7 +606,7 @@ describe('Offline mode', () => {
 		// Server has the old version
 		vi.mocked(api.notes.list).mockResolvedValue([
 			{ id: 5, title: 'Server Title', body: 'Server body', starred: false, pinned: false,
-			  archived: false, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+			  archived: false, locked: false, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
 		]);
 		// Sync returns no mappings (e.g. sync failed silently)
 		vi.mocked(syncOfflineChanges).mockResolvedValue(emptySyncResult);
@@ -633,7 +634,7 @@ describe('Offline mode', () => {
 		// Server has the OLD version (sync failed so server never got the local edit)
 		vi.mocked(api.notes.list).mockResolvedValue([
 			{ id: 5, title: 'Server Title', body: 'Server body', starred: false, pinned: false,
-			  archived: false, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
+			  archived: false, locked: false, created_at: '2024-01-01T00:00:00Z', updated_at: '2024-01-01T00:00:00Z' },
 		]);
 		vi.mocked(syncOfflineChanges).mockResolvedValue(emptySyncResult);
 		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([
@@ -731,5 +732,143 @@ describe('Offline mode', () => {
 		await fireEvent.click(syncBtn);
 
 		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalledWith('manual', 1));
+	});
+});
+
+describe('Note locking', () => {
+	// Earlier blocks stub a mobile viewport globally; the lock control lives in
+	// the desktop editor toolbar.
+	beforeEach(() => mockViewport(false));
+
+	/**
+	 * Render and open "Test Note" in the desktop editor pane. Selects by title
+	 * rather than by position — earlier tests leave offline-created notes in the
+	 * fake IndexedDB, which the cache merge prepends to the list.
+	 */
+	async function openNote() {
+		render(Page);
+		const label = await waitFor(() => screen.getByText('Test Note'));
+		const noteBtn = label.closest('.note-btn') as HTMLElement | null;
+		await fireEvent.click(noteBtn ?? label);
+		await waitFor(() => screen.getByPlaceholderText(/note title/i));
+	}
+
+	it('shows a lock control for the selected note', async () => {
+		await openNote();
+
+		expect(screen.getByTitle('Lock note')).toBeTruthy();
+	});
+
+	it('locks a note through the API and reflects the new state', async () => {
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ locked: true }));
+
+		await openNote();
+
+		await fireEvent.click(screen.getByTitle('Lock note'));
+
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(1));
+		await waitFor(() => expect(screen.getByTitle('Unlock note')).toBeTruthy());
+	});
+
+	it('makes the title read-only while the note is locked', async () => {
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ locked: true })]);
+
+		await openNote();
+
+		const title = screen.getByPlaceholderText(/note title/i);
+		expect((title as HTMLInputElement).readOnly).toBe(true);
+	});
+
+	it('does not save edits made to a locked note', async () => {
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ locked: true })]);
+
+		await openNote();
+		const title = screen.getByPlaceholderText(/note title/i);
+
+		vi.useFakeTimers();
+		await fireEvent.input(title, { target: { value: 'changed' } });
+		await vi.advanceTimersByTimeAsync(1000); // well past the 800ms debounce
+
+		expect(api.notes.update).not.toHaveBeenCalled();
+		vi.useRealTimers();
+	});
+
+	it('unlocking restores editing', async () => {
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ locked: true })]);
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ locked: false }));
+
+		await openNote();
+
+		await fireEvent.click(screen.getByTitle('Unlock note'));
+
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(1));
+		const title = await waitFor(() => screen.getByPlaceholderText(/note title/i));
+		await waitFor(() => expect((title as HTMLInputElement).readOnly).toBe(false));
+	});
+});
+
+describe('Lock controls in the note list', () => {
+	beforeEach(() => mockViewport(false));
+
+	function row() {
+		return screen.getByText('Test Note').closest('.note-row-body') as HTMLElement;
+	}
+
+	it('offers a lock action on hover for an unlocked note', async () => {
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ locked: true }));
+
+		const lockBtn = row().querySelector('.note-hover-actions [title="Lock"]') as HTMLElement;
+		expect(lockBtn).toBeTruthy();
+
+		await fireEvent.click(lockBtn);
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(1));
+	});
+
+	it('marks a locked note with a lock icon that unlocks it', async () => {
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ locked: true })]);
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ locked: false }));
+
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		const indicator = row().querySelector('.note-meta-icons [title="Unlock"]') as HTMLElement;
+		expect(indicator).toBeTruthy();
+
+		await fireEvent.click(indicator);
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(1));
+	});
+
+	it('does not show a lock indicator on an unlocked note', async () => {
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		expect(row().querySelector('.note-meta-icons [title="Unlock"]')).toBeNull();
+	});
+
+	// Deleting a locked note is rejected by the API with 423.
+	it('disables delete in the hover actions while a note is locked', async () => {
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ locked: true })]);
+
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		const del = row().querySelector('.note-hover-actions [title="Delete"]') as HTMLButtonElement;
+		expect(del.disabled).toBe(true);
+	});
+
+	it('offers lock alongside pin and star in the mobile swipe panel', async () => {
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ locked: true }));
+
+		const item = screen.getByText('Test Note').closest('.note-item') as HTMLElement;
+		const panel = item.querySelector('.mob-swipe-left') as HTMLElement;
+		const labels = [...panel.querySelectorAll('button')].map((b) => b.getAttribute('aria-label'));
+		expect(labels).toEqual(['Pin note', 'Star note', 'Lock note']);
+
+		await fireEvent.click(panel.querySelector('.mob-swipe-lock') as HTMLElement);
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(1));
 	});
 });

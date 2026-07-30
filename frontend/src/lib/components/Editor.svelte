@@ -14,6 +14,7 @@
 	import { imagePlugin } from '$lib/milkdown/image';
 	import { linkPlugin } from '$lib/milkdown/link';
 	import { taskListPlugin } from '$lib/milkdown/tasklist';
+	import { listMovePlugin } from '$lib/milkdown/listmove';
 
 	export interface EditorRef {
 		call: (key: string | CmdKey<unknown>, payload?: unknown) => void;
@@ -33,7 +34,16 @@
 	let { value = '', onchange, ref = $bindable<EditorRef | null>(null), oninsertlink, onformatchange, readonly = false }: Props = $props();
 
 	let container: HTMLDivElement;
-	let _editor: Editor | null = null;
+	let _editor = $state<Editor | null>(null);
+
+	// Lock/unlock can flip `readonly` on a mounted editor, so editability is
+	// applied reactively rather than only at creation time.
+	$effect(() => {
+		const editable = !readonly;
+		_editor?.action((ctx) => {
+			ctx.get(editorViewCtx).setProps({ editable: () => editable });
+		});
+	});
 
 	// Reports which formats are active at the selection (drives the format-bar
 	// button highlight). Recomputes only when selection/doc/stored marks change.
@@ -70,6 +80,7 @@
 			.use(commonmark)
 			.use(gfm)
 			.use(taskListPlugin as Parameters<typeof Editor.prototype.use>[0])
+			.use(listMovePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(underlinePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(imagePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(linkPlugin as Parameters<typeof Editor.prototype.use>[0])
@@ -77,13 +88,6 @@
 			.use(history)
 			.use(listener)
 			.create();
-
-		if (readonly) {
-			_editor.action((ctx) => {
-				const view = ctx.get(editorViewCtx);
-				view.setProps({ editable: () => false });
-			});
-		}
 
 		container.addEventListener('crapnote:insert-link', () => oninsertlink?.());
 
@@ -167,8 +171,96 @@
 	.editor-container :global(.ProseMirror ul),
 	.editor-container :global(.ProseMirror ol) {
 		margin: 0.15em 0;
-		padding-left: 1.5em;
+		/* Wider than the 1.5em the markers need: the extra space is the gutter
+		   the drag handles occupy, so showing one never shifts the text. */
+		padding-left: 2.1em;
 		line-height: 1.5;
+	}
+
+	/* ── Drag-to-reorder ── */
+	.editor-container :global(.ProseMirror li) {
+		position: relative;
+	}
+
+	.editor-container :global(.ProseMirror .list-drag-handle) {
+		position: absolute;
+		left: -1.9em;
+		top: 0;
+		/* Font size is deliberately left inherited so this height is exactly one
+		   line of the list's line-height — that is what centres the grip against
+		   the first line of its item. Shrinking the font here would shrink the
+		   em box too and float the grip above the text. */
+		height: 1.5em;
+		width: 0.85em;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--text-3);
+		opacity: 0;
+		cursor: grab;
+		user-select: none;
+		/* Claim the gesture so a touch-drag reorders instead of scrolling. */
+		touch-action: none;
+		transition: opacity 0.12s;
+	}
+	.editor-container :global(.ProseMirror .list-drag-handle svg) {
+		display: block;
+		width: 0.4em;
+		height: 0.68em;
+	}
+	/* Widen the hit area without moving the grip — it stays clear of the text,
+	   which begins to the right of the gutter. */
+	.editor-container :global(.ProseMirror .list-drag-handle::after) {
+		content: '';
+		position: absolute;
+		inset: -6px -7px;
+	}
+	/* Task items are pulled 1.25em left so their text lines up with plain
+	   items; shift the handle back by the same amount to keep the gutter
+	   column straight. */
+	.editor-container :global(.ProseMirror li[data-item-type='task'] .list-drag-handle) {
+		left: -0.65em;
+	}
+	/* Touch devices never hover, so a hover-only grip would be undraggable. */
+	@media (hover: none) {
+		.editor-container :global(.ProseMirror .list-drag-handle) {
+			opacity: 0.4;
+		}
+	}
+
+	.editor-container :global(.ProseMirror li:hover > .list-drag-handle),
+	.editor-container :global(.ProseMirror li.list-item-dragging > .list-drag-handle) {
+		opacity: 0.55;
+	}
+	.editor-container :global(.ProseMirror .list-drag-handle:active) {
+		cursor: grabbing;
+		opacity: 0.9;
+	}
+	/* No handles when the note is locked or otherwise read-only. */
+	.editor-container.readonly :global(.ProseMirror .list-drag-handle) {
+		display: none;
+	}
+
+	.editor-container :global(.ProseMirror li.list-item-dragging) {
+		opacity: 0.45;
+	}
+
+	.editor-container :global(.ProseMirror li.list-drop-before)::before,
+	.editor-container :global(.ProseMirror li.list-drop-after)::after {
+		content: '';
+		position: absolute;
+		left: -0.5em;
+		right: 0;
+		height: 2px;
+		background: var(--accent);
+		border-radius: 1px;
+		pointer-events: none;
+	}
+	.editor-container :global(.ProseMirror li.list-drop-before)::before {
+		top: -1px;
+	}
+	.editor-container :global(.ProseMirror li.list-drop-after)::after {
+		bottom: -1px;
 	}
 
 	/* Task list items — text aligned with regular list item text, checkbox in margin */

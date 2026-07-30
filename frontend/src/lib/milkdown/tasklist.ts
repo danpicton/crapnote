@@ -3,8 +3,9 @@ import { wrapIn } from '@milkdown/kit/prose/commands';
 import { bulletListSchema } from '@milkdown/kit/preset/commonmark';
 import { extendListItemSchemaForTask } from '@milkdown/kit/preset/gfm';
 import type { Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
-import type { EditorView } from '@milkdown/kit/prose/view';
+import type { EditorView, ViewMutationRecord } from '@milkdown/kit/prose/view';
 import type { Transaction } from '@milkdown/kit/prose/state';
+import { createDragHandle, enableListItemDrag } from './listdrag';
 
 export const wrapInTaskListCommand = $command('WrapInTaskList', (ctx) => () => {
 	return (state, dispatch) => {
@@ -63,6 +64,17 @@ export const taskListItemView = $view(
 			const contentDOM = document.createElement('div');
 			contentDOM.className = 'task-content';
 
+			// Drag-to-reorder grip, shown in the list gutter on hover. Applies to
+			// plain bullets and ordered items as well as task items.
+			const handle = createDragHandle();
+			const teardownDrag = enableListItemDrag({
+				handle,
+				dom,
+				view,
+				getPos: () => (typeof getPos === 'function' ? getPos() : undefined),
+			});
+			dom.appendChild(handle);
+
 			let checkbox: HTMLInputElement | null = null;
 
 			if (isTaskItem) {
@@ -108,7 +120,20 @@ export const taskListItemView = $view(
 					}
 					return true;
 				},
-				destroy() {},
+				/**
+				 * The drag handle and the drag/drop-target classes live on DOM
+				 * ProseMirror owns. Without this hook its DOM observer treats
+				 * those mutations as the document having diverged and redraws
+				 * the node — destroying this NodeView mid-gesture, which
+				 * cancelled every drag on the first frame. Anything inside
+				 * contentDOM is real editing and must still be handled.
+				 */
+				ignoreMutation(mutation: ViewMutationRecord) {
+					return !contentDOM.contains(mutation.target);
+				},
+				destroy() {
+					teardownDrag();
+				},
 			};
 		},
 );

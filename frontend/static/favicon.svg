@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- CrapNote mark: folded page + dot. Monochrome on purpose so it suits
+     every theme; the PNG icons in this directory are rasterised from it. -->
 <svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192">
-  <rect width="192" height="192" rx="36" fill="#faf8f4"/>
-  <text x="50%" y="68%" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-weight="800" font-size="148" fill="#1a1612">C</text>
-  <circle cx="148" cy="138" r="15" fill="#e45c3a"/>
+  <path d="M49,20 H106 L172,86 V143 A29,29 0 0 1 143,172 H49 A29,29 0 0 1 20,143 V49 A29,29 0 0 1 49,20 Z" fill="none" stroke="#ffffff" stroke-width="24" stroke-linejoin="round"/><path d="M49,20 H106 L172,86 V143 A29,29 0 0 1 143,172 H49 A29,29 0 0 1 20,143 V49 A29,29 0 0 1 49,20 Z" fill="#16161a"/><path fill="#ffffff" d="M106,20 L172,86 H106 Z"/><circle cx="96" cy="124" r="30" fill="#ffffff"/>
 </svg>

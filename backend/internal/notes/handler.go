@@ -161,6 +161,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "note not found")
 		return
 	}
+	if errors.Is(err, ErrLocked) {
+		writeError(w, http.StatusLocked, "note is locked")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -186,6 +190,9 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.Delete(r.Context(), id, u.ID); errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "note not found")
 		return
+	} else if errors.Is(err, ErrLocked) {
+		writeError(w, http.StatusLocked, "note is locked")
+		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -202,6 +209,11 @@ func (h *Handler) ToggleStar(w http.ResponseWriter, r *http.Request) {
 // TogglePin handles PATCH /api/notes/{id}/pin
 func (h *Handler) TogglePin(w http.ResponseWriter, r *http.Request) {
 	h.toggleFlag(w, r, h.svc.TogglePin)
+}
+
+// ToggleLock handles PATCH /api/notes/{id}/lock
+func (h *Handler) ToggleLock(w http.ResponseWriter, r *http.Request) {
+	h.toggleFlag(w, r, h.svc.ToggleLock)
 }
 
 // Archive handles PATCH /api/notes/{id}/archive
@@ -317,6 +329,7 @@ type noteResponse struct {
 	Starred   bool   `json:"starred"`
 	Pinned    bool   `json:"pinned"`
 	Archived  bool   `json:"archived"`
+	Locked    bool   `json:"locked"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -329,6 +342,7 @@ func noteToResponse(n *Note) noteResponse {
 		Starred:   n.Starred,
 		Pinned:    n.Pinned,
 		Archived:  n.Archived,
+		Locked:    n.Locked,
 		CreatedAt: n.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt: n.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}

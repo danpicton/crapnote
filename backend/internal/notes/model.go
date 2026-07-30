@@ -8,6 +8,10 @@ import (
 // ErrNotFound is returned when a note does not exist or belongs to another user.
 var ErrNotFound = errors.New("note not found")
 
+// ErrLocked is returned when an operation would change the content of a locked
+// note. Callers must unlock the note first.
+var ErrLocked = errors.New("note is locked")
+
 // Note represents a single user note.
 type Note struct {
 	ID        int64
@@ -17,6 +21,7 @@ type Note struct {
 	Starred   bool
 	Pinned    bool
 	Archived  bool
+	Locked    bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

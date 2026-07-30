@@ -9,7 +9,11 @@ export type ShortcutId =
 	| 'italic'
 	| 'underline'
 	| 'insert-link'
-	| 'open-tags';
+	| 'open-tags'
+	| 'list-move-up'
+	| 'list-move-down'
+	| 'list-move-top'
+	| 'list-move-bottom';
 
 export interface ShortcutAction {
 	id: ShortcutId;
@@ -46,6 +50,30 @@ const actions: ShortcutAction[] = [
 	},
 	{ id: 'help-modal', description: 'Show keyboard shortcuts', defaultCombo: '?' },
 	{ id: 'open-tags', description: 'Open tag popover', defaultCombo: 'Ctrl+.' },
+	{
+		id: 'list-move-up',
+		description: 'Move list item up (in editor)',
+		defaultCombo: 'Alt+ArrowUp',
+		allowInInputs: true,
+	},
+	{
+		id: 'list-move-down',
+		description: 'Move list item down (in editor)',
+		defaultCombo: 'Alt+ArrowDown',
+		allowInInputs: true,
+	},
+	{
+		id: 'list-move-top',
+		description: 'Move list item to top (in editor)',
+		defaultCombo: 'Alt+Shift+ArrowUp',
+		allowInInputs: true,
+	},
+	{
+		id: 'list-move-bottom',
+		description: 'Move list item to bottom (in editor)',
+		defaultCombo: 'Alt+Shift+ArrowDown',
+		allowInInputs: true,
+	},
 ];
 
 // ── Parsing / formatting ─────────────────────────────────────────────────────

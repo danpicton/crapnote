@@ -42,9 +42,9 @@ func (r *Repo) Create(ctx context.Context, userID int64, title, body string) (*N
 // Returns ErrNotFound if not found, trashed, archived, or owned by a different user.
 func (r *Repo) Get(ctx context.Context, id, userID int64) (*Note, error) {
 	n := &Note{}
-	var starred, pinned, archived int
+	var starred, pinned, archived, locked int
 	err := r.db.QueryRowContext(ctx, `
-		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived,
+		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,
 		       n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.id = ? AND n.user_id = ?
@@ -52,7 +52,7 @@ func (r *Repo) Get(ctx context.Context, id, userID int64) (*Note, error) {
 		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)
 	`, id, userID).Scan(
 		&n.ID, &n.UserID, &n.Title, &n.Body,
-		&starred, &pinned, &archived, &n.CreatedAt, &n.UpdatedAt,
+		&starred, &pinned, &archived, &locked, &n.CreatedAt, &n.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -63,14 +63,33 @@ func (r *Repo) Get(ctx context.Context, id, userID int64) (*Note, error) {
 	n.Starred = starred != 0
 	n.Pinned = pinned != 0
 	n.Archived = archived != 0
+	n.Locked = locked != 0
 	return n, nil
+}
+
+// IsLocked reports whether a note is locked. Returns ErrNotFound if the note
+// does not exist or belongs to a different user. Unlike Get it also considers
+// archived and trashed notes, so content operations on those still respect the
+// lock.
+func (r *Repo) IsLocked(ctx context.Context, id, userID int64) (bool, error) {
+	var locked int
+	err := r.db.QueryRowContext(ctx,
+		`SELECT locked FROM notes WHERE id = ? AND user_id = ?`, id, userID,
+	).Scan(&locked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	if err != nil {
+		return false, fmt.Errorf("is locked: %w", err)
+	}
+	return locked != 0, nil
 }
 
 // List returns all non-trashed notes for a user, with optional filters.
 // Pinned notes appear first, then ordered by updated_at DESC.
 func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*Note, error) {
 	query := `
-		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived,
+		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,
 		       n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.user_id = ?
@@ -114,22 +133,7 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 	}
 	defer rows.Close()
 
-	var result []*Note
-	for rows.Next() {
-		n := &Note{}
-		var starred, pinned, archived int
-		if err := rows.Scan(
-			&n.ID, &n.UserID, &n.Title, &n.Body,
-			&starred, &pinned, &archived, &n.CreatedAt, &n.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		n.Starred = starred != 0
-		n.Pinned = pinned != 0
-		n.Archived = archived != 0
-		result = append(result, n)
-	}
-	return result, rows.Err()
+	return scanNotes(rows)
 }
 
 // Update performs a partial update of a note's title and/or body. Only non-nil
@@ -155,9 +159,60 @@ func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string
 	return r.Get(ctx, id, userID)
 }
 
+// scanNotes drains a rows set selecting the standard note column list.
+func scanNotes(rows *sql.Rows) ([]*Note, error) {
+	var result []*Note
+	for rows.Next() {
+		n := &Note{}
+		var starred, pinned, archived, locked int
+		if err := rows.Scan(
+			&n.ID, &n.UserID, &n.Title, &n.Body,
+			&starred, &pinned, &archived, &locked, &n.CreatedAt, &n.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		n.Starred = starred != 0
+		n.Pinned = pinned != 0
+		n.Archived = archived != 0
+		n.Locked = locked != 0
+		result = append(result, n)
+	}
+	return result, rows.Err()
+}
+
 // SetStarred toggles the starred flag for a note.
 func (r *Repo) SetStarred(ctx context.Context, id, userID int64, starred bool) error {
 	return r.setBool(ctx, "starred", id, userID, starred)
+}
+
+// SetLocked sets the locked flag for a note.
+func (r *Repo) SetLocked(ctx context.Context, id, userID int64, locked bool) error {
+	return r.setBool(ctx, "locked", id, userID, locked)
+}
+
+// AutoLockStale locks every unlocked, untrashed note whose content has not been
+// updated within the given window, and reports how many notes it locked.
+//
+// It deliberately writes only the locked column: updated_at is the signal this
+// job reads, so touching it would make each run reset the staleness clock.
+func (r *Repo) AutoLockStale(ctx context.Context, olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().UTC().Add(-olderThan)
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE notes
+		SET locked = 1
+		WHERE locked = 0
+		  AND updated_at < ?
+		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = notes.id)`,
+		cutoff,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("auto-lock stale notes: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("auto-lock rows affected: %w", err)
+	}
+	return n, nil
 }
 
 // SetPinned toggles the pinned flag for a note.
@@ -229,7 +284,7 @@ func (r *Repo) Unarchive(ctx context.Context, id, userID int64) error {
 // contexts such as full exports).
 func (r *Repo) ListArchived(ctx context.Context, userID int64, limit, offset int) ([]*Note, error) {
 	query := `
-		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived,
+		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,
 		       n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.user_id = ?
@@ -247,22 +302,7 @@ func (r *Repo) ListArchived(ctx context.Context, userID int64, limit, offset int
 	}
 	defer rows.Close()
 
-	var result []*Note
-	for rows.Next() {
-		n := &Note{}
-		var starred, pinned, archived int
-		if err := rows.Scan(
-			&n.ID, &n.UserID, &n.Title, &n.Body,
-			&starred, &pinned, &archived, &n.CreatedAt, &n.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		n.Starred = starred != 0
-		n.Pinned = pinned != 0
-		n.Archived = archived != 0
-		result = append(result, n)
-	}
-	return result, rows.Err()
+	return scanNotes(rows)
 }
 
 // HardDelete permanently removes a note and its trash record.

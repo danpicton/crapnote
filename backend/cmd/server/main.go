@@ -136,6 +136,34 @@ func main() {
 		}
 	}()
 
+	// Background job: lock notes whose content has gone untouched, runs once at
+	// startup and then daily. AUTO_LOCK_DAYS=0 disables it.
+	autoLockDays, err := strconv.Atoi(envOrDefault("AUTO_LOCK_DAYS", "7"))
+	if err != nil || autoLockDays < 0 {
+		autoLockDays = 7
+	}
+	if autoLockDays > 0 {
+		window := time.Duration(autoLockDays) * 24 * time.Hour
+		autoLock := func() {
+			n, err := notesSvc.AutoLockStale(context.Background(), window)
+			if err != nil {
+				logger.Error("auto-lock stale notes", "error", err)
+				return
+			}
+			if n > 0 {
+				logger.Info("auto-locked stale notes", "count", n, "older_than_days", autoLockDays)
+			}
+		}
+		go func() {
+			autoLock()
+			ticker := time.NewTicker(24 * time.Hour)
+			defer ticker.Stop()
+			for range ticker.C {
+				autoLock()
+			}
+		}()
+	}
+
 	imagesCfg := images.DefaultConfig()
 	if v, err := strconv.Atoi(os.Getenv("IMAGE_UPLOADS_PER_MINUTE")); err == nil && v > 0 {
 		imagesCfg.UploadsPerMinute = v

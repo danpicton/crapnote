@@ -278,3 +278,57 @@ describe('theme store — global (admin-set) theme', () => {
 		expect(theme.current).toBe('bianco');
 	});
 });
+
+describe('browser theme-color', () => {
+	function setup() {
+		document.head.innerHTML = `
+			<meta name="theme-color" content="#faf8f4" />
+			<style>
+				:root { --bg: #faf8f4; }
+				[data-theme="dark"] { --bg: #141210; }
+				[data-theme="rosso"] { --bg: #181818; }
+				[data-theme="verdana"] { --bg: #f8fafc; }
+			</style>`;
+	}
+
+	function themeColor(): string | null {
+		return document.querySelector('meta[name="theme-color"]')?.getAttribute('content') ?? null;
+	}
+
+	beforeEach(() => {
+		localStorage.clear();
+		document.documentElement.removeAttribute('data-theme');
+		setup();
+	});
+
+	it('follows the active theme so the status bar matches the app', async () => {
+		const theme = await freshTheme();
+		await theme.init();
+
+		theme.set('dark');
+		expect(themeColor()).toBe('#141210');
+
+		theme.set('rosso');
+		expect(themeColor()).toBe('#181818');
+
+		theme.set('verdana');
+		expect(themeColor()).toBe('#f8fafc');
+	});
+
+	it('is applied on init, not just on later changes', async () => {
+		localStorage.setItem(STORAGE_KEY, 'rosso');
+		const theme = await freshTheme();
+		await theme.init();
+
+		expect(themeColor()).toBe('#181818');
+	});
+
+	it('leaves the existing value alone when no meta tag is present', async () => {
+		document.head.innerHTML = '<style>:root { --bg: #faf8f4; }</style>';
+		const theme = await freshTheme();
+		await theme.init();
+
+		// Nothing to update, and crucially nothing thrown.
+		expect(document.querySelector('meta[name="theme-color"]')).toBeNull();
+	});
+})

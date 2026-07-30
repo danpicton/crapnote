@@ -29,6 +29,24 @@ function createThemeStore() {
 
 	function applyToDOM(t: ThemeId) {
 		document.documentElement.setAttribute('data-theme', t);
+		syncBrowserThemeColor();
+	}
+
+	/**
+	 * Keep <meta name="theme-color"> in step with the active theme so the
+	 * browser chrome — and the status bar of the installed PWA — matches the
+	 * app instead of staying on the light theme's cream.
+	 *
+	 * The value is read back from the computed --bg rather than duplicated in a
+	 * lookup table here, so adding a theme to app.html is all it takes.
+	 */
+	function syncBrowserThemeColor() {
+		const meta = document.querySelector('meta[name="theme-color"]');
+		if (!meta) return;
+		const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+		// Empty before the stylesheet has applied — leave the markup default in
+		// place rather than blanking it.
+		if (bg) meta.setAttribute('content', bg);
 	}
 
 	// A user-level preference exists only when the user has explicitly picked

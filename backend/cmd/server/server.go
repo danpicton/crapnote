@@ -123,6 +123,7 @@ func newMux(
 	protectedWrite("DELETE", "/api/notes/{id}", notesHandler.Delete)
 	protectedWrite("PATCH", "/api/notes/{id}/star", notesHandler.ToggleStar)
 	protectedWrite("PATCH", "/api/notes/{id}/pin", notesHandler.TogglePin)
+	protectedWrite("PATCH", "/api/notes/{id}/lock", notesHandler.ToggleLock)
 	protectedWrite("PATCH", "/api/notes/{id}/archive", notesHandler.Archive)
 	protectedWrite("PATCH", "/api/notes/{id}/unarchive", notesHandler.Unarchive)
 	protected("GET", "/api/archive", notesHandler.ListArchived)
