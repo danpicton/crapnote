@@ -4,6 +4,11 @@ name: Mirror CLI release tag
 # resolves versions from tags named cli/vX.Y.Z, not the repo-root vX.Y.Z tags.
 # Without the prefixed tag, Go falls back to a v0.0.0 pseudo-version. This
 # workflow mirrors every root release tag to its cli/-prefixed twin.
+#
+# The mirror is done over the REST API rather than `git ls-remote`/`git push`:
+# git has no default timeout, so a stalled HTTPS connection hangs the step until
+# the job-level cap rather than failing fast. The API calls time out on their own,
+# and need no working tree, so the checkout step is unnecessary.
 
 on:
   push:
@@ -14,19 +19,24 @@ jobs:
     name: Create cli/${{ github.ref_name }} tag
     runs-on: ubuntu-latest
 
+    # Belt and braces: without this, a wedged step runs to the 6h default.
+    timeout-minutes: 5
+
     permissions:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
-
       - name: Push cli/${{ github.ref_name }} if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           cli_tag="cli/${GITHUB_REF_NAME}"
-          if git ls-remote --exit-code --tags origin "refs/tags/${cli_tag}" >/dev/null; then
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${cli_tag}" >/dev/null 2>&1; then
             echo "${cli_tag} already exists, nothing to do"
             exit 0
           fi
-          git tag "${cli_tag}" "${GITHUB_SHA}"
-          git push origin "refs/tags/${cli_tag}"
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${cli_tag}" \
+            -f sha="${GITHUB_SHA}"
+          echo "Created ${cli_tag} at ${GITHUB_SHA}"
