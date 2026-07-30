@@ -3,7 +3,7 @@ import { wrapIn } from '@milkdown/kit/prose/commands';
 import { bulletListSchema } from '@milkdown/kit/preset/commonmark';
 import { extendListItemSchemaForTask } from '@milkdown/kit/preset/gfm';
 import type { Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
-import type { EditorView } from '@milkdown/kit/prose/view';
+import type { EditorView, ViewMutationRecord } from '@milkdown/kit/prose/view';
 import type { Transaction } from '@milkdown/kit/prose/state';
 import { createDragHandle, enableListItemDrag } from './listdrag';
 
@@ -119,6 +119,17 @@ export const taskListItemView = $view(
 						dom.setAttribute('data-checked', String(updatedNode.attrs.checked));
 					}
 					return true;
+				},
+				/**
+				 * The drag handle and the drag/drop-target classes live on DOM
+				 * ProseMirror owns. Without this hook its DOM observer treats
+				 * those mutations as the document having diverged and redraws
+				 * the node — destroying this NodeView mid-gesture, which
+				 * cancelled every drag on the first frame. Anything inside
+				 * contentDOM is real editing and must still be handled.
+				 */
+				ignoreMutation(mutation: ViewMutationRecord) {
+					return !contentDOM.contains(mutation.target);
 				},
 				destroy() {
 					teardownDrag();

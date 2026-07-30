@@ -184,12 +184,17 @@
 
 	.editor-container :global(.ProseMirror .list-drag-handle) {
 		position: absolute;
-		left: -2.05em;
+		left: -1.9em;
 		top: 0;
-		width: 0.9em;
-		line-height: inherit;
-		text-align: center;
-		font-size: 0.8em;
+		/* Font size is deliberately left inherited so this height is exactly one
+		   line of the list's line-height — that is what centres the grip against
+		   the first line of its item. Shrinking the font here would shrink the
+		   em box too and float the grip above the text. */
+		height: 1.5em;
+		width: 0.85em;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 		color: var(--text-3);
 		opacity: 0;
 		cursor: grab;
@@ -198,11 +203,29 @@
 		touch-action: none;
 		transition: opacity 0.12s;
 	}
+	.editor-container :global(.ProseMirror .list-drag-handle svg) {
+		display: block;
+		width: 0.4em;
+		height: 0.68em;
+	}
+	/* Widen the hit area without moving the grip — it stays clear of the text,
+	   which begins to the right of the gutter. */
+	.editor-container :global(.ProseMirror .list-drag-handle::after) {
+		content: '';
+		position: absolute;
+		inset: -6px -7px;
+	}
 	/* Task items are pulled 1.25em left so their text lines up with plain
 	   items; shift the handle back by the same amount to keep the gutter
 	   column straight. */
 	.editor-container :global(.ProseMirror li[data-item-type='task'] .list-drag-handle) {
-		left: -0.8em;
+		left: -0.65em;
+	}
+	/* Touch devices never hover, so a hover-only grip would be undraggable. */
+	@media (hover: none) {
+		.editor-container :global(.ProseMirror .list-drag-handle) {
+			opacity: 0.4;
+		}
 	}
 
 	.editor-container :global(.ProseMirror li:hover > .list-drag-handle),

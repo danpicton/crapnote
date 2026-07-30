@@ -38,7 +38,14 @@ export function createDragHandle(): HTMLElement {
 	handle.className = 'list-drag-handle';
 	handle.setAttribute('contenteditable', 'false');
 	handle.setAttribute('aria-hidden', 'true');
-	handle.textContent = '⠿';
+	// Drawn rather than typed: the themes use very different fonts and a glyph
+	// like U+283F is not in all of them. An SVG also keeps the grip out of the
+	// list item's text content.
+	handle.innerHTML =
+		'<svg viewBox="0 0 6 10" fill="currentColor" aria-hidden="true">' +
+		'<circle cx="1" cy="1" r="1"/><circle cx="5" cy="1" r="1"/>' +
+		'<circle cx="1" cy="5" r="1"/><circle cx="5" cy="5" r="1"/>' +
+		'<circle cx="1" cy="9" r="1"/><circle cx="5" cy="9" r="1"/></svg>';
 	return handle;
 }
 
