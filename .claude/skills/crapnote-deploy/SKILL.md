@@ -30,6 +30,19 @@ Manifests in `deploy/k8s/`:
 - `pvc.yaml` — persistent volume for SQLite data
 - `secret.yaml` — credentials (do not read this file)
 
+## Releases
+
+Cut a release with a **lightweight** tag, matching existing history — do not use `git tag -a`:
+
+```
+git tag vX.Y.Z <sha> && git push origin vX.Y.Z
+```
+
+CI then mirrors it to `cli/vX.Y.Z` (`.github/workflows/release-cli-tag.yml`). Verify both landed
+with `git ls-remote --tags origin`. The CLI's `version` command reads the module version from the
+prefixed tag, so a root tag whose mirror failed leaves `go install @latest` on the previous version
+— push `cli/vX.Y.Z` by hand if so.
+
 ## Key Constraints
 
 - SQLite means single-writer — do not scale replicas beyond 1 unless migrating to PostgreSQL.
