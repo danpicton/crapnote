@@ -256,11 +256,19 @@ test.describe('Offline edit and lock-toggle replay', () => {
     await context.setOffline(true);
     await page.reload();
 
-    // Unlock the locked note offline — the reported bug: the unlock must
-    // stick in the list, not just in the note view.
+    // Unlock the locked note offline AND edit it in the same breath — the
+    // reported wedge: the content PUT used to replay before the unlock,
+    // bounce off the still-locked note with a 423 forever, and the status
+    // stuck on NOT SYNCED.
+    const UNLOCKED_EDIT = `Unlocked And Edited ${runTag}`;
     await page.locator('.note-item').filter({ hasText: LOCKED }).first().click();
     await page.locator(`.mob-topbar button[aria-label="Unlock note"]`).click();
     await expect(page.locator(`.mob-topbar button[aria-label="Lock note"]`)).toBeVisible();
+    const lockedTitle = page.getByPlaceholder('Note title').first();
+    await expect(lockedTitle).toHaveValue(LOCKED);
+    await lockedTitle.fill(UNLOCKED_EDIT);
+    await lockedTitle.blur();
+    await page.waitForTimeout(1200); // let the debounced offline save land
     await page.locator('a.mob-topbar-btn').click(); // back to list
 
     // Edit the other note's title offline.
@@ -310,11 +318,16 @@ test.describe('Offline edit and lock-toggle replay', () => {
           ]);
           if (!editRes.ok() || !lockCheck.ok()) return 'fetch-failed';
           const editServer = (await editRes.json()) as { title: string };
-          const lockServer = (await lockCheck.json()) as { locked: boolean };
-          return { title: editServer.title, locked: lockServer.locked };
+          const lockServer = (await lockCheck.json()) as { title: string; locked: boolean };
+          return { title: editServer.title, lockedTitle: lockServer.title, locked: lockServer.locked };
         },
-        { message: 'offline edit + unlock should replay to the server', timeout: 60_000 },
+        { message: 'offline edit + unlock-and-edit should replay to the server', timeout: 60_000 },
       )
-      .toEqual({ title: EDITED, locked: false });
+      .toEqual({ title: EDITED, lockedTitle: UNLOCKED_EDIT, locked: false });
+
+    // And the status must come back to SYNCED — a wedged replay leaves it
+    // stuck on NOT SYNCED forever.
+    await expect(page.locator('.mob-sync-row')).toContainText('SYNCED', { timeout: 45_000 });
+    await expect(page.locator('.mob-sync-row')).not.toContainText('NOT SYNCED');
   });
 });

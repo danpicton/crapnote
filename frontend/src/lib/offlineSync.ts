@@ -106,16 +106,22 @@ export async function syncOfflineChanges(
 					await syncDeletedNote(db, note, result);
 				} else if (note.archived_offline) {
 					await syncArchivedNote(db, note, result);
-				} else {
-					if (note.is_new) {
-						await syncNewNote(db, note, result);
-					} else if (note.is_dirty) {
-						await syncDirtyNote(db, note, result);
-					}
-					// Flag toggles reconcile after any content push so the
-					// updated_at bookkeeping stays consistent.
+				} else if (note.is_new) {
+					await syncNewNote(db, note, result);
 					if (note.flags_dirty) {
 						await syncNoteFlags(db, note, result);
+					}
+				} else {
+					// Flags reconcile BEFORE the content push: an offline
+					// unlock must reach the server first, or the PUT of the
+					// offline edit bounces off the still-locked note with a
+					// 423 on every retry and sync wedges on "unsynced".
+					let current: CachedNote | null = note;
+					if (current.flags_dirty) {
+						current = await syncNoteFlags(db, current, result);
+					}
+					if (current?.is_dirty) {
+						await syncDirtyNote(db, current, result);
 					}
 				}
 			} catch {
@@ -163,6 +169,11 @@ function isGoneServerSide(err: unknown): boolean {
 	return err instanceof ApiError && !(err instanceof OfflineError) && err.status === 404;
 }
 
+/** True when the server refused the write because the note is locked (423). */
+function isLockedServerSide(err: unknown): boolean {
+	return err instanceof ApiError && !(err instanceof OfflineError) && err.status === 423;
+}
+
 /**
  * Replay an offline delete. A note created offline and deleted before it ever
  * synced never existed server-side, so it is simply discarded; otherwise the
@@ -176,7 +187,15 @@ async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncRe
 		try {
 			await api.notes.delete(note.id);
 		} catch (err) {
-			if (!isGoneServerSide(err)) throw err;
+			if (isLockedServerSide(err) && note.flags_dirty && !(note.locked ?? false)) {
+				// The user unlocked the note offline before deleting it, but
+				// the unlock hasn't replayed (the delete branch runs first).
+				// Apply the unlock, then delete.
+				await api.notes.toggleLock(note.id);
+				await api.notes.delete(note.id);
+			} else if (!isGoneServerSide(err)) {
+				throw err;
+			}
 		}
 	}
 	await deleteNote(db, note.id);
@@ -184,108 +203,187 @@ async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncRe
 }
 
 /**
- * Replay an offline archive. The cached title/body is only pushed when the
- * note actually carries offline content edits (is_dirty), and then under the
- * same conflict check as syncDirtyNote — a plain archive must never clobber
- * edits made from another device while this one was offline. On a content
+ * Replay an offline archive. The replay makes several server writes, so each
+ * one is CHECKPOINTED into the cache entry before moving on — a retry after a
+ * partial failure (create ok, archive failed) resumes where it left off
+ * instead of re-running earlier writes and creating duplicate notes.
+ *
+ * The cached title/body is only pushed when the note carries offline content
+ * edits (is_dirty), under the same conflict check as syncDirtyNote — a plain
+ * archive must never clobber edits made from another device. On a content
  * conflict the local edits are preserved as a "[sync conflict]" note and the
- * server's version is archived untouched. A note created offline is created
- * server-side and immediately archived. The cache entry is removed on
- * success — archived notes live outside the offline working set.
+ * server's version is archived as-is. Flags toggled offline (flags_dirty)
+ * are reconciled before archiving, while the note is still active. The cache
+ * entry is removed on success — archived notes live outside the offline
+ * working set.
  */
 async function syncArchivedNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
-	let serverId = note.id;
-	if (note.is_new) {
-		const created = await api.notes.create(note.title, note.body);
-		serverId = created.id;
-	} else if (note.is_dirty) {
+	let current = note;
+
+	// 1. A note born offline is created server-side first. Checkpoint: re-key
+	//    the cache entry to the server id and clear is_new, so a retry after
+	//    a later failure never calls create again.
+	if (current.is_new) {
+		const created = await api.notes.create(current.title, current.body);
+		await deleteNote(db, current.id);
+		current = {
+			...current,
+			id: created.id,
+			is_new: false,
+			is_dirty: false,
+			server_updated_at: created.updated_at,
+			local_updated_at: created.updated_at,
+		};
+		await upsertNote(db, current);
+		result.mappings.push({ tempId: note.id, serverId: created.id });
+	}
+
+	// 2. Flags toggled offline apply BEFORE the content push and the
+	//    archive: an offline unlock must land first or the PUT below
+	//    bounces off the still-locked note with a 423 forever. Checkpointed
+	//    (flags_dirty cleared) so a retry skips straight past this step.
+	if (current.flags_dirty) {
+		const reconciled = await reconcileFlagsCheckpoint(db, { ...current, is_new: false }, result);
+		if (reconciled === null) {
+			// Gone server-side — the archive intent is moot.
+			await deleteNote(db, current.id);
+			result.pushed.archived++;
+			return;
+		}
+		current = reconciled;
+	}
+
+	// 3. Push offline content edits (or preserve them as a conflict note).
+	//    Checkpoint is_dirty:false either way, so a retried archive neither
+	//    re-pushes nor mints a second conflict copy.
+	if (current.is_dirty) {
 		try {
-			const serverNote = await api.notes.get(note.id);
-			if (serverNote.updated_at === note.server_updated_at) {
-				// No server-side change since our last sync — push cleanly.
-				await api.notes.update(note.id, { title: note.title, body: note.body });
+			const serverNote = await api.notes.get(current.id);
+			if (serverNote.updated_at === current.server_updated_at) {
+				const updated = await api.notes.update(current.id, { title: current.title, body: current.body });
+				current = {
+					...current,
+					is_dirty: false,
+					server_updated_at: updated.updated_at,
+					local_updated_at: updated.updated_at,
+				};
 			} else {
-				// Both sides changed. Keep the local edit as a conflict note
-				// and archive the server's version as it stands.
 				result.conflicts++;
-				await api.notes.create(`[sync conflict] ${note.title}`, note.body);
+				await api.notes.create(`[sync conflict] ${current.title}`, current.body);
+				current = { ...current, is_dirty: false };
 			}
+			await upsertNote(db, current);
 		} catch (err) {
 			// Note already deleted server-side — nothing to update; the
 			// archive call below resolves the same way.
 			if (!isGoneServerSide(err)) throw err;
 		}
 	}
+
+	// 4. Archive, then drop the entry.
 	try {
-		await api.notes.archive(serverId);
+		await api.notes.archive(current.id);
 	} catch (err) {
 		if (!isGoneServerSide(err)) throw err;
 	}
-	await deleteNote(db, note.id);
+	await deleteNote(db, current.id);
 	result.pushed.archived++;
 }
 
 /**
- * Reconcile starred/pinned/locked toggled offline. The cached values are the
- * user's desired state; the server is fetched and each flag is toggled only
- * where it differs — replaying raw toggles blind could double-flip a flag
- * that another device already changed. Local desired state wins.
+ * Reconcile the desired starred/pinned/locked state against the server,
+ * toggling only the flags that differ — replaying raw toggles blind could
+ * double-flip a flag another device already changed. Local desired state
+ * wins. Persists the checkpointed entry (flags_dirty cleared) and returns
+ * it, or null when the note no longer exists server-side.
+ *
+ * updated_at bookkeeping: our own toggles bump the server's updated_at, so
+ * the conflict baseline is fast-forwarded past them — EXCEPT when content
+ * edits are pending AND the server's content genuinely changed since our
+ * last sync, in which case the old baseline is kept so the content push
+ * still detects the real conflict.
  */
-async function syncNoteFlags(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
-	// An offline-created note gets its server id earlier in this same run
-	// (syncNewNote re-keys the cache entry and records a mapping).
-	const mapping = result.mappings.find((m) => m.tempId === note.id);
-	const id = mapping ? mapping.serverId : note.id;
-
+async function reconcileFlagsCheckpoint(
+	db: IDBDatabase,
+	note: CachedNote,
+	result: SyncResult
+): Promise<CachedNote | null> {
 	let current;
 	try {
-		current = await api.notes.get(id);
+		current = await api.notes.get(note.id);
 	} catch (err) {
-		if (isGoneServerSide(err)) {
-			// Deleted from another device — nothing left to reconcile.
-			await deleteNote(db, id);
-			return;
-		}
+		if (isGoneServerSide(err)) return null;
 		throw err;
 	}
-	if (note.starred !== current.starred) current = await api.notes.toggleStar(id);
-	if (note.pinned !== current.pinned) current = await api.notes.togglePin(id);
-	if ((note.locked ?? false) !== current.locked) current = await api.notes.toggleLock(id);
+	// Decide whether a genuine server-side change is pending BEFORE our own
+	// toggles bump updated_at.
+	const serverChanged = current.updated_at !== note.server_updated_at;
+	if (note.starred !== current.starred) current = await api.notes.toggleStar(note.id);
+	if (note.pinned !== current.pinned) current = await api.notes.togglePin(note.id);
+	if ((note.locked ?? false) !== current.locked) current = await api.notes.toggleLock(note.id);
 
-	const entry = await getNote(db, id);
-	if (entry) {
-		await upsertNote(db, {
-			...entry,
-			starred: current.starred,
-			pinned: current.pinned,
-			locked: current.locked,
-			flags_dirty: false,
-			// Fast-forward the conflict baseline (toggles bump the server's
-			// updated_at) — but only when no content edits are still pending,
-			// so a real server-side content change isn't masked.
-			...(entry.is_dirty
-				? {}
-				: { server_updated_at: current.updated_at, local_updated_at: current.updated_at }),
-		});
-	}
+	const updated: CachedNote = {
+		...note,
+		starred: current.starred,
+		pinned: current.pinned,
+		locked: current.locked,
+		flags_dirty: false,
+		...(note.is_dirty && serverChanged
+			? {} // real conflict pending — keep the old baseline
+			: {
+					server_updated_at: current.updated_at,
+					...(note.is_dirty ? {} : { local_updated_at: current.updated_at }),
+				}),
+	};
+	await upsertNote(db, updated);
 	result.pushed.flags++;
+	return updated;
+}
+
+/**
+ * Reconcile starred/pinned/locked toggled offline for an active note. The
+ * cached values are the user's desired state. Returns the checkpointed
+ * entry the content push should continue from, or null when the note is
+ * gone server-side (the cache entry is dropped).
+ */
+async function syncNoteFlags(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<CachedNote | null> {
+	// An offline-created note gets its server id earlier in this same run
+	// (syncNewNote re-keys the cache entry and records a mapping); the
+	// snapshot from getDirtyNotes still carries the temp id and is_new.
+	const mapping = result.mappings.find((m) => m.tempId === note.id);
+	const snapshot = mapping
+		? { ...note, id: mapping.serverId, is_new: false, is_dirty: false }
+		: note;
+
+	const updated = await reconcileFlagsCheckpoint(db, snapshot, result);
+	if (updated === null) {
+		// Deleted from another device — nothing left to reconcile.
+		await deleteNote(db, snapshot.id);
+		return null;
+	}
+	return updated;
 }
 
 async function syncNewNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
 	const serverNote = await api.notes.create(note.title, note.body);
 	await deleteNote(db, note.id);
+	// Flags toggled offline survive the re-key: keep the DESIRED values and
+	// flags_dirty on the persisted entry, so if the flag reconcile that runs
+	// after this fails mid-way, the next sync still retries it instead of
+	// silently reporting "synced" with the toggle lost.
 	await upsertNote(db, {
 		id: serverNote.id,
 		title: serverNote.title,
 		body: serverNote.body,
-		starred: serverNote.starred,
-		locked: serverNote.locked,
-		pinned: serverNote.pinned,
+		starred: note.flags_dirty ? note.starred : serverNote.starred,
+		locked: note.flags_dirty ? (note.locked ?? false) : serverNote.locked,
+		pinned: note.flags_dirty ? note.pinned : serverNote.pinned,
 		tags: note.tags, // preserve any tags the user added offline
 		server_updated_at: serverNote.updated_at,
 		local_updated_at: serverNote.updated_at,
 		is_dirty: false,
 		is_new: false,
+		flags_dirty: note.flags_dirty,
 	});
 	result.mappings.push({ tempId: note.id, serverId: serverNote.id });
 	result.pushed.created++;
@@ -296,7 +394,30 @@ async function syncDirtyNote(db: IDBDatabase, note: CachedNote, result: SyncResu
 
 	if (serverNote.updated_at === note.server_updated_at) {
 		// No server-side change since we last synced — our version wins cleanly
-		const updated = await api.notes.update(note.id, { title: note.title, body: note.body });
+		let updated;
+		try {
+			updated = await api.notes.update(note.id, { title: note.title, body: note.body });
+		} catch (err) {
+			if (!isLockedServerSide(err)) throw err;
+			// The note is locked server-side (locked from another device, or
+			// an unlock replay that couldn't land). Retrying the PUT would
+			// fail identically forever — preserve the offline edit as a
+			// conflict note and accept the server's version instead.
+			result.conflicts++;
+			await api.notes.create(`[sync conflict] ${note.title}`, note.body);
+			await upsertNote(db, {
+				...note,
+				title: serverNote.title,
+				body: serverNote.body,
+				starred: serverNote.starred,
+				pinned: serverNote.pinned,
+				locked: serverNote.locked,
+				server_updated_at: serverNote.updated_at,
+				local_updated_at: serverNote.updated_at,
+				is_dirty: false,
+			});
+			return;
+		}
 		await upsertNote(db, {
 			...note,
 			title: updated.title,
@@ -318,7 +439,28 @@ async function syncDirtyNote(db: IDBDatabase, note: CachedNote, result: SyncResu
 	if (localWins) {
 		// Preserve the server's version as the conflict note, then push local.
 		await api.notes.create(`[sync conflict] ${serverNote.title}`, serverNote.body);
-		const updated = await api.notes.update(note.id, { title: note.title, body: note.body });
+		let updated;
+		try {
+			updated = await api.notes.update(note.id, { title: note.title, body: note.body });
+		} catch (err) {
+			if (!isLockedServerSide(err)) throw err;
+			// Locked server-side — the local edit can't win after all. Keep
+			// it as its own conflict note and accept the server's version so
+			// sync never wedges on the 423.
+			await api.notes.create(`[sync conflict] ${note.title}`, note.body);
+			await upsertNote(db, {
+				...note,
+				title: serverNote.title,
+				body: serverNote.body,
+				starred: serverNote.starred,
+				pinned: serverNote.pinned,
+				locked: serverNote.locked,
+				server_updated_at: serverNote.updated_at,
+				local_updated_at: serverNote.updated_at,
+				is_dirty: false,
+			});
+			return;
+		}
 		await upsertNote(db, {
 			...note,
 			title: updated.title,
