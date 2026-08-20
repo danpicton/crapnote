@@ -103,15 +103,17 @@ sw.addEventListener('fetch', (event) => {
 	}
 
 	// Top-level HTML loads (link clicks, cold PWA start, address bar).
-	// Serve the cached shell instantly and revalidate it in the background:
-	// offline starts are immediate instead of waiting for the network to
-	// fail, and online starts don't pay a network round-trip either. New
-	// deploys are picked up two ways: the background revalidation refreshes
-	// the cached shell for the *next* navigation, and the browser's own SW
-	// update check installs the new version-keyed SW (fresh cache) shortly
-	// after a deploy anyway.
+	// Serve the shell cached at install time: it references exactly the
+	// hashed chunks precached in the same install, so shell and chunks stay
+	// consistent by construction and offline starts are instant. New deploys
+	// arrive via the browser's SW update check (every build changes
+	// `version`, hence the SW script), which installs a fresh cache + shell
+	// atomically. Never refresh the cached shell from the network outside
+	// that cycle — a newer deploy's shell references chunk hashes this cache
+	// doesn't hold, and caching it would break cold offline starts until the
+	// new SW finishes installing.
 	if (request.mode === 'navigate') {
-		event.respondWith(navigationStaleWhileRevalidate(event, request));
+		event.respondWith(navigationCacheFirst(request));
 		return;
 	}
 
@@ -121,36 +123,25 @@ sw.addEventListener('fetch', (event) => {
 
 // ─── Strategy helpers ────────────────────────────────────────────────────────
 
-async function navigationStaleWhileRevalidate(
-	event: FetchEvent,
-	request: Request,
-): Promise<Response> {
+async function navigationCacheFirst(request: Request): Promise<Response> {
 	// The shell is always keyed under '/' (adapter-static emits one fallback
 	// index.html that boots every route), so any navigation can use it.
 	const cached = (await caches.match(request)) ?? (await caches.match('/'));
+	if (cached) return cached;
 
-	const revalidate = (async () => {
-		try {
-			const response = await fetch(request);
-			if (response.ok) {
-				const cache = await caches.open(CACHE_NAME);
-				await cache.put('/', response.clone());
-			}
-			return response;
-		} catch {
-			return null;
+	// No cached shell yet — the install-time prime raced this navigation or
+	// failed. Serve the network and remember the result so the next
+	// navigation is covered.
+	try {
+		const response = await fetch(request);
+		if (response.ok) {
+			const cache = await caches.open(CACHE_NAME);
+			await cache.put('/', response.clone());
 		}
-	})();
-
-	if (cached) {
-		// Keep the SW alive until the background refresh settles.
-		event.waitUntil(revalidate);
-		return cached;
+		return response;
+	} catch {
+		return new Response('Offline', { status: 503 });
 	}
-
-	// Nothing cached yet (first ever visit) — fall back to the network result.
-	const fresh = await revalidate;
-	return fresh ?? new Response('Offline', { status: 503 });
 }
 
 async function cacheFirst(request: Request): Promise<Response> {

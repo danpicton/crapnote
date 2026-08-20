@@ -9,7 +9,8 @@ import { writable } from 'svelte/store';
 const noopSnippet = (() => {}) as unknown as Snippet;
 
 const goto = vi.hoisted(() => vi.fn());
-vi.mock('$app/navigation', () => ({ goto }));
+const preloadCode = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock('$app/navigation', () => ({ goto, preloadCode }));
 
 const pageStore = writable({
 	url: new URL('http://localhost/'),
@@ -71,5 +72,18 @@ describe('Layout auth guard', () => {
 		setPath('/login');
 		render(Layout, { children: noopSnippet });
 		await vi.waitFor(() => expect(goto).toHaveBeenCalledWith('/', { replaceState: true }));
+	});
+});
+
+describe('Route code pre-loading', () => {
+	it('pre-imports every route on mount so screens open offline without prior visits', async () => {
+		render(Layout, { children: noopSnippet });
+
+		await vi.waitFor(() => expect(preloadCode).toHaveBeenCalled());
+		const preloaded = preloadCode.mock.calls.map((c) => c[0]);
+		// The critical offline screens must all be in the pre-import set.
+		for (const route of ['/', '/notes/*', '/settings', '/archive', '/trash', '/login']) {
+			expect(preloaded).toContain(route);
+		}
 	});
 });

@@ -15,31 +15,33 @@ async function login(page: Page) {
   await expect(page).toHaveURL('/');
 }
 
-/** Counts notes in the offline IndexedDB store (0 if missing). */
-async function offlineNoteCount(page: Page): Promise<number> {
+/** True when every given note id is present in the offline IndexedDB store. */
+async function offlineHasNotes(page: Page, ids: number[]): Promise<boolean> {
   return page.evaluate(
-    () =>
-      new Promise<number>((resolve) => {
+    (wanted) =>
+      new Promise<boolean>((resolve) => {
         const req = indexedDB.open('crapnote-notes-v2');
         req.onsuccess = () => {
           const db = req.result;
           if (!db.objectStoreNames.contains('notes')) {
             db.close();
-            resolve(0);
+            resolve(false);
             return;
           }
-          const count = db.transaction('notes', 'readonly').objectStore('notes').count();
-          count.onsuccess = () => {
+          const all = db.transaction('notes', 'readonly').objectStore('notes').getAllKeys();
+          all.onsuccess = () => {
             db.close();
-            resolve(count.result);
+            const keys = all.result as number[];
+            resolve(wanted.every((id) => keys.includes(id)));
           };
-          count.onerror = () => {
+          all.onerror = () => {
             db.close();
-            resolve(0);
+            resolve(false);
           };
         };
-        req.onerror = () => resolve(0);
+        req.onerror = () => resolve(false);
       }),
+    ids,
   );
 }
 
@@ -70,8 +72,8 @@ test.describe('Offline mode', () => {
     const DEL = `Offline Delete Target ${runTag}`;
     const ARC = `Offline Archive Target ${runTag}`;
     const keep = await mkNote(KEEP);
-    await mkNote(DEL);
-    await mkNote(ARC);
+    const del = await mkNote(DEL);
+    const arc = await mkNote(ARC);
 
     // Let the SW install and take control, then reload so the page is
     // SW-controlled and the list load populates the offline IndexedDB cache.
@@ -83,12 +85,15 @@ test.describe('Offline mode', () => {
     await page.waitForFunction(() => caches.match('/').then((res) => !!res));
     await page.reload();
     await expect(page.getByText(KEEP).first()).toBeVisible();
+    // Wait for the three seeded notes SPECIFICALLY: a raw count can be
+    // satisfied by other tests' notes while ours are still mid-caching, and
+    // the upcoming reload would kill the caching loop before they land.
     await expect
-      .poll(() => offlineNoteCount(page), {
-        message: 'offline cache should hold the seeded notes',
+      .poll(() => offlineHasNotes(page, [keep.id, del.id, arc.id]), {
+        message: 'offline cache should hold the three seeded notes',
         timeout: 15_000,
       })
-      .toBeGreaterThanOrEqual(3);
+      .toBe(true);
 
     // ── Airplane mode ────────────────────────────────────────────────────
     await context.setOffline(true);
@@ -148,5 +153,54 @@ test.describe('Offline mode', () => {
     expect(archived.ok()).toBeTruthy();
     const archivedTitles = ((await archived.json()) as Array<{ title: string }>).map((n) => n.title);
     expect(archivedTitles).toContain(ARC);
+  });
+});
+
+test.describe('Offline immediately after login (no reload, no prior clicks)', () => {
+  test.afterEach(async ({ context }) => {
+    await context.setOffline(false);
+  });
+
+  // The user's reported failure mode: log in, touch nothing, cut the
+  // network — then every click 500'd because each screen's JS chunk was
+  // lazy-loaded on first visit. Route code is now pre-imported at startup,
+  // so navigation must work from the module registry alone, without a
+  // reload and without depending on service-worker state.
+  test('every screen still opens after cutting the network right after login', async ({
+    page,
+    context,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 }); // phone layout
+    await login(page);
+
+    // Wait for the startup pre-import pass to complete (flag set by the
+    // root layout once all preloadCode calls succeed).
+    await page.waitForFunction(
+      () => (window as Window & { __crapnoteRoutesPreloaded?: boolean }).__crapnoteRoutesPreloaded === true,
+    );
+
+    // Airplane mode. Deliberately NO reload and NO prior navigation.
+    await context.setOffline(true);
+
+    // New note → /notes/[tempId] — the editor screen carries the heaviest
+    // chunk graph (Milkdown). It was never visited online.
+    await page.locator('.mob-new-btn').click();
+    await expect(page).toHaveURL(/\/notes\/-\d+/);
+    await expect(page.getByPlaceholder(/note title/i)).toBeVisible({ timeout: 15_000 });
+
+    // Back to the list, then screens never opened online: Settings, Archive.
+    await page.locator('a.mob-topbar-btn').click();
+    const tabs = page.getByRole('navigation', { name: /main navigation/i });
+    await tabs.getByRole('link', { name: /settings/i }).click();
+    await expect(page.getByRole('heading', { name: /settings/i }).first()).toBeVisible();
+
+    await tabs.getByRole('link', { name: /notes/i }).click();
+    await tabs.getByRole('link', { name: /archive/i }).click();
+    // The Archive SCREEN must render (no SvelteKit 500 page). Its data path
+    // is covered by the cold-start spec above — and under Playwright's
+    // offline emulation, service-worker-initiated fetches can still reach
+    // the local server, so the empty/offline notice isn't deterministic here.
+    await expect(page).toHaveURL(/\/archive$/);
+    await expect(page.locator('.mob-wordmark, .page-title').first()).toBeVisible();
   });
 });
