@@ -58,11 +58,14 @@ export async function markNoteDeletedOffline(
 
 /**
  * Record the user's desired starred/pinned/locked state after an offline
- * toggle. `note` carries the already-toggled values; sync reconciles them
- * against the server with compare-and-toggle (see offlineSync).
+ * toggle. `note` carries the already-toggled values and `flag` names the
+ * flag that was actually toggled — sync reconciles only explicitly-toggled
+ * flags against the server (see offlineSync), so a stale cached value for
+ * an untouched flag can never clobber state set from another device.
  */
 export async function markNoteFlagsOffline(
 	note: Note,
+	flag: 'starred' | 'pinned' | 'locked',
 	tags: Array<{ id: number; name: string }> = []
 ): Promise<void> {
 	const db = await openOfflineDB();
@@ -74,6 +77,7 @@ export async function markNoteFlagsOffline(
 			pinned: note.pinned,
 			locked: note.locked,
 			flags_dirty: true,
+			flags_toggled: { ...existing?.flags_toggled, [flag]: true },
 			local_updated_at: new Date().toISOString(),
 		});
 	} finally {

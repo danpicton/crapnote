@@ -59,7 +59,7 @@
 		if (!(err instanceof OfflineError)) throw err;
 		if (!note) return;
 		note = { ...note, [flag]: !note[flag] };
-		await markNoteFlagsOffline(note, noteTags.map((t) => ({ id: t.id, name: t.name })));
+		await markNoteFlagsOffline(note, flag, noteTags.map((t) => ({ id: t.id, name: t.name })));
 	}
 
 	async function mobToggleStar() {

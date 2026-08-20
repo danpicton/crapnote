@@ -790,7 +790,10 @@ describe('syncOfflineChanges — locked-note wedges (regression: sync stuck on N
 	});
 
 	it('delete of a note unlocked offline: a 423 triggers unlock-then-delete instead of wedging', async () => {
-		const note = fakeCachedNote({ id: 7, deleted_offline: true, flags_dirty: true, locked: false });
+		const note = fakeCachedNote({
+			id: 7, deleted_offline: true, flags_dirty: true, locked: false,
+			flags_toggled: { locked: true },
+		});
 		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
 		vi.mocked(api.notes.delete)
 			.mockRejectedValueOnce(new ApiError(423, 'note is locked'))
@@ -804,5 +807,95 @@ describe('syncOfflineChanges — locked-note wedges (regression: sync stuck on N
 		expect(offlineDB.deleteNote).toHaveBeenCalledWith(fakeDB, 7);
 		expect(result.pushed.deleted).toBe(1);
 		expect(result.errors).toBe(0);
+	});
+});
+
+describe('syncOfflineChanges — lock safety and ordering', () => {
+	it('an offline edit + LOCK applies the lock AFTER the content push, not before', async () => {
+		// Locking first would make our own PUT bounce with a 423 and shunt
+		// the edit into a spurious conflict copy.
+		const note = fakeCachedNote({
+			id: 5, title: 'Edited', body: 'B', is_dirty: true, flags_dirty: true,
+			locked: true, flags_toggled: { locked: true },
+			server_updated_at: '2024-01-01T00:00:00Z',
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(
+			fakeServerNote({ id: 5, locked: false, updated_at: '2024-01-01T00:00:00Z' })
+		);
+		vi.mocked(api.notes.update).mockResolvedValue(fakeServerNote({ id: 5, updated_at: '2024-01-05T00:00:00Z' }));
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(fakeServerNote({ id: 5, locked: true, updated_at: '2024-01-05T00:00:00Z' }));
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.update).toHaveBeenCalledWith(5, { title: 'Edited', body: 'B' });
+		expect(api.notes.toggleLock).toHaveBeenCalledWith(5);
+		const updateOrder = vi.mocked(api.notes.update).mock.invocationCallOrder[0];
+		const lockOrder = vi.mocked(api.notes.toggleLock).mock.invocationCallOrder[0];
+		expect(updateOrder).toBeLessThan(lockOrder);
+		expect(result.conflicts).toBe(0);
+		expect(result.errors).toBe(0);
+		expect(result.pushed.updated).toBe(1);
+		expect(result.pushed.flags).toBe(1);
+	});
+
+	it('reconcile never touches a flag the user did not toggle — a stale cached locked:false cannot strip another device lock', async () => {
+		// Device A locked the note; this device's cache predates that and the
+		// user only starred it offline.
+		const note = fakeCachedNote({
+			id: 5, is_dirty: false, flags_dirty: true,
+			starred: true, locked: false, flags_toggled: { starred: true },
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({ id: 5, starred: false, locked: true }));
+		vi.mocked(api.notes.toggleStar).mockResolvedValue(fakeServerNote({ id: 5, starred: true, locked: true }));
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.toggleStar).toHaveBeenCalledWith(5);
+		expect(api.notes.toggleLock).not.toHaveBeenCalled();
+		expect(result.errors).toBe(0);
+	});
+
+	it('delete replay never force-unlocks when the lock flag itself was not toggled offline', async () => {
+		// Same stale-cache setup, but the user deleted the note. The 423 must
+		// NOT trigger unlock-then-delete — the lock was set by another device.
+		const note = fakeCachedNote({
+			id: 7, deleted_offline: true, flags_dirty: true,
+			starred: true, locked: false, flags_toggled: { starred: true },
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.delete).mockRejectedValue(new ApiError(423, 'note is locked'));
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.toggleLock).not.toHaveBeenCalled();
+		expect(offlineDB.deleteNote).not.toHaveBeenCalled();
+		expect(result.errors).toBe(1);
+	});
+
+	it('archive replay of a locked+edited note preserves the edit as a conflict instead of wedging on 423', async () => {
+		// The archive path shares pushContentCheckpoint, so the 423 fallback
+		// applies there too.
+		const note = fakeCachedNote({
+			id: 8, title: 'Edited', body: 'B', is_dirty: true, archived_offline: true,
+			server_updated_at: '2024-01-01T00:00:00Z',
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(
+			fakeServerNote({ id: 8, title: 'Server', body: 'S', locked: true, updated_at: '2024-01-01T00:00:00Z' })
+		);
+		vi.mocked(api.notes.update).mockRejectedValue(new ApiError(423, 'note is locked'));
+		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 999 }));
+		vi.mocked(api.notes.archive).mockResolvedValue(undefined);
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.create).toHaveBeenCalledWith('[sync conflict] Edited', 'B');
+		expect(api.notes.archive).toHaveBeenCalledWith(8);
+		expect(offlineDB.deleteNote).toHaveBeenCalledWith(fakeDB, 8);
+		expect(result.conflicts).toBe(1);
+		expect(result.errors).toBe(0);
+		expect(result.pushed.archived).toBe(1);
 	});
 });

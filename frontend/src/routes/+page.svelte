@@ -318,7 +318,9 @@
 			const cached = await getAllNotes(db);
 			db.close();
 			const byId = new Map<number, Tag>();
-			for (const note of cached) {
+			// Match loadFromCache: notes deleted/archived offline are gone
+			// from the user's point of view — their tags shouldn't count.
+			for (const note of cached.filter((n) => !n.deleted_offline && !n.archived_offline)) {
 				for (const t of note.tags) {
 					const existing = byId.get(t.id);
 					if (existing) existing.note_count++;
@@ -791,8 +793,10 @@
 		showHeadingsMenu = false;
 		try {
 			noteTags = await api.tags.listForNote(id);
-		} catch {
-			// Offline — use the tags cached with the note, if any.
+		} catch (err) {
+			// Offline — use the tags cached with the note, if any. A genuine
+			// server rejection still surfaces.
+			if (!(err instanceof OfflineError)) throw err;
 			const db = await openOfflineDB();
 			const cached = await getNote(db, id);
 			db.close();
@@ -1002,7 +1006,7 @@
 		const note = notes.find((n) => n.id === id);
 		if (!note) return null;
 		const toggled = { ...note, [flag]: !note[flag] };
-		await markNoteFlagsOffline(toggled);
+		await markNoteFlagsOffline(toggled, flag);
 		syncStatus = 'unsynced';
 		return toggled;
 	}

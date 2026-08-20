@@ -129,7 +129,8 @@ describe('markNoteFlagsOffline', () => {
 		});
 		db.close();
 
-		await markNoteFlagsOffline(serverNote({ id: 10, locked: false, starred: true }));
+		await markNoteFlagsOffline(serverNote({ id: 10, locked: false, starred: true }), 'locked');
+		await markNoteFlagsOffline(serverNote({ id: 10, locked: false, starred: true }), 'starred');
 
 		const check = await openOfflineDB();
 		const cached = await getNote(check, 10);
@@ -137,12 +138,13 @@ describe('markNoteFlagsOffline', () => {
 		expect(cached?.locked).toBe(false);
 		expect(cached?.starred).toBe(true);
 		expect(cached?.flags_dirty).toBe(true);
+		expect(cached?.flags_toggled).toEqual({ locked: true, starred: true });
 		expect(cached?.is_dirty).toBe(false); // content untouched
 		expect(cached?.title).toBe('T');
 	});
 
 	it('creates a cache entry for an uncached note so the toggle still syncs', async () => {
-		await markNoteFlagsOffline(serverNote({ id: 21, locked: false }));
+		await markNoteFlagsOffline(serverNote({ id: 21, locked: false }), 'locked');
 
 		const check = await openOfflineDB();
 		const cached = await getNote(check, 21);

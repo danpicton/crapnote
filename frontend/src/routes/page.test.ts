@@ -647,7 +647,8 @@ describe('Offline mode', () => {
 		await fireEvent.click(item.querySelector('[aria-label="Star note"]') as HTMLElement);
 
 		await waitFor(() => expect(markNoteFlagsOffline).toHaveBeenCalledWith(
-			expect.objectContaining({ id: 6, starred: true })
+			expect.objectContaining({ id: 6, starred: true }),
+			'starred'
 		));
 	});
 

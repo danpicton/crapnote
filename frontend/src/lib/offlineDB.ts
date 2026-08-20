@@ -17,6 +17,12 @@ export interface CachedNote {
 	 * calling the toggle endpoints only where they differ — never by
 	 * replaying toggles blind, which could double-flip. */
 	flags_dirty?: boolean;
+	/** Which flags the user actually toggled offline. Sync only reconciles
+	 * these: a stale cached value for a flag the user never touched must not
+	 * overwrite state set from another device (in particular, never strip a
+	 * lock the user didn't explicitly remove). Absent on legacy entries —
+	 * treated as all-toggled. */
+	flags_toggled?: { starred?: boolean; pinned?: boolean; locked?: boolean };
 }
 
 const DB_NAME = 'crapnote-notes-v2';
