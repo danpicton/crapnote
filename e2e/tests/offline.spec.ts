@@ -63,17 +63,31 @@ test.describe('Offline mode', () => {
       expect(res.ok()).toBeTruthy();
       return (await res.json()) as { id: number };
     };
-    const keep = await mkNote('Offline Keeper');
-    await mkNote('Offline Delete Target');
-    await mkNote('Offline Archive Target');
+    // Titles are unique per attempt: the suite shares one SQLite DB, so a CI
+    // retry would otherwise see duplicate rows from the failed attempt.
+    const runTag = Date.now().toString(36);
+    const KEEP = `Offline Keeper ${runTag}`;
+    const DEL = `Offline Delete Target ${runTag}`;
+    const ARC = `Offline Archive Target ${runTag}`;
+    const keep = await mkNote(KEEP);
+    await mkNote(DEL);
+    await mkNote(ARC);
 
-    // Let the SW install, then reload so the page is SW-controlled and the
-    // list load populates the offline IndexedDB cache.
+    // Let the SW install and take control, then reload so the page is
+    // SW-controlled and the list load populates the offline IndexedDB cache.
+    // Explicitly wait for the cached app shell too — serviceWorker.ready can
+    // resolve before clients.claim()/shell-priming have finished on a slow
+    // CI runner, and an offline reload without the cached shell boots nothing.
     await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+    await page.waitForFunction(() => caches.match('/').then((res) => !!res));
     await page.reload();
-    await expect(page.getByText('Offline Keeper').first()).toBeVisible();
+    await expect(page.getByText(KEEP).first()).toBeVisible();
     await expect
-      .poll(() => offlineNoteCount(page), { message: 'offline cache should hold the seeded notes' })
+      .poll(() => offlineNoteCount(page), {
+        message: 'offline cache should hold the seeded notes',
+        timeout: 15_000,
+      })
       .toBeGreaterThanOrEqual(3);
 
     // ── Airplane mode ────────────────────────────────────────────────────
@@ -81,12 +95,12 @@ test.describe('Offline mode', () => {
 
     // Cold start: the SW serves the cached shell, the list paints from IDB.
     await page.reload();
-    await expect(page.getByText('Offline Keeper').first()).toBeVisible();
+    await expect(page.getByText(KEEP).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('Offline', { exact: true }).first()).toBeVisible();
 
     // A note never opened online still opens offline via its own route.
     await page.goto(`/notes/${keep.id}`);
-    await expect(page.getByText('Body of Offline Keeper')).toBeVisible();
+    await expect(page.getByText(`Body of ${KEEP}`)).toBeVisible();
 
     // An unvisited page still opens offline.
     await page.goto('/settings');
@@ -94,29 +108,23 @@ test.describe('Offline mode', () => {
 
     // ── Offline delete ───────────────────────────────────────────────────
     await page.goto('/');
-    const delRow = page
-      .locator('.note-item')
-      .filter({ hasText: 'Offline Delete Target' })
-      .first();
+    const delRow = page.locator('.note-item').filter({ hasText: DEL }).first();
     await delRow.hover();
     await delRow.locator('[title="Delete"]').click();
-    await expect(page.getByText('Offline Delete Target')).toHaveCount(0);
+    await expect(page.getByText(DEL)).toHaveCount(0);
 
     // ── Offline archive ──────────────────────────────────────────────────
-    const arcRow = page
-      .locator('.note-item')
-      .filter({ hasText: 'Offline Archive Target' })
-      .first();
+    const arcRow = page.locator('.note-item').filter({ hasText: ARC }).first();
     await arcRow.hover();
     await arcRow.getByRole('button', { name: /move to archive/i }).click();
-    await expect(page.getByText('Offline Archive Target')).toHaveCount(0);
+    await expect(page.getByText(ARC)).toHaveCount(0);
 
     // Both survive a reload while still offline (they're queued in IDB, not
     // just hidden in memory).
     await page.reload();
-    await expect(page.getByText('Offline Keeper').first()).toBeVisible();
-    await expect(page.getByText('Offline Delete Target')).toHaveCount(0);
-    await expect(page.getByText('Offline Archive Target')).toHaveCount(0);
+    await expect(page.getByText(KEEP).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(DEL)).toHaveCount(0);
+    await expect(page.getByText(ARC)).toHaveCount(0);
 
     // ── Reconnect: queued actions replay against the server ──────────────
     await context.setOffline(false);
@@ -128,8 +136,8 @@ test.describe('Offline mode', () => {
           if (!res.ok()) return 'list-failed';
           const titles = ((await res.json()) as Array<{ title: string }>).map((n) => n.title);
           return {
-            deleted: !titles.includes('Offline Delete Target'),
-            archivedGone: !titles.includes('Offline Archive Target'),
+            deleted: !titles.includes(DEL),
+            archivedGone: !titles.includes(ARC),
           };
         },
         { message: 'offline delete + archive should replay to the server on reconnect', timeout: 15_000 },
@@ -139,6 +147,6 @@ test.describe('Offline mode', () => {
     const archived = await api.get('/api/archive?limit=100');
     expect(archived.ok()).toBeTruthy();
     const archivedTitles = ((await archived.json()) as Array<{ title: string }>).map((n) => n.title);
-    expect(archivedTitles).toContain('Offline Archive Target');
+    expect(archivedTitles).toContain(ARC);
   });
 });
