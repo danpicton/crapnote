@@ -34,7 +34,7 @@ vi.mock('$lib/localData', () => ({
 	clearSessionUser: vi.fn(),
 }));
 
-import { api, OfflineError } from '$lib/api';
+import { api, ApiError, OfflineError } from '$lib/api';
 import {
 	clearLocalData,
 	ensureOfflineOwner,
@@ -136,12 +136,21 @@ describe('offline session restore', () => {
 		expect(ensureOfflineOwner).not.toHaveBeenCalled();
 	});
 
-	it('forgets the persisted user when the server rejects the session', async () => {
-		vi.mocked(api.auth.me).mockRejectedValue(new Error('401'));
+	it('forgets the persisted user when the server rejects the session with 401', async () => {
+		vi.mocked(api.auth.me).mockRejectedValue(new ApiError(401, 'unauthorized'));
 
 		await auth.init();
 
 		expect(auth.user).toBeNull();
 		expect(clearSessionUser).toHaveBeenCalledTimes(1);
+	});
+
+	it('keeps the persisted user through a transient server error (5xx)', async () => {
+		vi.mocked(api.auth.me).mockRejectedValue(new ApiError(502, 'bad gateway'));
+
+		await auth.init();
+
+		expect(auth.user).toBeNull();
+		expect(clearSessionUser).not.toHaveBeenCalled();
 	});
 });

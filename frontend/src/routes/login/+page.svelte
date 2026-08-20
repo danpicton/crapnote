@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { ApiError } from '$lib/api';
+	import { ApiError, OfflineError } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { hasStashedShare } from '$lib/share';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
@@ -20,7 +20,11 @@
 			// finish it rather than dropping the user on the notes list.
 			goto(hasStashedShare() ? '/share?restore=1' : '/');
 		} catch (err) {
-			if (err instanceof ApiError) {
+			if (err instanceof OfflineError) {
+				// OfflineError extends ApiError, so this check must come first
+				// or an offline attempt reads as "invalid credentials".
+				error = "You're offline. Reconnect to log in.";
+			} else if (err instanceof ApiError) {
 				if (err.status === 403) {
 					error = 'This account has been locked. Contact an administrator.';
 				} else {

@@ -348,7 +348,8 @@
 		for (const note of serverNotes) {
 			if (!toKeep.has(note.id)) continue;
 			const existing = await getNote(db, note.id);
-			if (existing?.is_dirty) continue; // don't overwrite unsync'd local changes
+			// Don't overwrite unsync'd local changes or pending delete/archive replays
+			if (existing?.is_dirty || existing?.deleted_offline || existing?.archived_offline) continue;
 			// Fetch tags for this note so they're available offline
 			const noteTags = await api.tags.listForNote(note.id).catch(() => existing?.tags ?? []);
 			await upsertNote(db, {
@@ -366,10 +367,11 @@
 			});
 		}
 
-		// Evict notes no longer in the keep-set (unless dirty / new)
+		// Evict notes no longer in the keep-set (unless dirty / new / queued
+		// for a delete or archive replay)
 		const allCached = await getAllNotes(db);
 		for (const c of allCached) {
-			if (!toKeep.has(c.id) && !c.is_dirty && !c.is_new) {
+			if (!toKeep.has(c.id) && !c.is_dirty && !c.is_new && !c.deleted_offline && !c.archived_offline) {
 				await deleteOfflineNote(db, c.id);
 			}
 		}

@@ -2,7 +2,16 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import ArchivePage from './+page.svelte';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', () => {
+	class ApiError extends Error {
+		constructor(public readonly status: number, message: string) { super(message); this.name = 'ApiError'; }
+	}
+	class OfflineError extends ApiError {
+		constructor(message = 'offline') { super(503, message); this.name = 'OfflineError'; }
+	}
+	return {
+	ApiError,
+	OfflineError,
 	api: {
 		notes: {
 			listArchived: vi.fn(),
@@ -10,10 +19,11 @@ vi.mock('$lib/api', () => ({
 			delete: vi.fn(),
 		},
 	},
-}));
+};
+});
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
-import { api } from '$lib/api';
+import { api, OfflineError } from '$lib/api';
 
 const mockNote = (overrides = {}) => ({
 	id: 1, title: 'Archived Note', body: '', starred: false, pinned: false, archived: true, locked: false,
@@ -101,8 +111,8 @@ describe('Locked archived notes', () => {
 });
 
 describe('Archive page offline', () => {
-	it('shows an offline notice instead of spinning when the list fetch fails', async () => {
-		vi.mocked(api.notes.listArchived).mockRejectedValue(new Error('offline'));
+	it('shows an offline notice instead of spinning when the fetch fails offline', async () => {
+		vi.mocked(api.notes.listArchived).mockRejectedValue(new OfflineError());
 
 		render(ArchivePage);
 
@@ -110,5 +120,16 @@ describe('Archive page offline', () => {
 			expect(screen.getByText(/aren't available offline/i)).toBeInTheDocument()
 		);
 		expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
+	});
+
+	it('a genuine server failure shows an error, not a misleading offline notice', async () => {
+		vi.mocked(api.notes.listArchived).mockRejectedValue(new Error('boom'));
+
+		render(ArchivePage);
+
+		await waitFor(() =>
+			expect(screen.getByText(/couldn't load archived notes/i)).toBeInTheDocument()
+		);
+		expect(screen.queryByText(/aren't available offline/i)).not.toBeInTheDocument();
 	});
 });

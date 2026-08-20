@@ -8,7 +8,7 @@ export interface CachedNote {
 	tags: Array<{ id: number; name: string }>;  // cached for offline tag-filtering
 	server_updated_at: string;  // server's updated_at when we last fetched — used for conflict detection
 	local_updated_at: string;   // ISO string of last local modification
-	is_dirty: boolean;          // has unsynced local changes
+	is_dirty: boolean;          // has unsynced local CONTENT changes (title/body)
 	is_new: boolean;            // created offline; no server ID yet
 	deleted_offline?: boolean;  // deleted while offline; replay DELETE on sync
 	archived_offline?: boolean; // archived while offline; replay archive on sync
@@ -113,8 +113,12 @@ export function getAllNotes(db: IDBDatabase): Promise<CachedNote[]> {
 	});
 }
 
+/** Notes with anything left to push: content edits, or a queued
+ * delete/archive replay. */
 export function getDirtyNotes(db: IDBDatabase): Promise<CachedNote[]> {
-	return getAllNotes(db).then((notes) => notes.filter((n) => n.is_dirty));
+	return getAllNotes(db).then(
+		(notes) => notes.filter((n) => n.is_dirty || n.deleted_offline || n.archived_offline)
+	);
 }
 
 export function deleteNote(db: IDBDatabase, id: number): Promise<void> {

@@ -1,4 +1,4 @@
-import { api, OfflineError, type User } from '$lib/api';
+import { api, ApiError, OfflineError, type User } from '$lib/api';
 import {
 	clearLocalData,
 	ensureOfflineOwner,
@@ -32,11 +32,15 @@ export const auth = {
 				user = readSessionUser();
 				if (user) await ensureOfflineOwner(user.id);
 			} else {
-				// The server answered and rejected the session (or errored) —
-				// forget the persisted identity so an expired session doesn't
-				// keep resurrecting offline.
+				// The server answered but this session isn't usable right now.
 				user = null;
-				clearSessionUser();
+				// Forget the persisted identity only on a genuine auth
+				// rejection — a transient 5xx (reachable proxy, backend
+				// restarting) must not strand the next offline start on
+				// /login while the session cookie is still valid.
+				if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
+					clearSessionUser();
+				}
 			}
 		} finally {
 			loading = false;

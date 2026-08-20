@@ -21,7 +21,9 @@ function cachedFromNote(note: Note, tags: Array<{ id: number; name: string }>): 
 		tags,
 		server_updated_at: note.updated_at,
 		local_updated_at: new Date().toISOString(),
-		is_dirty: true,
+		// Mirrors the in-memory note as-is: no content edit has happened, so
+		// the sync replay knows it may skip the title/body push entirely.
+		is_dirty: false,
 		is_new: note.id < 0,
 	};
 }
@@ -42,9 +44,10 @@ export async function markNoteDeletedOffline(
 			await deleteNote(db, note.id);
 			return;
 		}
+		// is_dirty is left as-is: it tracks content edits only, and a delete
+		// doesn't need (or want) a title/body push during replay.
 		await upsertNote(db, {
 			...(existing ?? cachedFromNote(note, tags)),
-			is_dirty: true,
 			deleted_offline: true,
 			local_updated_at: new Date().toISOString(),
 		});
@@ -62,9 +65,11 @@ export async function markNoteArchivedOffline(
 	const db = await openOfflineDB();
 	try {
 		const existing = await getNote(db, note.id);
+		// is_dirty is left as-is: an archive with no content edits must not
+		// push the (possibly stale) cached title/body over newer server-side
+		// edits during replay.
 		await upsertNote(db, {
 			...(existing ?? cachedFromNote(note, tags)),
-			is_dirty: true,
 			archived_offline: true,
 			local_updated_at: new Date().toISOString(),
 		});

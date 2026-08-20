@@ -14,6 +14,12 @@ vi.mock('$lib/api', () => ({
 			super(message);
 		}
 	},
+	OfflineError: class OfflineError extends Error {
+		public status = 503;
+		constructor(message = 'offline') {
+			super(message);
+		}
+	},
 }));
 
 // Mock SvelteKit navigation
@@ -146,5 +152,20 @@ describe('Pending share', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
 
 		await waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
+	});
+});
+
+describe('Login page offline', () => {
+	it('shows an offline message rather than "invalid credentials" when the network is down', async () => {
+		const { OfflineError } = await import('$lib/api');
+		vi.mocked(api.auth.login).mockRejectedValue(new OfflineError());
+
+		render(LoginPage);
+		await fireEvent.input(screen.getByLabelText(/username/i), { target: { value: 'alice' } });
+		await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'pw' } });
+		await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
+
+		await waitFor(() => expect(screen.getByText(/you're offline/i)).toBeInTheDocument());
+		expect(screen.queryByText(/invalid username or password/i)).not.toBeInTheDocument();
 	});
 });

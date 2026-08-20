@@ -2,21 +2,24 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { ArchiveRestore, Trash2, ChevronLeft, Archive as ArchiveIcon } from 'lucide-svelte';
-	import { api, type Note } from '$lib/api';
+	import { api, OfflineError, type Note } from '$lib/api';
 	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
 
 	let notes = $state<Note[]>([]);
 	let loading = $state(true);
 	let offline = $state(false);
+	let failed = $state(false);
 	let expandedId = $state<number | null>(null);
 
 	onMount(async () => {
 		try {
 			notes = await api.notes.listArchived();
-		} catch {
+		} catch (err) {
 			// Archived notes aren't cached offline — say so instead of
-			// spinning on "Loading…" forever.
-			offline = true;
+			// spinning on "Loading…" forever. A genuine server failure gets
+			// its own message, not a misleading "you're offline".
+			if (err instanceof OfflineError) offline = true;
+			else failed = true;
 		} finally {
 			loading = false;
 		}
@@ -153,6 +156,8 @@
 			<p class="status">Loading…</p>
 		{:else if offline}
 			<p class="status">Archived notes aren't available offline. Reconnect to view them.</p>
+		{:else if failed}
+			<p class="status">Couldn't load archived notes. Please try again.</p>
 		{:else if notes.length === 0}
 			<div class="mob-empty-state">
 				<div class="mob-empty-icon"><ArchiveIcon size={28} aria-hidden="true" /></div>

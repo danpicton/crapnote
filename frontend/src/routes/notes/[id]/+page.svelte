@@ -54,10 +54,12 @@
 		if (!note) return;
 		try {
 			note = await api.notes.toggleStar(noteId);
-		} catch {
+		} catch (err) {
 			// Offline — star/pin/lock replay isn't queued (the API only offers
 			// toggle endpoints, so replaying them blind risks double-flips).
-			// Leave the state as-is rather than lying about it.
+			// Leave the state as-is rather than lying about it. A genuine
+			// server rejection still surfaces.
+			if (!(err instanceof OfflineError)) throw err;
 		}
 	}
 
@@ -65,8 +67,9 @@
 		if (!note) return;
 		try {
 			note = await api.notes.togglePin(noteId);
-		} catch {
+		} catch (err) {
 			// Offline — see mobToggleStar.
+			if (!(err instanceof OfflineError)) throw err;
 		}
 		showActionSheet = false;
 	}
@@ -75,8 +78,9 @@
 		if (!note) return;
 		try {
 			note = await api.notes.toggleLock(noteId);
-		} catch {
+		} catch (err) {
 			// Offline — see mobToggleStar.
+			if (!(err instanceof OfflineError)) throw err;
 		}
 		showActionSheet = false;
 	}

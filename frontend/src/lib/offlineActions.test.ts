@@ -37,7 +37,8 @@ describe('markNoteDeletedOffline', () => {
 		const cached = await getNote(check, 10);
 		check.close();
 		expect(cached?.deleted_offline).toBe(true);
-		expect(cached?.is_dirty).toBe(true);
+		// is_dirty tracks content edits only — a delete is not a content edit
+		expect(cached?.is_dirty).toBe(false);
 		expect(cached?.title).toBe('Cached'); // existing cache entry preserved
 	});
 
@@ -48,7 +49,7 @@ describe('markNoteDeletedOffline', () => {
 		const cached = await getNote(db, 11);
 		db.close();
 		expect(cached?.deleted_offline).toBe(true);
-		expect(cached?.is_dirty).toBe(true);
+		expect(cached?.is_dirty).toBe(false);
 	});
 
 	it('discards an offline-created note entirely (nothing to replay)', async () => {
@@ -85,6 +86,18 @@ describe('markNoteArchivedOffline', () => {
 		check.close();
 		expect(cached?.archived_offline).toBe(true);
 		expect(cached?.title).toBe('Edited offline');
+		// The pre-existing content edit stays dirty so replay pushes it
+		expect(cached?.is_dirty).toBe(true);
+	});
+
+	it('an archive with no content edits stays clean so replay skips the content push', async () => {
+		await markNoteArchivedOffline(serverNote({ id: 12 }));
+
+		const check = await openOfflineDB();
+		const cached = await getNote(check, 12);
+		check.close();
+		expect(cached?.archived_offline).toBe(true);
+		expect(cached?.is_dirty).toBe(false);
 	});
 
 	it('keeps is_new on an offline-created note so sync creates it before archiving', async () => {

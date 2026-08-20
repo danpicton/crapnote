@@ -1,4 +1,4 @@
-import { api } from '$lib/api';
+import { api, ApiError, OfflineError } from '$lib/api';
 import { openOfflineDB, getDirtyNotes, upsertNote, deleteNote, getOfflineOwner, setOfflineOwner } from '$lib/offlineDB';
 import type { CachedNote } from '$lib/offlineDB';
 
@@ -145,25 +145,43 @@ function logSyncResult(r: SyncResult): void {
 }
 
 /**
+ * True when the replay target no longer exists server-side (deleted from
+ * another device): the intent behind the queued action is already satisfied,
+ * so the replay counts as done. Without this, a 404 would keep the flagged
+ * note retrying — and the sync indicator stuck on "unsynced" — forever.
+ */
+function isGoneServerSide(err: unknown): boolean {
+	return err instanceof ApiError && !(err instanceof OfflineError) && err.status === 404;
+}
+
+/**
  * Replay an offline delete. A note created offline and deleted before it ever
  * synced never existed server-side, so it is simply discarded; otherwise the
- * server delete runs first and the cache entry is only dropped on success, so
- * a failed call leaves the flag in place for the next sync to retry.
- * `deleted_offline` wins over `archived_offline` when both are set — the
- * user's last visible action was the delete.
+ * server delete runs first and the cache entry is only dropped on success
+ * (or on a 404 — already gone), so a failed call leaves the flag in place
+ * for the next sync to retry. `deleted_offline` wins over `archived_offline`
+ * when both are set — the user's last visible action was the delete.
  */
 async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
 	if (!note.is_new) {
-		await api.notes.delete(note.id);
+		try {
+			await api.notes.delete(note.id);
+		} catch (err) {
+			if (!isGoneServerSide(err)) throw err;
+		}
 	}
 	await deleteNote(db, note.id);
 	result.pushed.deleted++;
 }
 
 /**
- * Replay an offline archive. Local title/body edits are pushed first so
- * archiving doesn't silently discard offline work; a note created offline is
- * created server-side and immediately archived. The cache entry is removed on
+ * Replay an offline archive. The cached title/body is only pushed when the
+ * note actually carries offline content edits (is_dirty), and then under the
+ * same conflict check as syncDirtyNote — a plain archive must never clobber
+ * edits made from another device while this one was offline. On a content
+ * conflict the local edits are preserved as a "[sync conflict]" note and the
+ * server's version is archived untouched. A note created offline is created
+ * server-side and immediately archived. The cache entry is removed on
  * success — archived notes live outside the offline working set.
  */
 async function syncArchivedNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
@@ -171,10 +189,29 @@ async function syncArchivedNote(db: IDBDatabase, note: CachedNote, result: SyncR
 	if (note.is_new) {
 		const created = await api.notes.create(note.title, note.body);
 		serverId = created.id;
-	} else {
-		await api.notes.update(note.id, { title: note.title, body: note.body });
+	} else if (note.is_dirty) {
+		try {
+			const serverNote = await api.notes.get(note.id);
+			if (serverNote.updated_at === note.server_updated_at) {
+				// No server-side change since our last sync — push cleanly.
+				await api.notes.update(note.id, { title: note.title, body: note.body });
+			} else {
+				// Both sides changed. Keep the local edit as a conflict note
+				// and archive the server's version as it stands.
+				result.conflicts++;
+				await api.notes.create(`[sync conflict] ${note.title}`, note.body);
+			}
+		} catch (err) {
+			// Note already deleted server-side — nothing to update; the
+			// archive call below resolves the same way.
+			if (!isGoneServerSide(err)) throw err;
+		}
 	}
-	await api.notes.archive(serverId);
+	try {
+		await api.notes.archive(serverId);
+	} catch (err) {
+		if (!isGoneServerSide(err)) throw err;
+	}
 	await deleteNote(db, note.id);
 	result.pushed.archived++;
 }

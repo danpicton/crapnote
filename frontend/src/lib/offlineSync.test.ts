@@ -2,7 +2,16 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import 'fake-indexeddb/auto';
 
 // Mock api and offlineDB so sync logic is tested in isolation
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', () => {
+	class ApiError extends Error {
+		constructor(public readonly status: number, message: string) { super(message); this.name = 'ApiError'; }
+	}
+	class OfflineError extends ApiError {
+		constructor(message = 'offline') { super(503, message); this.name = 'OfflineError'; }
+	}
+	return {
+	ApiError,
+	OfflineError,
 	api: {
 		notes: {
 			create: vi.fn(),
@@ -12,7 +21,8 @@ vi.mock('$lib/api', () => ({
 			archive: vi.fn(),
 		},
 	},
-}));
+};
+});
 
 vi.mock('$lib/offlineDB', () => ({
 	openOfflineDB: vi.fn(),
@@ -27,7 +37,7 @@ vi.mock('$lib/offlineDB', () => ({
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
-import { api } from '$lib/api';
+import { api, ApiError } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
 import type { CachedNote } from '$lib/offlineDB';
 import { syncOfflineChanges } from './offlineSync';
@@ -443,6 +453,8 @@ describe('syncOfflineChanges — offline archives', () => {
 	it('pushes local content then archives a server note, dropping the cache entry', async () => {
 		const note = fakeCachedNote({ id: 8, title: 'Edited', body: 'Offline edit', archived_offline: true });
 		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		// Server unchanged since our last sync — the content push is clean.
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({ id: 8, updated_at: '2024-01-01T00:00:00Z' }));
 		vi.mocked(api.notes.update).mockResolvedValue(fakeServerNote({ id: 8 }));
 		vi.mocked(api.notes.archive).mockResolvedValue(undefined);
 
@@ -469,9 +481,8 @@ describe('syncOfflineChanges — offline archives', () => {
 	});
 
 	it('keeps the flagged note for retry when the archive call fails', async () => {
-		const note = fakeCachedNote({ id: 8, archived_offline: true });
+		const note = fakeCachedNote({ id: 8, is_dirty: false, archived_offline: true });
 		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
-		vi.mocked(api.notes.update).mockResolvedValue(fakeServerNote({ id: 8 }));
 		vi.mocked(api.notes.archive).mockRejectedValue(new Error('network'));
 
 		const result = await syncOfflineChanges('online', 1);
@@ -479,5 +490,78 @@ describe('syncOfflineChanges — offline archives', () => {
 		expect(offlineDB.deleteNote).not.toHaveBeenCalled();
 		expect(result.errors).toBe(1);
 		expect(result.pushed.archived).toBe(0);
+	});
+});
+
+describe('syncOfflineChanges — archive replay conflict safety', () => {
+	it('a plain archive (no content edits) never pushes cached title/body', async () => {
+		const note = fakeCachedNote({ id: 9, is_dirty: false, archived_offline: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.archive).mockResolvedValue(undefined);
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.get).not.toHaveBeenCalled();
+		expect(api.notes.update).not.toHaveBeenCalled();
+		expect(api.notes.archive).toHaveBeenCalledWith(9);
+		expect(result.pushed.archived).toBe(1);
+	});
+
+	it('preserves offline edits as a conflict note when the server changed too, archiving the server version untouched', async () => {
+		const note = fakeCachedNote({
+			id: 9, title: 'My Edit', body: 'My body',
+			archived_offline: true, server_updated_at: '2024-01-01T00:00:00Z',
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(
+			fakeServerNote({ id: 9, updated_at: '2024-01-02T00:00:00Z' }) // server moved
+		);
+		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 999 }));
+		vi.mocked(api.notes.archive).mockResolvedValue(undefined);
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.update).not.toHaveBeenCalled();
+		expect(api.notes.create).toHaveBeenCalledWith('[sync conflict] My Edit', 'My body');
+		expect(api.notes.archive).toHaveBeenCalledWith(9);
+		expect(result.conflicts).toBe(1);
+		expect(result.pushed.archived).toBe(1);
+	});
+});
+
+describe('syncOfflineChanges — replay tolerates notes already gone server-side', () => {
+	it('a 404 on delete replay counts as done and drops the cache entry', async () => {
+		const note = fakeCachedNote({ id: 7, deleted_offline: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.delete).mockRejectedValue(new ApiError(404, 'not found'));
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(offlineDB.deleteNote).toHaveBeenCalledWith(fakeDB, 7);
+		expect(result.pushed.deleted).toBe(1);
+		expect(result.errors).toBe(0);
+	});
+
+	it('a 404 on archive replay counts as done and drops the cache entry', async () => {
+		const note = fakeCachedNote({ id: 8, is_dirty: false, archived_offline: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.archive).mockRejectedValue(new ApiError(404, 'not found'));
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(offlineDB.deleteNote).toHaveBeenCalledWith(fakeDB, 8);
+		expect(result.pushed.archived).toBe(1);
+		expect(result.errors).toBe(0);
+	});
+
+	it('a non-404 server error still leaves the flag in place for retry', async () => {
+		const note = fakeCachedNote({ id: 7, deleted_offline: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.delete).mockRejectedValue(new ApiError(500, 'boom'));
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(offlineDB.deleteNote).not.toHaveBeenCalled();
+		expect(result.errors).toBe(1);
 	});
 });
