@@ -11,7 +11,26 @@
 		<link rel="manifest" href="%sveltekit.assets%/manifest.json" />
 		<link rel="preconnect" href="https://fonts.googleapis.com" />
 		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
-		<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400..700;1,400..700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Archivo+Black&family=Work+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=DM+Sans:wght@400;500;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
+		<!-- Webfonts are progressive enhancement: injected after the window
+		     load event so a slow or unreachable fonts CDN (airplane mode,
+		     captive portal, flaky mobile link) can never block first render
+		     or delay app startup. display=swap keeps text visible in the
+		     fallback stacks until (if ever) the webfonts arrive. -->
+		<script>
+			(function () {
+				function addFonts() {
+					var l = document.createElement('link');
+					l.rel = 'stylesheet';
+					l.href = 'https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400..700;1,400..700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Archivo+Black&family=Work+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=DM+Sans:wght@400;500;700&family=Fira+Code:wght@400;500&display=swap';
+					document.head.appendChild(l);
+				}
+				if (document.readyState === 'complete') addFonts();
+				else window.addEventListener('load', addFonts);
+			})();
+		</script>
+		<noscript>
+			<link href="https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,400..700;1,400..700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Archivo+Black&family=Work+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=DM+Sans:wght@400;500;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
+		</noscript>
 		<style>
 			/* Remove default browser margin so the app fills the viewport exactly.
 			   overflow is NOT set here — the main .app container handles its own
