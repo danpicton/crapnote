@@ -1,14 +1,25 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { ChevronLeft, RotateCcw, Trash2 } from 'lucide-svelte';
-	import { api, type TrashEntry } from '$lib/api';
+	import { api, OfflineError, type TrashEntry } from '$lib/api';
 
 	let entries = $state<TrashEntry[]>([]);
 	let loading = $state(true);
+	let offline = $state(false);
+	let failed = $state(false);
 
 	onMount(async () => {
-		entries = await api.trash.list();
-		loading = false;
+		try {
+			entries = await api.trash.list();
+		} catch (err) {
+			// Trash isn't cached offline — say so instead of spinning on
+			// "Loading…" forever. A genuine server failure gets its own
+			// message, not a misleading "you're offline".
+			if (err instanceof OfflineError) offline = true;
+			else failed = true;
+		} finally {
+			loading = false;
+		}
 	});
 
 	async function restore(noteId: number) {
@@ -50,6 +61,10 @@
 
 	{#if loading}
 		<p class="status">Loading…</p>
+	{:else if offline}
+		<p class="status">Trash isn't available offline. Reconnect to view it.</p>
+	{:else if failed}
+		<p class="status">Couldn't load the trash. Please try again.</p>
 	{:else if entries.length === 0}
 		<p class="status">Trash is empty.</p>
 	{:else}

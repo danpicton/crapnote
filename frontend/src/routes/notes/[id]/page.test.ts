@@ -54,7 +54,16 @@ vi.mock('$app/stores', async () => {
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', () => {
+	class ApiError extends Error {
+		constructor(public readonly status: number, message: string) { super(message); this.name = 'ApiError'; }
+	}
+	class OfflineError extends ApiError {
+		constructor(message = 'offline') { super(503, message); this.name = 'OfflineError'; }
+	}
+	return {
+	ApiError,
+	OfflineError,
 	api: {
 		notes: { get: vi.fn(), update: vi.fn(), toggleLock: vi.fn() },
 		tags: {
@@ -65,7 +74,8 @@ vi.mock('$lib/api', () => ({
 			create: vi.fn(),
 		},
 	},
-}));
+};
+});
 
 vi.mock('$lib/offlineDB', () => ({
 	openOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
@@ -428,5 +438,29 @@ describe('Mobile lock control', () => {
 		await waitFor(() => screen.getByDisplayValue('My Note'));
 
 		expect(container.querySelector('.mob-topbar button[aria-label="Unlock note"]')).toBeTruthy();
+	});
+});
+
+describe('Offline lock toggle', () => {
+	it('unlocking offline applies optimistically and queues the desired state for sync', async () => {
+		const { OfflineError } = await import('$lib/api');
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ locked: true }));
+		vi.mocked(api.notes.toggleLock).mockRejectedValue(new OfflineError());
+
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.click(screen.getByTitle('Unlock note'));
+
+		// UI reflects the unlock immediately…
+		await waitFor(() => expect(screen.getByTitle('Lock note')).toBeTruthy());
+		// …and the desired state is recorded for the sync reconcile.
+		await waitFor(() =>
+			expect(offlineDB.upsertNote).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.objectContaining({ id: 42, locked: false, flags_dirty: true })
+			)
+		);
 	});
 });

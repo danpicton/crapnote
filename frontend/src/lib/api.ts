@@ -62,19 +62,45 @@ export class ApiError extends Error {
 	}
 }
 
+/**
+ * Thrown when a request failed because the network is unreachable — either
+ * fetch itself rejected (no service worker / hard network failure) or the
+ * service worker answered with its synthetic offline 503, which it marks with
+ * the `X-Crapnote-Offline: 1` header (see service-worker.ts). Callers use
+ * this to distinguish "you are offline, fall back to the local cache" from a
+ * genuine server error.
+ */
+export class OfflineError extends ApiError {
+	constructor(message = 'offline') {
+		super(503, message);
+		this.name = 'OfflineError';
+	}
+}
+
+/** Marker header set by the service worker on its synthetic offline 503s. */
+const OFFLINE_HEADER = 'X-Crapnote-Offline';
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
 	const headers: Record<string, string> = {};
 	if (body !== undefined) headers['Content-Type'] = 'application/json';
 
-	const res = await fetch(path, {
-		method,
-		headers,
-		body: body !== undefined ? JSON.stringify(body) : undefined,
-		credentials: 'include',
-	});
+	let res: Response;
+	try {
+		res = await fetch(path, {
+			method,
+			headers,
+			body: body !== undefined ? JSON.stringify(body) : undefined,
+			credentials: 'include',
+		});
+	} catch {
+		// fetch rejects only on network-level failure (offline, DNS, CORS) —
+		// there is no HTTP response to inspect.
+		throw new OfflineError();
+	}
 
 	if (!res.ok) {
 		const text = await res.text();
+		if (res.headers.get(OFFLINE_HEADER) === '1') throw new OfflineError(text);
 		throw new ApiError(res.status, text);
 	}
 	if (res.status === 204) return undefined as T;

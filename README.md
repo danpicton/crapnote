@@ -116,7 +116,7 @@ Docker image.
 | Variable | Default | Description |
 |---|---|---|
 | `PUBLIC_SYNC_INTERVAL_MS` | `30000` | Heartbeat interval (ms) for the offline sync loop that flushes dirty notes and pulls server changes. Clamped to a minimum of 5000. |
-| `PUBLIC_OFFLINE_NOTES_COUNT` | `50` | How many most-recent notes to mirror into IndexedDB for offline use. Clamped to a minimum of 1. |
+| `PUBLIC_OFFLINE_NOTES_COUNT` | `50` | How many most-recent notes to mirror into IndexedDB for offline use (full body + tags, so they can be opened and edited offline). Pinned notes are always mirrored on top of this count. Clamped to a minimum of 1. |
 
 ---
 

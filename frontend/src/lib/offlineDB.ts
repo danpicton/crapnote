@@ -8,8 +8,21 @@ export interface CachedNote {
 	tags: Array<{ id: number; name: string }>;  // cached for offline tag-filtering
 	server_updated_at: string;  // server's updated_at when we last fetched — used for conflict detection
 	local_updated_at: string;   // ISO string of last local modification
-	is_dirty: boolean;          // has unsynced local changes
+	is_dirty: boolean;          // has unsynced local CONTENT changes (title/body)
 	is_new: boolean;            // created offline; no server ID yet
+	deleted_offline?: boolean;  // deleted while offline; replay DELETE on sync
+	archived_offline?: boolean; // archived while offline; replay archive on sync
+	/** starred/pinned/locked were toggled offline: the cached values are the
+	 * user's DESIRED state. Sync reconciles by comparing with the server and
+	 * calling the toggle endpoints only where they differ — never by
+	 * replaying toggles blind, which could double-flip. */
+	flags_dirty?: boolean;
+	/** Which flags the user actually toggled offline. Sync only reconciles
+	 * these: a stale cached value for a flag the user never touched must not
+	 * overwrite state set from another device (in particular, never strip a
+	 * lock the user didn't explicitly remove). Absent on legacy entries —
+	 * treated as all-toggled. */
+	flags_toggled?: { starred?: boolean; pinned?: boolean; locked?: boolean };
 }
 
 const DB_NAME = 'crapnote-notes-v2';
@@ -111,8 +124,12 @@ export function getAllNotes(db: IDBDatabase): Promise<CachedNote[]> {
 	});
 }
 
+/** Notes with anything left to push: content edits, flag toggles, or a
+ * queued delete/archive replay. */
 export function getDirtyNotes(db: IDBDatabase): Promise<CachedNote[]> {
-	return getAllNotes(db).then((notes) => notes.filter((n) => n.is_dirty));
+	return getAllNotes(db).then(
+		(notes) => notes.filter((n) => n.is_dirty || n.flags_dirty || n.deleted_offline || n.archived_offline)
+	);
 }
 
 export function deleteNote(db: IDBDatabase, id: number): Promise<void> {

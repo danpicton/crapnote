@@ -2,7 +2,16 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import TrashPage from './+page.svelte';
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', () => {
+	class ApiError extends Error {
+		constructor(public readonly status: number, message: string) { super(message); this.name = 'ApiError'; }
+	}
+	class OfflineError extends ApiError {
+		constructor(message = 'offline') { super(503, message); this.name = 'OfflineError'; }
+	}
+	return {
+	ApiError,
+	OfflineError,
 	api: {
 		trash: {
 			list: vi.fn(),
@@ -11,11 +20,12 @@ vi.mock('$lib/api', () => ({
 			empty: vi.fn(),
 		},
 	},
-}));
+};
+});
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
-import { api } from '$lib/api';
+import { api, OfflineError } from '$lib/api';
 
 const mockEntry = (overrides = {}) => ({
 	note_id: 1,
@@ -87,5 +97,29 @@ describe('Trash page', () => {
 		await waitFor(() => {
 			expect(screen.getByText(/trash is empty/i)).toBeInTheDocument();
 		});
+	});
+});
+
+describe('Trash page offline', () => {
+	it('shows an offline notice instead of spinning when the fetch fails offline', async () => {
+		vi.mocked(api.trash.list).mockRejectedValue(new OfflineError());
+
+		render(TrashPage);
+
+		await waitFor(() =>
+			expect(screen.getByText(/isn't available offline/i)).toBeInTheDocument()
+		);
+		expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
+	});
+
+	it('a genuine server failure shows an error, not a misleading offline notice', async () => {
+		vi.mocked(api.trash.list).mockRejectedValue(new Error('boom'));
+
+		render(TrashPage);
+
+		await waitFor(() =>
+			expect(screen.getByText(/couldn't load the trash/i)).toBeInTheDocument()
+		);
+		expect(screen.queryByText(/isn't available offline/i)).not.toBeInTheDocument();
 	});
 });

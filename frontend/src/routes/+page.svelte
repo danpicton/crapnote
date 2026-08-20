@@ -18,7 +18,7 @@
 	import { insertImageCommand } from '$lib/milkdown/image';
 	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
 	import type { CmdKey } from '@milkdown/kit/core';
-	import { api, type Note, type Tag } from '$lib/api';
+	import { api, OfflineError, type Note, type Tag } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { shortcuts, matchShortcut, type ShortcutId } from '$lib/stores/shortcuts.svelte';
 	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
@@ -26,6 +26,7 @@
 	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote } from '$lib/offlineDB';
 	import type { CachedNote } from '$lib/offlineDB';
 	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
+	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 
 	// PUBLIC_OFFLINE_NOTES_COUNT can be set at build time via the PUBLIC_ prefix env var.
 	const OFFLINE_NOTES_COUNT = Math.max(1, parseInt(
@@ -285,8 +286,10 @@
 		const db = await openOfflineDB();
 		const cached = await getAllNotes(db);
 		db.close();
-		// Apply filters using cached metadata
-		let filtered = cached;
+		// Apply filters using cached metadata. Notes deleted or archived
+		// offline are already gone from the user's point of view — hide them
+		// while their replay is still pending.
+		let filtered = cached.filter(n => !n.deleted_offline && !n.archived_offline);
 		if (starredOnly) filtered = filtered.filter(n => n.starred);
 		if (activeTagId !== null) filtered = filtered.filter(n => n.tags.some(t => t.id === activeTagId));
 		if (search) {
@@ -302,6 +305,32 @@
 				return new Date(b.local_updated_at).getTime() - new Date(a.local_updated_at).getTime();
 			})
 			.map(cachedToNote);
+	}
+
+	/**
+	 * Offline fallback for the tags panel: rebuild the tag list (with counts)
+	 * from the tags cached on each offline note, since /api/tags is
+	 * unreachable.
+	 */
+	async function loadTagsFromCache(): Promise<Tag[]> {
+		try {
+			const db = await openOfflineDB();
+			const cached = await getAllNotes(db);
+			db.close();
+			const byId = new Map<number, Tag>();
+			// Match loadFromCache: notes deleted/archived offline are gone
+			// from the user's point of view — their tags shouldn't count.
+			for (const note of cached.filter((n) => !n.deleted_offline && !n.archived_offline)) {
+				for (const t of note.tags) {
+					const existing = byId.get(t.id);
+					if (existing) existing.note_count++;
+					else byId.set(t.id, { id: t.id, name: t.name, note_count: 1 });
+				}
+			}
+			return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+		} catch {
+			return [];
+		}
 	}
 
 	async function cacheNotesForOffline(serverNotes: Note[]): Promise<void> {
@@ -321,7 +350,9 @@
 		for (const note of serverNotes) {
 			if (!toKeep.has(note.id)) continue;
 			const existing = await getNote(db, note.id);
-			if (existing?.is_dirty) continue; // don't overwrite unsync'd local changes
+			// Don't overwrite unsync'd local changes, pending flag toggles, or
+			// pending delete/archive replays
+			if (existing?.is_dirty || existing?.flags_dirty || existing?.deleted_offline || existing?.archived_offline) continue;
 			// Fetch tags for this note so they're available offline
 			const noteTags = await api.tags.listForNote(note.id).catch(() => existing?.tags ?? []);
 			await upsertNote(db, {
@@ -339,10 +370,11 @@
 			});
 		}
 
-		// Evict notes no longer in the keep-set (unless dirty / new)
+		// Evict notes no longer in the keep-set (unless dirty / new / queued
+		// for a delete or archive replay)
 		const allCached = await getAllNotes(db);
 		for (const c of allCached) {
-			if (!toKeep.has(c.id) && !c.is_dirty && !c.is_new) {
+			if (!toKeep.has(c.id) && !c.is_dirty && !c.flags_dirty && !c.is_new && !c.deleted_offline && !c.archived_offline) {
 				await deleteOfflineNote(db, c.id);
 			}
 		}
@@ -365,21 +397,32 @@
 		const cached = await getAllNotes(db);
 		db.close();
 
+		// Server notes deleted or archived offline stay hidden until the
+		// pending replay lands — otherwise they'd pop back into the list the
+		// moment the connection returns, then vanish again after the sync.
+		const hiddenIds = new Set<number>();
 		// Overlay dirty (but not new) local content onto matching server notes
 		const dirtyById = new Map<number, CachedNote>();
 		for (const c of cached) {
-			if (c.is_dirty && !c.is_new) dirtyById.set(c.id, c);
+			if (c.deleted_offline || c.archived_offline) hiddenIds.add(c.id);
+			else if ((c.is_dirty || c.flags_dirty) && !c.is_new) dirtyById.set(c.id, c);
 		}
-		const merged: Note[] = serverNotes.map((n) => {
-			const d = dirtyById.get(n.id);
-			if (!d) return n;
-			return { ...n, title: d.title, body: d.body, updated_at: d.local_updated_at };
-		});
+		const merged: Note[] = serverNotes
+			.filter((n) => !hiddenIds.has(n.id))
+			.map((n) => {
+				const d = dirtyById.get(n.id);
+				if (!d) return n;
+				const flags = d.flags_dirty
+					? { starred: d.starred, pinned: d.pinned, locked: d.locked ?? n.locked }
+					: {};
+				if (!d.is_dirty) return { ...n, ...flags };
+				return { ...n, ...flags, title: d.title, body: d.body, updated_at: d.local_updated_at };
+			});
 
 		// Include offline-created notes (not yet on the server) — apply the
 		// same filters the server query applies so the list stays consistent.
 		for (const c of cached) {
-			if (!c.is_new) continue;
+			if (!c.is_new || c.deleted_offline || c.archived_offline) continue;
 			if (starredOnly && !c.starred) continue;
 			if (activeTagId !== null && !c.tags.some((t) => t.id === activeTagId)) continue;
 			if (search) {
@@ -407,11 +450,23 @@
 
 	async function loadNotes() {
 		const version = ++listVersion;
+
+		// Paint whatever IndexedDB has *immediately* — don't make the first
+		// render wait for a network round-trip (or, worse, for the network to
+		// time out when offline). The server response replaces this paint if
+		// and when it lands; the `serverApplied` flag stops a slow cache read
+		// from clobbering an already-applied fresher server list.
+		let serverApplied = false;
+		const cachePaint = loadFromCache()
+			.then((cached) => {
+				if (version !== listVersion || serverApplied) return;
+				notes = cached;
+			})
+			.catch(() => {});
+
 		if (!navigator.onLine) {
 			isOnline = false;
-			const cached = await loadFromCache();
-			if (version !== listVersion) return;
-			notes = cached;
+			await cachePaint;
 			return;
 		}
 		const params: { search?: string; tag?: number; starred?: boolean } = {};
@@ -423,6 +478,7 @@
 			isOnline = true;
 			const merged = await mergeServerWithCache(fetched);
 			if (version !== listVersion) return; // stale — newer load/mutation won
+			serverApplied = true;
 			notes = merged;
 			// Cache top-N when no filter is active (we want the canonical recent list)
 			if (!search && activeTagId === null && !starredOnly) {
@@ -431,9 +487,7 @@
 		} catch {
 			// Network failed despite navigator.onLine — server is unreachable.
 			isOnline = false;
-			const cached = await loadFromCache();
-			if (version !== listVersion) return;
-			notes = cached;
+			await cachePaint;
 		}
 	}
 
@@ -487,7 +541,7 @@
 		syncStatus = stillDirty.length > 0 ? 'unsynced' : 'synced';
 
 		lastSyncAt = new Date();
-		lastSyncSummary = `pushed ${result.pushed.created + result.pushed.updated}, conflicts ${result.conflicts}, errors ${result.errors}`;
+		lastSyncSummary = `pushed ${result.pushed.created + result.pushed.updated + result.pushed.deleted + result.pushed.archived}, conflicts ${result.conflicts}, errors ${result.errors}`;
 	}
 
 	/** Manual sync — wired to the sync-status indicator in the sidebar footer. */
@@ -592,9 +646,12 @@
 
 		// Fire async init as a void IIFE so the cleanup function can be returned synchronously.
 		void (async () => {
+			// Sync-status reads only IndexedDB — run it alongside the list load
+			// so the indicator is correct on first paint instead of defaulting
+			// to "synced" until the (possibly slow) network settles.
+			void refreshSyncStatus();
 			await loadNotes();
-			await refreshSyncStatus();
-			allTags = await api.tags.list().catch(() => []);
+			allTags = await api.tags.list().catch(() => loadTagsFromCache());
 			// On mobile the list is the home screen; we never auto-open the editor.
 			// On desktop, pre-select the first note so the editor pane isn't empty.
 			if (!isMobile() && notes.length > 0 && selectedId === null) {
@@ -734,7 +791,17 @@
 		showTagPopover = false;
 		showNoteMenu = false;
 		showHeadingsMenu = false;
-		noteTags = await api.tags.listForNote(id);
+		try {
+			noteTags = await api.tags.listForNote(id);
+		} catch (err) {
+			// Offline — use the tags cached with the note, if any. A genuine
+			// server rejection still surfaces.
+			if (!(err instanceof OfflineError)) throw err;
+			const db = await openOfflineDB();
+			const cached = await getNote(db, id);
+			db.close();
+			noteTags = (cached?.tags ?? []).map((t) => ({ ...t, note_count: 0 }));
+		}
 	}
 
 	async function duplicateNote(id: number) {
@@ -765,7 +832,7 @@
 		await loadNotes();
 		if (notes.length > 0 && !notes.find(n => n.id === selectedId)) {
 			selectedId = notes[0].id;
-			noteTags = await api.tags.listForNote(notes[0].id);
+			noteTags = await api.tags.listForNote(notes[0].id).catch(() => []);
 		} else if (notes.length === 0) {
 			selectedId = null;
 			noteTags = [];
@@ -924,14 +991,46 @@
 		}, 800);
 	}
 
+	/**
+	 * Offline fallback shared by the star/pin/lock toggles: flip the flag
+	 * locally, record the desired state in IndexedDB for sync to reconcile
+	 * on reconnect, and return the toggled note for the caller's list
+	 * update. A genuine server rejection still surfaces.
+	 */
+	async function toggleFlagOffline(
+		err: unknown,
+		id: number,
+		flag: 'starred' | 'pinned' | 'locked'
+	): Promise<Note | null> {
+		if (!(err instanceof OfflineError)) throw err;
+		const note = notes.find((n) => n.id === id);
+		if (!note) return null;
+		const toggled = { ...note, [flag]: !note[flag] };
+		await markNoteFlagsOffline(toggled, flag);
+		syncStatus = 'unsynced';
+		return toggled;
+	}
+
 	async function toggleStar(id: number) {
-		const updated = await api.notes.toggleStar(id);
+		let updated: Note | null;
+		try {
+			updated = await api.notes.toggleStar(id);
+		} catch (err) {
+			updated = await toggleFlagOffline(err, id, 'starred');
+		}
+		if (!updated) return;
 		listVersion++; // invalidate in-flight list loads carrying the old state
 		notes = notes.map((n) => (n.id === updated.id ? updated : n));
 	}
 
 	async function togglePin(id: number) {
-		const updated = await api.notes.togglePin(id);
+		let updated: Note | null;
+		try {
+			updated = await api.notes.togglePin(id);
+		} catch (err) {
+			updated = await toggleFlagOffline(err, id, 'pinned');
+		}
+		if (!updated) return;
 		listVersion++; // invalidate in-flight list loads carrying the old state
 		const rest = notes.filter((n) => n.id !== updated.id);
 		const full = [updated, ...rest];
@@ -939,27 +1038,64 @@
 	}
 
 	async function toggleLock(id: number) {
-		const updated = await api.notes.toggleLock(id);
+		let updated: Note | null;
+		try {
+			updated = await api.notes.toggleLock(id);
+		} catch (err) {
+			updated = await toggleFlagOffline(err, id, 'locked');
+		}
+		if (!updated) return;
 		listVersion++; // invalidate in-flight list loads carrying the old state
 		notes = notes.map((n) => (n.id === updated.id ? updated : n));
 	}
 
-	async function archiveNote(id: number) {
-		await api.notes.archive(id);
-		listVersion++; // invalidate any in-flight list load fetched pre-archive
+	/** Remove a note from the visible list after an archive/delete. */
+	function removeNoteFromList(id: number) {
+		listVersion++; // invalidate any in-flight list load fetched pre-removal
 		notes = notes.filter((n) => n.id !== id);
 		if (selectedId === id) {
 			selectedId = notes.length > 0 ? notes[0].id : null;
 		}
 	}
 
-	async function deleteNote(id: number) {
-		await api.notes.delete(id);
-		listVersion++; // invalidate any in-flight list load fetched pre-delete
-		notes = notes.filter((n) => n.id !== id);
-		if (selectedId === id) {
-			selectedId = notes.length > 0 ? notes[0].id : null;
+	async function archiveNote(id: number) {
+		const note = notes.find((n) => n.id === id);
+		if (navigator.onLine) {
+			try {
+				await api.notes.archive(id);
+				removeNoteFromList(id);
+				return;
+			} catch (err) {
+				// Only fall through to the offline queue on a connectivity
+				// failure — a genuine server rejection must not hide a note
+				// that still exists server-side.
+				if (!(err instanceof OfflineError)) throw err;
+			}
 		}
+		// Offline — apply optimistically and queue the archive for replay.
+		if (!note) return;
+		await markNoteArchivedOffline(note);
+		syncStatus = 'unsynced';
+		removeNoteFromList(id);
+	}
+
+	async function deleteNote(id: number) {
+		const note = notes.find((n) => n.id === id);
+		if (navigator.onLine) {
+			try {
+				await api.notes.delete(id);
+				removeNoteFromList(id);
+				return;
+			} catch (err) {
+				// See archiveNote — only queue on connectivity failure.
+				if (!(err instanceof OfflineError)) throw err;
+			}
+		}
+		// Offline — apply optimistically and queue the delete for replay.
+		if (!note) return;
+		await markNoteDeletedOffline(note);
+		syncStatus = 'unsynced';
+		removeNoteFromList(id);
 	}
 
 	async function handleLogout() {
@@ -971,7 +1107,7 @@
 		await loadNotes();
 		if (notes.length > 0 && !notes.find((n) => n.id === selectedId)) {
 			selectedId = notes[0].id;
-			noteTags = await api.tags.listForNote(notes[0].id);
+			noteTags = await api.tags.listForNote(notes[0].id).catch(() => []);
 		}
 	}
 

@@ -1,4 +1,41 @@
 import { openOfflineDB, deleteOfflineDB, getOfflineOwner, setOfflineOwner, clearAllNotes } from '$lib/offlineDB';
+import type { User } from '$lib/api';
+
+// localStorage key holding the last authenticated user, so the PWA can
+// restore the session identity when it starts offline (the /api/auth/me
+// round-trip is impossible then). Cleared on logout with the rest of the
+// local footprint.
+const SESSION_USER_KEY = 'crapnote:session-user';
+
+/** Remembers the authenticated user for offline session restore. */
+export function persistSessionUser(user: User): void {
+	try {
+		localStorage.setItem(SESSION_USER_KEY, JSON.stringify(user));
+	} catch {
+		// Storage full / unavailable — offline restore just won't work.
+	}
+}
+
+/** Returns the last authenticated user, or null if none was persisted. */
+export function readSessionUser(): User | null {
+	try {
+		const raw = localStorage.getItem(SESSION_USER_KEY);
+		if (!raw) return null;
+		const parsed = JSON.parse(raw) as User;
+		return typeof parsed?.id === 'number' ? parsed : null;
+	} catch {
+		return null;
+	}
+}
+
+/** Forgets the persisted user (logout, or server rejected the session). */
+export function clearSessionUser(): void {
+	try {
+		localStorage.removeItem(SESSION_USER_KEY);
+	} catch {
+		// Nothing to clear if storage is unavailable.
+	}
+}
 
 /**
  * Wipes every locally persisted trace of the authenticated user: the
@@ -23,6 +60,7 @@ export async function clearLocalData(): Promise<void> {
 	} catch {
 		// Same: if IDB is unavailable there is nothing to clear.
 	}
+	clearSessionUser();
 }
 
 /**
