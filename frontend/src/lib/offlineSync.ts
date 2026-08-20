@@ -1,5 +1,5 @@
 import { api, ApiError, OfflineError } from '$lib/api';
-import { openOfflineDB, getDirtyNotes, getNote, upsertNote, deleteNote, getOfflineOwner, setOfflineOwner } from '$lib/offlineDB';
+import { openOfflineDB, getDirtyNotes, upsertNote, deleteNote, getOfflineOwner, setOfflineOwner } from '$lib/offlineDB';
 import type { CachedNote } from '$lib/offlineDB';
 
 export interface IdMapping {
