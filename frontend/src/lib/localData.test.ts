@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import 'fake-indexeddb/auto';
-import { clearLocalData, ensureOfflineOwner } from './localData';
+import {
+	clearLocalData,
+	ensureOfflineOwner,
+	persistSessionUser,
+	readSessionUser,
+	clearSessionUser,
+} from './localData';
 import { openOfflineDB, upsertNote, getAllNotes, getOfflineOwner, setOfflineOwner, deleteOfflineDB } from './offlineDB';
 
 const makeNote = (id: number) => ({
@@ -62,6 +68,33 @@ describe('clearLocalData', () => {
 	it('does not throw when Cache Storage is unavailable', async () => {
 		vi.stubGlobal('caches', undefined);
 		await expect(clearLocalData()).resolves.toBeUndefined();
+	});
+
+	it('forgets the persisted session user', async () => {
+		stubCaches([]);
+		persistSessionUser({ id: 5, username: 'alice', is_admin: false, created_at: '' });
+
+		await clearLocalData();
+
+		expect(readSessionUser()).toBeNull();
+	});
+});
+
+describe('session user persistence', () => {
+	it('round-trips the persisted user', () => {
+		const user = { id: 5, username: 'alice', is_admin: true, created_at: '2024-01-01T00:00:00Z' };
+		persistSessionUser(user);
+		expect(readSessionUser()).toEqual(user);
+	});
+
+	it('returns null when nothing was persisted', () => {
+		clearSessionUser();
+		expect(readSessionUser()).toBeNull();
+	});
+
+	it('returns null for corrupt stored data', () => {
+		localStorage.setItem('crapnote:session-user', 'not json');
+		expect(readSessionUser()).toBeNull();
 	});
 });
 

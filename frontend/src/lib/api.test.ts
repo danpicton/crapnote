@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { api, ApiError } from './api';
+import { api, ApiError, OfflineError } from './api';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
 function ok(data: unknown, status = 200) {
-	return { ok: true, status, json: () => Promise.resolve(data), text: () => Promise.resolve('') };
+	return { ok: true, status, headers: new Headers(), json: () => Promise.resolve(data), text: () => Promise.resolve('') };
 }
-function fail(status: number, body = 'error') {
-	return { ok: false, status, json: () => Promise.reject(new Error()), text: () => Promise.resolve(body) };
+function fail(status: number, body = 'error', headers: Record<string, string> = {}) {
+	return { ok: false, status, headers: new Headers(headers), json: () => Promise.reject(new Error()), text: () => Promise.resolve(body) };
 }
 
 beforeEach(() => mockFetch.mockReset());
@@ -102,5 +102,30 @@ describe('ApiError', () => {
 		expect(err.status).toBe(404);
 		expect(err.message).toBe('not found');
 		expect(err).toBeInstanceOf(Error);
+	});
+});
+
+describe('OfflineError', () => {
+	it('is thrown when fetch itself rejects (hard network failure)', async () => {
+		mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+		await expect(api.notes.list()).rejects.toBeInstanceOf(OfflineError);
+	});
+
+	it('is thrown when the service worker answers with its marked offline 503', async () => {
+		mockFetch.mockResolvedValueOnce(fail(503, '{"error":"offline"}', { 'X-Crapnote-Offline': '1' }));
+		await expect(api.notes.list()).rejects.toBeInstanceOf(OfflineError);
+	});
+
+	it('a genuine server 503 without the marker stays a plain ApiError', async () => {
+		mockFetch.mockResolvedValueOnce(fail(503, 'upstream down'));
+		const err = await api.notes.list().catch((e) => e);
+		expect(err).toBeInstanceOf(ApiError);
+		expect(err).not.toBeInstanceOf(OfflineError);
+	});
+
+	it('is an ApiError subclass with status 503', () => {
+		const err = new OfflineError();
+		expect(err).toBeInstanceOf(ApiError);
+		expect(err.status).toBe(503);
 	});
 });

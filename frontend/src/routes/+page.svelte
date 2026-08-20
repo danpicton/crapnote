@@ -304,6 +304,30 @@
 			.map(cachedToNote);
 	}
 
+	/**
+	 * Offline fallback for the tags panel: rebuild the tag list (with counts)
+	 * from the tags cached on each offline note, since /api/tags is
+	 * unreachable.
+	 */
+	async function loadTagsFromCache(): Promise<Tag[]> {
+		try {
+			const db = await openOfflineDB();
+			const cached = await getAllNotes(db);
+			db.close();
+			const byId = new Map<number, Tag>();
+			for (const note of cached) {
+				for (const t of note.tags) {
+					const existing = byId.get(t.id);
+					if (existing) existing.note_count++;
+					else byId.set(t.id, { id: t.id, name: t.name, note_count: 1 });
+				}
+			}
+			return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
+		} catch {
+			return [];
+		}
+	}
+
 	async function cacheNotesForOffline(serverNotes: Note[]): Promise<void> {
 		const db = await openOfflineDB();
 
@@ -407,11 +431,23 @@
 
 	async function loadNotes() {
 		const version = ++listVersion;
+
+		// Paint whatever IndexedDB has *immediately* — don't make the first
+		// render wait for a network round-trip (or, worse, for the network to
+		// time out when offline). The server response replaces this paint if
+		// and when it lands; the `serverApplied` flag stops a slow cache read
+		// from clobbering an already-applied fresher server list.
+		let serverApplied = false;
+		const cachePaint = loadFromCache()
+			.then((cached) => {
+				if (version !== listVersion || serverApplied) return;
+				notes = cached;
+			})
+			.catch(() => {});
+
 		if (!navigator.onLine) {
 			isOnline = false;
-			const cached = await loadFromCache();
-			if (version !== listVersion) return;
-			notes = cached;
+			await cachePaint;
 			return;
 		}
 		const params: { search?: string; tag?: number; starred?: boolean } = {};
@@ -423,6 +459,7 @@
 			isOnline = true;
 			const merged = await mergeServerWithCache(fetched);
 			if (version !== listVersion) return; // stale — newer load/mutation won
+			serverApplied = true;
 			notes = merged;
 			// Cache top-N when no filter is active (we want the canonical recent list)
 			if (!search && activeTagId === null && !starredOnly) {
@@ -431,9 +468,7 @@
 		} catch {
 			// Network failed despite navigator.onLine — server is unreachable.
 			isOnline = false;
-			const cached = await loadFromCache();
-			if (version !== listVersion) return;
-			notes = cached;
+			await cachePaint;
 		}
 	}
 
@@ -592,9 +627,12 @@
 
 		// Fire async init as a void IIFE so the cleanup function can be returned synchronously.
 		void (async () => {
+			// Sync-status reads only IndexedDB — run it alongside the list load
+			// so the indicator is correct on first paint instead of defaulting
+			// to "synced" until the (possibly slow) network settles.
+			void refreshSyncStatus();
 			await loadNotes();
-			await refreshSyncStatus();
-			allTags = await api.tags.list().catch(() => []);
+			allTags = await api.tags.list().catch(() => loadTagsFromCache());
 			// On mobile the list is the home screen; we never auto-open the editor.
 			// On desktop, pre-select the first note so the editor pane isn't empty.
 			if (!isMobile() && notes.length > 0 && selectedId === null) {
@@ -734,7 +772,15 @@
 		showTagPopover = false;
 		showNoteMenu = false;
 		showHeadingsMenu = false;
-		noteTags = await api.tags.listForNote(id);
+		try {
+			noteTags = await api.tags.listForNote(id);
+		} catch {
+			// Offline — use the tags cached with the note, if any.
+			const db = await openOfflineDB();
+			const cached = await getNote(db, id);
+			db.close();
+			noteTags = (cached?.tags ?? []).map((t) => ({ ...t, note_count: 0 }));
+		}
 	}
 
 	async function duplicateNote(id: number) {
@@ -765,7 +811,7 @@
 		await loadNotes();
 		if (notes.length > 0 && !notes.find(n => n.id === selectedId)) {
 			selectedId = notes[0].id;
-			noteTags = await api.tags.listForNote(notes[0].id);
+			noteTags = await api.tags.listForNote(notes[0].id).catch(() => []);
 		} else if (notes.length === 0) {
 			selectedId = null;
 			noteTags = [];
@@ -971,7 +1017,7 @@
 		await loadNotes();
 		if (notes.length > 0 && !notes.find((n) => n.id === selectedId)) {
 			selectedId = notes[0].id;
-			noteTags = await api.tags.listForNote(notes[0].id);
+			noteTags = await api.tags.listForNote(notes[0].id).catch(() => []);
 		}
 	}
 

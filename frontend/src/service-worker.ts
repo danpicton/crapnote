@@ -9,12 +9,28 @@
 //
 // Bumping the SvelteKit `version` (or any code change that produces a new
 // build hash) automatically invalidates the cache via the version-keyed name.
+//
+// Strategy summary:
+//   - Navigations: cached shell served instantly, revalidated in the
+//     background. The app boots at the same speed online and offline.
+//   - /api/images/*: cache-first (image blobs are immutable per id).
+//   - All other /api/*: network only, NEVER served from cache. Stale API
+//     JSON served on network failure used to make the app believe it was
+//     online and fully synced while in airplane mode. Offline data lives in
+//     IndexedDB (see offlineDB.ts); the SW's only job for the API is to turn
+//     a network failure into a recognisable 503 carrying the
+//     `X-Crapnote-Offline: 1` marker header, which the API client converts
+//     into an OfflineError.
 
 import { build, files, version, prerendered } from '$service-worker';
 
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
 const CACHE_NAME = `crapnote-${version}`;
+
+/** Marker header the API client uses to distinguish "you are offline" from a
+ * genuine server-side 503. Keep in sync with frontend/src/lib/api.ts. */
+const OFFLINE_HEADER = 'X-Crapnote-Offline';
 
 // Assets that come bundled with the build — safe to cache aggressively.
 const PRECACHE = [
@@ -71,23 +87,31 @@ sw.addEventListener('fetch', (event) => {
 	// Only handle same-origin requests; let everything else pass through.
 	if (url.origin !== sw.location.origin) return;
 
-	// Don't try to cache non-GET requests at all (the queueing path is below).
 	if (url.pathname.startsWith('/api/')) {
-		// Network-first for reads; bare network for writes (no SW-level queue —
-		// the frontend manages its own offline cache + dirty-note replay via
-		// IndexedDB, and the previous queue produced 202s the API client could
-		// not distinguish from a real success, corrupting note state).
-		const isWrite = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
-		event.respondWith(isWrite ? networkOnly(request) : networkFirst(request));
+		// Image blobs are immutable per id — cache-first so note images keep
+		// rendering offline and don't refetch on every list render.
+		if (request.method === 'GET' && url.pathname.startsWith('/api/images/')) {
+			event.respondWith(cacheFirst(request));
+			return;
+		}
+		// Everything else on the API: network only, reads and writes alike.
+		// No SW-level cache or queue — the frontend owns offline note state in
+		// IndexedDB, and serving stale JSON here made the app misreport
+		// "synced" while offline.
+		event.respondWith(networkOnly(request));
 		return;
 	}
 
-	// Top-level HTML loads (link clicks, soft refresh, address bar). Network-
-	// first so new deploys aren't masked by a stale shell that references
-	// `_app/immutable/*` hashes the server no longer has. The cached `/` is
-	// only used as the offline fallback.
+	// Top-level HTML loads (link clicks, cold PWA start, address bar).
+	// Serve the cached shell instantly and revalidate it in the background:
+	// offline starts are immediate instead of waiting for the network to
+	// fail, and online starts don't pay a network round-trip either. New
+	// deploys are picked up two ways: the background revalidation refreshes
+	// the cached shell for the *next* navigation, and the browser's own SW
+	// update check installs the new version-keyed SW (fresh cache) shortly
+	// after a deploy anyway.
 	if (request.mode === 'navigate') {
-		event.respondWith(navigationNetworkFirst(request));
+		event.respondWith(navigationStaleWhileRevalidate(event, request));
 		return;
 	}
 
@@ -97,41 +121,36 @@ sw.addEventListener('fetch', (event) => {
 
 // ─── Strategy helpers ────────────────────────────────────────────────────────
 
-async function navigationNetworkFirst(request: Request): Promise<Response> {
-	try {
-		const response = await fetch(request);
-		if (response.ok) {
-			const cache = await caches.open(CACHE_NAME);
-			// Always key the shell under '/' so offline fallback is predictable
-			// regardless of which path the user navigated to.
-			cache.put('/', response.clone());
-		}
-		return response;
-	} catch {
-		const cached = (await caches.match(request)) ?? (await caches.match('/'));
-		if (cached) return cached;
-		return new Response('Offline', { status: 503 });
-	}
-}
+async function navigationStaleWhileRevalidate(
+	event: FetchEvent,
+	request: Request,
+): Promise<Response> {
+	// The shell is always keyed under '/' (adapter-static emits one fallback
+	// index.html that boots every route), so any navigation can use it.
+	const cached = (await caches.match(request)) ?? (await caches.match('/'));
 
-async function networkFirst(request: Request): Promise<Response> {
-	try {
-		const response = await fetch(request);
-		if (response.ok) {
-			const cache = await caches.open(CACHE_NAME);
-			cache.put(request, response.clone());
+	const revalidate = (async () => {
+		try {
+			const response = await fetch(request);
+			if (response.ok) {
+				const cache = await caches.open(CACHE_NAME);
+				await cache.put('/', response.clone());
+			}
+			return response;
+		} catch {
+			return null;
 		}
-		return response;
-	} catch {
-		const cached = await caches.match(request);
-		return (
-			cached ??
-			new Response('{"error":"offline"}', {
-				status: 503,
-				headers: { 'Content-Type': 'application/json' },
-			})
-		);
+	})();
+
+	if (cached) {
+		// Keep the SW alive until the background refresh settles.
+		event.waitUntil(revalidate);
+		return cached;
 	}
+
+	// Nothing cached yet (first ever visit) — fall back to the network result.
+	const fresh = await revalidate;
+	return fresh ?? new Response('Offline', { status: 503 });
 }
 
 async function cacheFirst(request: Request): Promise<Response> {
@@ -145,10 +164,6 @@ async function cacheFirst(request: Request): Promise<Response> {
 		}
 		return response;
 	} catch {
-		if (request.mode === 'navigate') {
-			const shell = await caches.match('/');
-			if (shell) return shell;
-		}
 		return new Response('Offline', { status: 503 });
 	}
 }
@@ -157,11 +172,16 @@ async function networkOnly(request: Request): Promise<Response> {
 	try {
 		return await fetch(request);
 	} catch {
-		// No SW-level queueing: surface a 503 so the API client throws and the
-		// caller's own offline-cache fallback (IndexedDB dirty notes) runs.
+		// No SW-level queueing or cache fallback: surface a marked 503 so the
+		// API client throws OfflineError and the caller's own offline handling
+		// (IndexedDB cache, dirty-note replay) takes over knowing it is
+		// genuinely offline.
 		return new Response('{"error":"offline"}', {
 			status: 503,
-			headers: { 'Content-Type': 'application/json' },
+			headers: {
+				'Content-Type': 'application/json',
+				[OFFLINE_HEADER]: '1',
+			},
 		});
 	}
 }

@@ -529,6 +529,28 @@ describe('Offline mode', () => {
 		expect(api.notes.list).not.toHaveBeenCalled();
 	});
 
+	// Cold PWA start in airplane mode used to leave the list empty until the
+	// network attempt failed. The cached notes must paint immediately, before
+	// the (slow or doomed) network request settles.
+	it('paints cached notes immediately while the network list is still pending', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		let resolveList!: (notes: ReturnType<typeof mockNote>[]) => void;
+		vi.mocked(api.notes.list).mockReturnValue(new Promise((r) => { resolveList = r; }));
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ id: 1, title: 'Instant Cached Note', body: '', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			  is_dirty: false, is_new: false },
+		]);
+
+		render(Page);
+		// Cached note appears while api.notes.list is still pending
+		await waitFor(() => expect(screen.getByText('Instant Cached Note')).toBeInTheDocument());
+
+		// When the server finally answers, its list replaces the cached paint
+		resolveList([mockNote({ id: 9, title: 'Fresh Server Note' })]);
+		await waitFor(() => expect(screen.getByText('Fresh Server Note')).toBeInTheDocument());
+	});
+
 	it('caches notes to IndexedDB after a successful online load', async () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: true });
 		vi.mocked(api.notes.list).mockResolvedValue([
