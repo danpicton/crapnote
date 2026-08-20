@@ -10,6 +10,8 @@ export interface CachedNote {
 	local_updated_at: string;   // ISO string of last local modification
 	is_dirty: boolean;          // has unsynced local changes
 	is_new: boolean;            // created offline; no server ID yet
+	deleted_offline?: boolean;  // deleted while offline; replay DELETE on sync
+	archived_offline?: boolean; // archived while offline; replay archive on sync
 }
 
 const DB_NAME = 'crapnote-notes-v2';

@@ -8,6 +8,8 @@ vi.mock('$lib/api', () => ({
 			create: vi.fn(),
 			get: vi.fn(),
 			update: vi.fn(),
+			delete: vi.fn(),
+			archive: vi.fn(),
 		},
 	},
 }));
@@ -385,5 +387,97 @@ describe('syncOfflineChanges — ownership guard', () => {
 
 		expect(result.skipped).toBe(false);
 		expect(api.notes.create).toHaveBeenCalled();
+	});
+});
+
+describe('syncOfflineChanges — offline deletes', () => {
+	it('replays an offline delete of a server note and drops the cache entry', async () => {
+		const note = fakeCachedNote({ id: 7, deleted_offline: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.delete).mockResolvedValue(undefined);
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.delete).toHaveBeenCalledWith(7);
+		expect(offlineDB.deleteNote).toHaveBeenCalledWith(fakeDB, 7);
+		expect(result.pushed.deleted).toBe(1);
+		expect(result.errors).toBe(0);
+	});
+
+	it('discards an offline-created note deleted before it ever synced (no API call)', async () => {
+		const note = fakeCachedNote({ id: -500, is_new: true, deleted_offline: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.delete).not.toHaveBeenCalled();
+		expect(offlineDB.deleteNote).toHaveBeenCalledWith(fakeDB, -500);
+		expect(result.pushed.deleted).toBe(1);
+	});
+
+	it('delete wins when both deleted_offline and archived_offline are set', async () => {
+		const note = fakeCachedNote({ id: 7, deleted_offline: true, archived_offline: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.delete).mockResolvedValue(undefined);
+
+		await syncOfflineChanges('online', 1);
+
+		expect(api.notes.delete).toHaveBeenCalledWith(7);
+		expect(api.notes.archive).not.toHaveBeenCalled();
+	});
+
+	it('keeps the flagged note for retry when the delete call fails', async () => {
+		const note = fakeCachedNote({ id: 7, deleted_offline: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.delete).mockRejectedValue(new Error('network'));
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(offlineDB.deleteNote).not.toHaveBeenCalled();
+		expect(result.errors).toBe(1);
+		expect(result.pushed.deleted).toBe(0);
+	});
+});
+
+describe('syncOfflineChanges — offline archives', () => {
+	it('pushes local content then archives a server note, dropping the cache entry', async () => {
+		const note = fakeCachedNote({ id: 8, title: 'Edited', body: 'Offline edit', archived_offline: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.update).mockResolvedValue(fakeServerNote({ id: 8 }));
+		vi.mocked(api.notes.archive).mockResolvedValue(undefined);
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.update).toHaveBeenCalledWith(8, { title: 'Edited', body: 'Offline edit' });
+		expect(api.notes.archive).toHaveBeenCalledWith(8);
+		expect(offlineDB.deleteNote).toHaveBeenCalledWith(fakeDB, 8);
+		expect(result.pushed.archived).toBe(1);
+	});
+
+	it('creates then archives an offline-created note that was archived before syncing', async () => {
+		const note = fakeCachedNote({ id: -600, is_new: true, title: 'New', body: 'B', archived_offline: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 42, title: 'New', body: 'B' }));
+		vi.mocked(api.notes.archive).mockResolvedValue(undefined);
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.create).toHaveBeenCalledWith('New', 'B');
+		expect(api.notes.archive).toHaveBeenCalledWith(42);
+		expect(offlineDB.deleteNote).toHaveBeenCalledWith(fakeDB, -600);
+		expect(result.pushed.archived).toBe(1);
+	});
+
+	it('keeps the flagged note for retry when the archive call fails', async () => {
+		const note = fakeCachedNote({ id: 8, archived_offline: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.update).mockResolvedValue(fakeServerNote({ id: 8 }));
+		vi.mocked(api.notes.archive).mockRejectedValue(new Error('network'));
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(offlineDB.deleteNote).not.toHaveBeenCalled();
+		expect(result.errors).toBe(1);
+		expect(result.pushed.archived).toBe(0);
 	});
 });

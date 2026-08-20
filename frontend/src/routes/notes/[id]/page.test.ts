@@ -54,7 +54,16 @@ vi.mock('$app/stores', async () => {
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', () => {
+	class ApiError extends Error {
+		constructor(public readonly status: number, message: string) { super(message); this.name = 'ApiError'; }
+	}
+	class OfflineError extends ApiError {
+		constructor(message = 'offline') { super(503, message); this.name = 'OfflineError'; }
+	}
+	return {
+	ApiError,
+	OfflineError,
 	api: {
 		notes: { get: vi.fn(), update: vi.fn(), toggleLock: vi.fn() },
 		tags: {
@@ -65,7 +74,8 @@ vi.mock('$lib/api', () => ({
 			create: vi.fn(),
 		},
 	},
-}));
+};
+});
 
 vi.mock('$lib/offlineDB', () => ({
 	openOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),

@@ -99,3 +99,16 @@ describe('Locked archived notes', () => {
 		await waitFor(() => expect(api.notes.delete).toHaveBeenCalledWith(1));
 	});
 });
+
+describe('Archive page offline', () => {
+	it('shows an offline notice instead of spinning when the list fetch fails', async () => {
+		vi.mocked(api.notes.listArchived).mockRejectedValue(new Error('offline'));
+
+		render(ArchivePage);
+
+		await waitFor(() =>
+			expect(screen.getByText(/aren't available offline/i)).toBeInTheDocument()
+		);
+		expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
+	});
+});

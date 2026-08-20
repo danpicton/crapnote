@@ -17,9 +17,10 @@
 	import { undoCommand, redoCommand } from '@milkdown/kit/plugin/history';
 	import { toggleUnderlineCommand } from '$lib/milkdown/underline';
 	import type { CmdKey } from '@milkdown/kit/core';
-	import { api, type Note, type Tag } from '$lib/api';
+	import { api, OfflineError, type Note, type Tag } from '$lib/api';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
 	import { openOfflineDB, getNote as getOfflineNote, upsertNote, type CachedNote } from '$lib/offlineDB';
+	import { markNoteDeletedOffline, markNoteArchivedOffline } from '$lib/offlineActions';
 	import {
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Link,
@@ -51,34 +52,68 @@
 
 	async function mobToggleStar() {
 		if (!note) return;
-		const updated = await api.notes.toggleStar(noteId);
-		note = updated;
+		try {
+			note = await api.notes.toggleStar(noteId);
+		} catch {
+			// Offline — star/pin/lock replay isn't queued (the API only offers
+			// toggle endpoints, so replaying them blind risks double-flips).
+			// Leave the state as-is rather than lying about it.
+		}
 	}
 
 	async function mobTogglePin() {
 		if (!note) return;
-		const updated = await api.notes.togglePin(noteId);
-		note = updated;
+		try {
+			note = await api.notes.togglePin(noteId);
+		} catch {
+			// Offline — see mobToggleStar.
+		}
 		showActionSheet = false;
 	}
 
 	async function toggleLock() {
 		if (!note) return;
-		const updated = await api.notes.toggleLock(noteId);
-		note = updated;
+		try {
+			note = await api.notes.toggleLock(noteId);
+		} catch {
+			// Offline — see mobToggleStar.
+		}
 		showActionSheet = false;
 	}
 
 	async function mobArchive() {
 		if (!note) return;
-		await api.notes.archive(noteId);
 		showActionSheet = false;
+		if (navigator.onLine) {
+			try {
+				await api.notes.archive(noteId);
+				goto('/');
+				return;
+			} catch (err) {
+				// Only queue on a connectivity failure — a genuine server
+				// rejection must not hide a note that still exists.
+				if (!(err instanceof OfflineError)) throw err;
+			}
+		}
+		// Offline — apply optimistically and queue the archive for replay.
+		await markNoteArchivedOffline(note);
 		goto('/');
 	}
 
 	async function mobDelete() {
 		showActionSheet = false;
-		await api.notes.delete(noteId);
+		if (navigator.onLine) {
+			try {
+				await api.notes.delete(noteId);
+				goto('/');
+				return;
+			} catch (err) {
+				// See mobArchive — only queue on connectivity failure.
+				if (!(err instanceof OfflineError)) throw err;
+			}
+		}
+		// Offline — apply optimistically and queue the delete for replay.
+		if (note) await markNoteDeletedOffline(note);
 		goto('/');
 	}
 

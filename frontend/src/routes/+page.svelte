@@ -18,7 +18,7 @@
 	import { insertImageCommand } from '$lib/milkdown/image';
 	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
 	import type { CmdKey } from '@milkdown/kit/core';
-	import { api, type Note, type Tag } from '$lib/api';
+	import { api, OfflineError, type Note, type Tag } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { shortcuts, matchShortcut, type ShortcutId } from '$lib/stores/shortcuts.svelte';
 	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
@@ -26,6 +26,7 @@
 	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote } from '$lib/offlineDB';
 	import type { CachedNote } from '$lib/offlineDB';
 	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
+	import { markNoteDeletedOffline, markNoteArchivedOffline } from '$lib/offlineActions';
 
 	// PUBLIC_OFFLINE_NOTES_COUNT can be set at build time via the PUBLIC_ prefix env var.
 	const OFFLINE_NOTES_COUNT = Math.max(1, parseInt(
@@ -285,8 +286,10 @@
 		const db = await openOfflineDB();
 		const cached = await getAllNotes(db);
 		db.close();
-		// Apply filters using cached metadata
-		let filtered = cached;
+		// Apply filters using cached metadata. Notes deleted or archived
+		// offline are already gone from the user's point of view — hide them
+		// while their replay is still pending.
+		let filtered = cached.filter(n => !n.deleted_offline && !n.archived_offline);
 		if (starredOnly) filtered = filtered.filter(n => n.starred);
 		if (activeTagId !== null) filtered = filtered.filter(n => n.tags.some(t => t.id === activeTagId));
 		if (search) {
@@ -389,21 +392,28 @@
 		const cached = await getAllNotes(db);
 		db.close();
 
+		// Server notes deleted or archived offline stay hidden until the
+		// pending replay lands — otherwise they'd pop back into the list the
+		// moment the connection returns, then vanish again after the sync.
+		const hiddenIds = new Set<number>();
 		// Overlay dirty (but not new) local content onto matching server notes
 		const dirtyById = new Map<number, CachedNote>();
 		for (const c of cached) {
-			if (c.is_dirty && !c.is_new) dirtyById.set(c.id, c);
+			if (c.deleted_offline || c.archived_offline) hiddenIds.add(c.id);
+			else if (c.is_dirty && !c.is_new) dirtyById.set(c.id, c);
 		}
-		const merged: Note[] = serverNotes.map((n) => {
-			const d = dirtyById.get(n.id);
-			if (!d) return n;
-			return { ...n, title: d.title, body: d.body, updated_at: d.local_updated_at };
-		});
+		const merged: Note[] = serverNotes
+			.filter((n) => !hiddenIds.has(n.id))
+			.map((n) => {
+				const d = dirtyById.get(n.id);
+				if (!d) return n;
+				return { ...n, title: d.title, body: d.body, updated_at: d.local_updated_at };
+			});
 
 		// Include offline-created notes (not yet on the server) — apply the
 		// same filters the server query applies so the list stays consistent.
 		for (const c of cached) {
-			if (!c.is_new) continue;
+			if (!c.is_new || c.deleted_offline || c.archived_offline) continue;
 			if (starredOnly && !c.starred) continue;
 			if (activeTagId !== null && !c.tags.some((t) => t.id === activeTagId)) continue;
 			if (search) {
@@ -522,7 +532,7 @@
 		syncStatus = stillDirty.length > 0 ? 'unsynced' : 'synced';
 
 		lastSyncAt = new Date();
-		lastSyncSummary = `pushed ${result.pushed.created + result.pushed.updated}, conflicts ${result.conflicts}, errors ${result.errors}`;
+		lastSyncSummary = `pushed ${result.pushed.created + result.pushed.updated + result.pushed.deleted + result.pushed.archived}, conflicts ${result.conflicts}, errors ${result.errors}`;
 	}
 
 	/** Manual sync — wired to the sync-status indicator in the sidebar footer. */
@@ -990,22 +1000,53 @@
 		notes = notes.map((n) => (n.id === updated.id ? updated : n));
 	}
 
-	async function archiveNote(id: number) {
-		await api.notes.archive(id);
-		listVersion++; // invalidate any in-flight list load fetched pre-archive
+	/** Remove a note from the visible list after an archive/delete. */
+	function removeNoteFromList(id: number) {
+		listVersion++; // invalidate any in-flight list load fetched pre-removal
 		notes = notes.filter((n) => n.id !== id);
 		if (selectedId === id) {
 			selectedId = notes.length > 0 ? notes[0].id : null;
 		}
 	}
 
-	async function deleteNote(id: number) {
-		await api.notes.delete(id);
-		listVersion++; // invalidate any in-flight list load fetched pre-delete
-		notes = notes.filter((n) => n.id !== id);
-		if (selectedId === id) {
-			selectedId = notes.length > 0 ? notes[0].id : null;
+	async function archiveNote(id: number) {
+		const note = notes.find((n) => n.id === id);
+		if (navigator.onLine) {
+			try {
+				await api.notes.archive(id);
+				removeNoteFromList(id);
+				return;
+			} catch (err) {
+				// Only fall through to the offline queue on a connectivity
+				// failure — a genuine server rejection must not hide a note
+				// that still exists server-side.
+				if (!(err instanceof OfflineError)) throw err;
+			}
 		}
+		// Offline — apply optimistically and queue the archive for replay.
+		if (!note) return;
+		await markNoteArchivedOffline(note);
+		syncStatus = 'unsynced';
+		removeNoteFromList(id);
+	}
+
+	async function deleteNote(id: number) {
+		const note = notes.find((n) => n.id === id);
+		if (navigator.onLine) {
+			try {
+				await api.notes.delete(id);
+				removeNoteFromList(id);
+				return;
+			} catch (err) {
+				// See archiveNote — only queue on connectivity failure.
+				if (!(err instanceof OfflineError)) throw err;
+			}
+		}
+		// Offline — apply optimistically and queue the delete for replay.
+		if (!note) return;
+		await markNoteDeletedOffline(note);
+		syncStatus = 'unsynced';
+		removeNoteFromList(id);
 	}
 
 	async function handleLogout() {

@@ -28,7 +28,16 @@ vi.mock('@milkdown/kit/plugin/history', () => ({
 	redoCommand: { key: 'Redo' },
 }));
 
-vi.mock('$lib/api', () => ({
+vi.mock('$lib/api', () => {
+	class ApiError extends Error {
+		constructor(public readonly status: number, message: string) { super(message); this.name = 'ApiError'; }
+	}
+	class OfflineError extends ApiError {
+		constructor(message = 'offline') { super(503, message); this.name = 'OfflineError'; }
+	}
+	return {
+	ApiError,
+	OfflineError,
 	api: {
 		notes: {
 			list: vi.fn(),
@@ -44,7 +53,8 @@ vi.mock('$lib/api', () => ({
 		tags: { list: vi.fn(), listForNote: vi.fn().mockResolvedValue([]) },
 		auth: { logout: vi.fn() },
 	},
-}));
+};
+});
 
 vi.mock('$lib/stores/auth.svelte', () => ({
 	auth: { user: { id: 1, username: 'alice', is_admin: false, created_at: '' }, loading: false, logout: vi.fn() },
@@ -65,6 +75,11 @@ vi.mock('$lib/milkdown/underline', () => ({
 	toggleUnderlineCommand: { key: 'ToggleUnderline' },
 }));
 
+vi.mock('$lib/offlineActions', () => ({
+	markNoteDeletedOffline: vi.fn().mockResolvedValue(undefined),
+	markNoteArchivedOffline: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('$lib/offlineDB', () => ({
 	openOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
 	getAllNotes: vi.fn().mockResolvedValue([]),
@@ -79,7 +94,7 @@ const emptySyncResult = {
 	startedAt: '',
 	durationMs: 0,
 	mappings: [] as Array<{ tempId: number; serverId: number }>,
-	pushed: { created: 0, updated: 0 },
+	pushed: { created: 0, updated: 0, deleted: 0, archived: 0 },
 	conflicts: 0,
 	errors: 0,
 	skipped: false,
@@ -91,7 +106,7 @@ vi.mock('$lib/offlineSync', () => ({
 		startedAt: '',
 		durationMs: 0,
 		mappings: [],
-		pushed: { created: 0, updated: 0 },
+		pushed: { created: 0, updated: 0, deleted: 0, archived: 0 },
 		conflicts: 0,
 		errors: 0,
 		skipped: false,
@@ -101,6 +116,7 @@ vi.mock('$lib/offlineSync', () => ({
 
 import { api } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
+import { markNoteDeletedOffline, markNoteArchivedOffline } from '$lib/offlineActions';
 import { syncOfflineChanges } from '$lib/offlineSync';
 
 // Helper: override matchMedia to simulate a mobile or desktop viewport for one test.
@@ -549,6 +565,69 @@ describe('Offline mode', () => {
 		// When the server finally answers, its list replaces the cached paint
 		resolveList([mockNote({ id: 9, title: 'Fresh Server Note' })]);
 		await waitFor(() => expect(screen.getByText('Fresh Server Note')).toBeInTheDocument());
+	});
+
+	it('deletes a note offline: queues the replay and removes it from the list', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ id: 3, title: 'Doomed Note', body: '', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			  is_dirty: false, is_new: false },
+		]);
+
+		render(Page);
+		await waitFor(() => screen.getByText('Doomed Note'));
+
+		const item = screen.getByText('Doomed Note').closest('.note-item') as HTMLElement;
+		const del = item.querySelector('[title="Delete"]') as HTMLButtonElement;
+		await fireEvent.click(del);
+
+		await waitFor(() => expect(markNoteDeletedOffline).toHaveBeenCalledWith(
+			expect.objectContaining({ id: 3 })
+		));
+		expect(api.notes.delete).not.toHaveBeenCalled();
+		await waitFor(() => expect(screen.queryByText('Doomed Note')).not.toBeInTheDocument());
+	});
+
+	it('archives a note offline: queues the replay and removes it from the list', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ id: 4, title: 'Shelved Note', body: '', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			  is_dirty: false, is_new: false },
+		]);
+
+		render(Page);
+		await waitFor(() => screen.getByText('Shelved Note'));
+
+		const archiveBtn = await waitFor(() => screen.getByRole('button', { name: /move to archive/i }));
+		await fireEvent.click(archiveBtn);
+
+		await waitFor(() => expect(markNoteArchivedOffline).toHaveBeenCalledWith(
+			expect.objectContaining({ id: 4 })
+		));
+		expect(api.notes.archive).not.toHaveBeenCalled();
+		await waitFor(() => expect(screen.queryByText('Shelved Note')).not.toBeInTheDocument());
+	});
+
+	it('hides notes flagged deleted_offline or archived_offline from the cached list', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ id: 1, title: 'Visible Note', body: '', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			  is_dirty: false, is_new: false },
+			{ id: 2, title: 'Deleted Pending', body: '', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			  is_dirty: true, is_new: false, deleted_offline: true },
+			{ id: 3, title: 'Archived Pending', body: '', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			  is_dirty: true, is_new: false, archived_offline: true },
+		]);
+
+		render(Page);
+		await waitFor(() => screen.getByText('Visible Note'));
+		expect(screen.queryByText('Deleted Pending')).not.toBeInTheDocument();
+		expect(screen.queryByText('Archived Pending')).not.toBeInTheDocument();
 	});
 
 	it('caches notes to IndexedDB after a successful online load', async () => {

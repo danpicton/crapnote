@@ -14,8 +14,9 @@ export interface SyncResult {
 	startedAt: string;
 	durationMs: number;
 	mappings: IdMapping[];
-	/** Dirty notes successfully pushed to the server. */
-	pushed: { created: number; updated: number };
+	/** Dirty notes successfully pushed to the server. `deleted` and
+	 * `archived` count offline deletes/archives replayed against the API. */
+	pushed: { created: number; updated: number; deleted: number; archived: number };
 	/** Notes where both sides changed since our last sync. */
 	conflicts: number;
 	/** Notes whose push attempt threw (network error, server error). */
@@ -59,7 +60,7 @@ export async function syncOfflineChanges(
 		startedAt,
 		durationMs: 0,
 		mappings: [],
-		pushed: { created: 0, updated: 0 },
+		pushed: { created: 0, updated: 0, deleted: 0, archived: 0 },
 		conflicts: 0,
 		errors: 0,
 		skipped: false,
@@ -100,7 +101,11 @@ export async function syncOfflineChanges(
 		const dirty = await getDirtyNotes(db);
 		for (const note of dirty) {
 			try {
-				if (note.is_new) {
+				if (note.deleted_offline) {
+					await syncDeletedNote(db, note, result);
+				} else if (note.archived_offline) {
+					await syncArchivedNote(db, note, result);
+				} else if (note.is_new) {
 					await syncNewNote(db, note, result);
 				} else {
 					await syncDirtyNote(db, note, result);
@@ -129,12 +134,49 @@ function logSyncResult(r: SyncResult): void {
 		durationMs: r.durationMs,
 		created: r.pushed.created,
 		updated: r.pushed.updated,
+		deleted: r.pushed.deleted,
+		archived: r.pushed.archived,
 		conflicts: r.conflicts,
 		errors: r.errors,
 		skipped: r.skipped,
 		reason: r.reason,
 		mappings: r.mappings.length,
 	});
+}
+
+/**
+ * Replay an offline delete. A note created offline and deleted before it ever
+ * synced never existed server-side, so it is simply discarded; otherwise the
+ * server delete runs first and the cache entry is only dropped on success, so
+ * a failed call leaves the flag in place for the next sync to retry.
+ * `deleted_offline` wins over `archived_offline` when both are set — the
+ * user's last visible action was the delete.
+ */
+async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
+	if (!note.is_new) {
+		await api.notes.delete(note.id);
+	}
+	await deleteNote(db, note.id);
+	result.pushed.deleted++;
+}
+
+/**
+ * Replay an offline archive. Local title/body edits are pushed first so
+ * archiving doesn't silently discard offline work; a note created offline is
+ * created server-side and immediately archived. The cache entry is removed on
+ * success — archived notes live outside the offline working set.
+ */
+async function syncArchivedNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
+	let serverId = note.id;
+	if (note.is_new) {
+		const created = await api.notes.create(note.title, note.body);
+		serverId = created.id;
+	} else {
+		await api.notes.update(note.id, { title: note.title, body: note.body });
+	}
+	await api.notes.archive(serverId);
+	await deleteNote(db, note.id);
+	result.pushed.archived++;
 }
 
 async function syncNewNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {

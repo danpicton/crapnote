@@ -5,10 +5,18 @@
 
 	let entries = $state<TrashEntry[]>([]);
 	let loading = $state(true);
+	let offline = $state(false);
 
 	onMount(async () => {
-		entries = await api.trash.list();
-		loading = false;
+		try {
+			entries = await api.trash.list();
+		} catch {
+			// Trash isn't cached offline — say so instead of spinning on
+			// "Loading…" forever.
+			offline = true;
+		} finally {
+			loading = false;
+		}
 	});
 
 	async function restore(noteId: number) {
@@ -50,6 +58,8 @@
 
 	{#if loading}
 		<p class="status">Loading…</p>
+	{:else if offline}
+		<p class="status">Trash isn't available offline. Reconnect to view it.</p>
 	{:else if entries.length === 0}
 		<p class="status">Trash is empty.</p>
 	{:else}

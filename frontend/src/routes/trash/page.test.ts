@@ -89,3 +89,16 @@ describe('Trash page', () => {
 		});
 	});
 });
+
+describe('Trash page offline', () => {
+	it('shows an offline notice instead of spinning when the list fetch fails', async () => {
+		vi.mocked(api.trash.list).mockRejectedValue(new Error('offline'));
+
+		render(TrashPage);
+
+		await waitFor(() =>
+			expect(screen.getByText(/isn't available offline/i)).toBeInTheDocument()
+		);
+		expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
+	});
+});

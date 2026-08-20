@@ -7,11 +7,19 @@
 
 	let notes = $state<Note[]>([]);
 	let loading = $state(true);
+	let offline = $state(false);
 	let expandedId = $state<number | null>(null);
 
 	onMount(async () => {
-		notes = await api.notes.listArchived();
-		loading = false;
+		try {
+			notes = await api.notes.listArchived();
+		} catch {
+			// Archived notes aren't cached offline — say so instead of
+			// spinning on "Loading…" forever.
+			offline = true;
+		} finally {
+			loading = false;
+		}
 	});
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -143,6 +151,8 @@
 
 		{#if loading}
 			<p class="status">Loading…</p>
+		{:else if offline}
+			<p class="status">Archived notes aren't available offline. Reconnect to view them.</p>
 		{:else if notes.length === 0}
 			<div class="mob-empty-state">
 				<div class="mob-empty-icon"><ArchiveIcon size={28} aria-hidden="true" /></div>
