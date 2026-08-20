@@ -1,5 +1,5 @@
 import { api, ApiError, OfflineError } from '$lib/api';
-import { openOfflineDB, getDirtyNotes, upsertNote, deleteNote, getOfflineOwner, setOfflineOwner } from '$lib/offlineDB';
+import { openOfflineDB, getDirtyNotes, getNote, upsertNote, deleteNote, getOfflineOwner, setOfflineOwner } from '$lib/offlineDB';
 import type { CachedNote } from '$lib/offlineDB';
 
 export interface IdMapping {
@@ -15,8 +15,9 @@ export interface SyncResult {
 	durationMs: number;
 	mappings: IdMapping[];
 	/** Dirty notes successfully pushed to the server. `deleted` and
-	 * `archived` count offline deletes/archives replayed against the API. */
-	pushed: { created: number; updated: number; deleted: number; archived: number };
+	 * `archived` count offline deletes/archives replayed against the API;
+	 * `flags` counts notes whose starred/pinned/locked state was reconciled. */
+	pushed: { created: number; updated: number; deleted: number; archived: number; flags: number };
 	/** Notes where both sides changed since our last sync. */
 	conflicts: number;
 	/** Notes whose push attempt threw (network error, server error). */
@@ -60,7 +61,7 @@ export async function syncOfflineChanges(
 		startedAt,
 		durationMs: 0,
 		mappings: [],
-		pushed: { created: 0, updated: 0, deleted: 0, archived: 0 },
+		pushed: { created: 0, updated: 0, deleted: 0, archived: 0, flags: 0 },
 		conflicts: 0,
 		errors: 0,
 		skipped: false,
@@ -105,10 +106,17 @@ export async function syncOfflineChanges(
 					await syncDeletedNote(db, note, result);
 				} else if (note.archived_offline) {
 					await syncArchivedNote(db, note, result);
-				} else if (note.is_new) {
-					await syncNewNote(db, note, result);
 				} else {
-					await syncDirtyNote(db, note, result);
+					if (note.is_new) {
+						await syncNewNote(db, note, result);
+					} else if (note.is_dirty) {
+						await syncDirtyNote(db, note, result);
+					}
+					// Flag toggles reconcile after any content push so the
+					// updated_at bookkeeping stays consistent.
+					if (note.flags_dirty) {
+						await syncNoteFlags(db, note, result);
+					}
 				}
 			} catch {
 				// Network error for this note — count it and continue
@@ -136,6 +144,7 @@ function logSyncResult(r: SyncResult): void {
 		updated: r.pushed.updated,
 		deleted: r.pushed.deleted,
 		archived: r.pushed.archived,
+		flags: r.pushed.flags,
 		conflicts: r.conflicts,
 		errors: r.errors,
 		skipped: r.skipped,
@@ -214,6 +223,52 @@ async function syncArchivedNote(db: IDBDatabase, note: CachedNote, result: SyncR
 	}
 	await deleteNote(db, note.id);
 	result.pushed.archived++;
+}
+
+/**
+ * Reconcile starred/pinned/locked toggled offline. The cached values are the
+ * user's desired state; the server is fetched and each flag is toggled only
+ * where it differs — replaying raw toggles blind could double-flip a flag
+ * that another device already changed. Local desired state wins.
+ */
+async function syncNoteFlags(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
+	// An offline-created note gets its server id earlier in this same run
+	// (syncNewNote re-keys the cache entry and records a mapping).
+	const mapping = result.mappings.find((m) => m.tempId === note.id);
+	const id = mapping ? mapping.serverId : note.id;
+
+	let current;
+	try {
+		current = await api.notes.get(id);
+	} catch (err) {
+		if (isGoneServerSide(err)) {
+			// Deleted from another device — nothing left to reconcile.
+			await deleteNote(db, id);
+			return;
+		}
+		throw err;
+	}
+	if (note.starred !== current.starred) current = await api.notes.toggleStar(id);
+	if (note.pinned !== current.pinned) current = await api.notes.togglePin(id);
+	if ((note.locked ?? false) !== current.locked) current = await api.notes.toggleLock(id);
+
+	const entry = await getNote(db, id);
+	if (entry) {
+		await upsertNote(db, {
+			...entry,
+			starred: current.starred,
+			pinned: current.pinned,
+			locked: current.locked,
+			flags_dirty: false,
+			// Fast-forward the conflict baseline (toggles bump the server's
+			// updated_at) — but only when no content edits are still pending,
+			// so a real server-side content change isn't masked.
+			...(entry.is_dirty
+				? {}
+				: { server_updated_at: current.updated_at, local_updated_at: current.updated_at }),
+		});
+	}
+	result.pushed.flags++;
 }
 
 async function syncNewNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {

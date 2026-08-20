@@ -56,6 +56,31 @@ export async function markNoteDeletedOffline(
 	}
 }
 
+/**
+ * Record the user's desired starred/pinned/locked state after an offline
+ * toggle. `note` carries the already-toggled values; sync reconciles them
+ * against the server with compare-and-toggle (see offlineSync).
+ */
+export async function markNoteFlagsOffline(
+	note: Note,
+	tags: Array<{ id: number; name: string }> = []
+): Promise<void> {
+	const db = await openOfflineDB();
+	try {
+		const existing = await getNote(db, note.id);
+		await upsertNote(db, {
+			...(existing ?? cachedFromNote(note, tags)),
+			starred: note.starred,
+			pinned: note.pinned,
+			locked: note.locked,
+			flags_dirty: true,
+			local_updated_at: new Date().toISOString(),
+		});
+	} finally {
+		db.close();
+	}
+}
+
 /** Queue an archive for replay. Offline-created notes keep their `is_new`
  * flag so sync knows to create them server-side before archiving. */
 export async function markNoteArchivedOffline(

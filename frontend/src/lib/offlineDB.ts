@@ -12,6 +12,11 @@ export interface CachedNote {
 	is_new: boolean;            // created offline; no server ID yet
 	deleted_offline?: boolean;  // deleted while offline; replay DELETE on sync
 	archived_offline?: boolean; // archived while offline; replay archive on sync
+	/** starred/pinned/locked were toggled offline: the cached values are the
+	 * user's DESIRED state. Sync reconciles by comparing with the server and
+	 * calling the toggle endpoints only where they differ — never by
+	 * replaying toggles blind, which could double-flip. */
+	flags_dirty?: boolean;
 }
 
 const DB_NAME = 'crapnote-notes-v2';
@@ -113,11 +118,11 @@ export function getAllNotes(db: IDBDatabase): Promise<CachedNote[]> {
 	});
 }
 
-/** Notes with anything left to push: content edits, or a queued
- * delete/archive replay. */
+/** Notes with anything left to push: content edits, flag toggles, or a
+ * queued delete/archive replay. */
 export function getDirtyNotes(db: IDBDatabase): Promise<CachedNote[]> {
 	return getAllNotes(db).then(
-		(notes) => notes.filter((n) => n.is_dirty || n.deleted_offline || n.archived_offline)
+		(notes) => notes.filter((n) => n.is_dirty || n.flags_dirty || n.deleted_offline || n.archived_offline)
 	);
 }
 

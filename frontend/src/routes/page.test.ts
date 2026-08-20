@@ -78,6 +78,7 @@ vi.mock('$lib/milkdown/underline', () => ({
 vi.mock('$lib/offlineActions', () => ({
 	markNoteDeletedOffline: vi.fn().mockResolvedValue(undefined),
 	markNoteArchivedOffline: vi.fn().mockResolvedValue(undefined),
+	markNoteFlagsOffline: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('$lib/offlineDB', () => ({
@@ -94,7 +95,7 @@ const emptySyncResult = {
 	startedAt: '',
 	durationMs: 0,
 	mappings: [] as Array<{ tempId: number; serverId: number }>,
-	pushed: { created: 0, updated: 0, deleted: 0, archived: 0 },
+	pushed: { created: 0, updated: 0, deleted: 0, archived: 0, flags: 0 },
 	conflicts: 0,
 	errors: 0,
 	skipped: false,
@@ -106,7 +107,7 @@ vi.mock('$lib/offlineSync', () => ({
 		startedAt: '',
 		durationMs: 0,
 		mappings: [],
-		pushed: { created: 0, updated: 0, deleted: 0, archived: 0 },
+		pushed: { created: 0, updated: 0, deleted: 0, archived: 0, flags: 0 },
 		conflicts: 0,
 		errors: 0,
 		skipped: false,
@@ -114,9 +115,9 @@ vi.mock('$lib/offlineSync', () => ({
 }));
 
 
-import { api } from '$lib/api';
+import { api, OfflineError } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
-import { markNoteDeletedOffline, markNoteArchivedOffline } from '$lib/offlineActions';
+import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 import { syncOfflineChanges } from '$lib/offlineSync';
 
 // Helper: override matchMedia to simulate a mobile or desktop viewport for one test.
@@ -628,6 +629,26 @@ describe('Offline mode', () => {
 		await waitFor(() => screen.getByText('Visible Note'));
 		expect(screen.queryByText('Deleted Pending')).not.toBeInTheDocument();
 		expect(screen.queryByText('Archived Pending')).not.toBeInTheDocument();
+	});
+
+	it('starring a note offline applies optimistically and queues the desired state', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ id: 6, title: 'Starrable Note', body: '', starred: false, pinned: false, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			  is_dirty: false, is_new: false },
+		]);
+		vi.mocked(api.notes.toggleStar).mockRejectedValue(new OfflineError());
+
+		render(Page);
+		await waitFor(() => screen.getByText('Starrable Note'));
+
+		const item = screen.getByText('Starrable Note').closest('.note-item') as HTMLElement;
+		await fireEvent.click(item.querySelector('[aria-label="Star note"]') as HTMLElement);
+
+		await waitFor(() => expect(markNoteFlagsOffline).toHaveBeenCalledWith(
+			expect.objectContaining({ id: 6, starred: true })
+		));
 	});
 
 	it('caches notes to IndexedDB after a successful online load', async () => {

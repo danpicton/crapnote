@@ -19,6 +19,9 @@ vi.mock('$lib/api', () => {
 			update: vi.fn(),
 			delete: vi.fn(),
 			archive: vi.fn(),
+			toggleStar: vi.fn(),
+			togglePin: vi.fn(),
+			toggleLock: vi.fn(),
 		},
 	},
 };
@@ -563,5 +566,75 @@ describe('syncOfflineChanges — replay tolerates notes already gone server-side
 
 		expect(offlineDB.deleteNote).not.toHaveBeenCalled();
 		expect(result.errors).toBe(1);
+	});
+});
+
+describe('syncOfflineChanges — flag reconcile (star/pin/lock toggled offline)', () => {
+	it('toggles only the flags that differ from the server (desired state, not blind replay)', async () => {
+		// Desired: unlocked + starred. Server: locked + starred.
+		const note = fakeCachedNote({ id: 5, is_dirty: false, flags_dirty: true, starred: true, pinned: false, locked: false });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({ id: 5, starred: true, pinned: false, locked: true }));
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(fakeServerNote({ id: 5, starred: true, pinned: false, locked: false, updated_at: '2024-01-06T00:00:00Z' }));
+		vi.mocked(offlineDB.getNote).mockResolvedValue(note);
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.toggleLock).toHaveBeenCalledWith(5);
+		expect(api.notes.toggleStar).not.toHaveBeenCalled();
+		expect(api.notes.togglePin).not.toHaveBeenCalled();
+		expect(api.notes.update).not.toHaveBeenCalled(); // no content push for flags-only
+		expect(offlineDB.upsertNote).toHaveBeenCalledWith(fakeDB, expect.objectContaining({
+			id: 5,
+			locked: false,
+			flags_dirty: false,
+			server_updated_at: '2024-01-06T00:00:00Z',
+		}));
+		expect(result.pushed.flags).toBe(1);
+	});
+
+	it('clears the flag without any toggle calls when server already matches', async () => {
+		const note = fakeCachedNote({ id: 5, is_dirty: false, flags_dirty: true, starred: false, pinned: false, locked: false });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({ id: 5, starred: false, pinned: false, locked: false }));
+		vi.mocked(offlineDB.getNote).mockResolvedValue(note);
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.toggleStar).not.toHaveBeenCalled();
+		expect(api.notes.togglePin).not.toHaveBeenCalled();
+		expect(api.notes.toggleLock).not.toHaveBeenCalled();
+		expect(offlineDB.upsertNote).toHaveBeenCalledWith(fakeDB, expect.objectContaining({ flags_dirty: false }));
+		expect(result.pushed.flags).toBe(1);
+	});
+
+	it('reconciles flags after pushing content when both are dirty', async () => {
+		const note = fakeCachedNote({
+			id: 5, title: 'Edited', body: 'B', is_dirty: true, flags_dirty: true,
+			starred: true, server_updated_at: '2024-01-01T00:00:00Z',
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({ id: 5, updated_at: '2024-01-01T00:00:00Z', starred: false }));
+		vi.mocked(api.notes.update).mockResolvedValue(fakeServerNote({ id: 5, updated_at: '2024-01-05T00:00:00Z', starred: false }));
+		vi.mocked(api.notes.toggleStar).mockResolvedValue(fakeServerNote({ id: 5, starred: true, updated_at: '2024-01-06T00:00:00Z' }));
+		vi.mocked(offlineDB.getNote).mockResolvedValue({ ...note, is_dirty: false });
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.update).toHaveBeenCalledWith(5, { title: 'Edited', body: 'B' });
+		expect(api.notes.toggleStar).toHaveBeenCalledWith(5);
+		expect(result.pushed.updated).toBe(1);
+		expect(result.pushed.flags).toBe(1);
+	});
+
+	it('drops the entry when the note is already gone server-side', async () => {
+		const note = fakeCachedNote({ id: 5, is_dirty: false, flags_dirty: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockRejectedValue(new ApiError(404, 'not found'));
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(offlineDB.deleteNote).toHaveBeenCalledWith(fakeDB, 5);
+		expect(result.errors).toBe(0);
 	});
 });

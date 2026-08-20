@@ -20,7 +20,7 @@
 	import { api, OfflineError, type Note, type Tag } from '$lib/api';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
 	import { openOfflineDB, getNote as getOfflineNote, upsertNote, type CachedNote } from '$lib/offlineDB';
-	import { markNoteDeletedOffline, markNoteArchivedOffline } from '$lib/offlineActions';
+	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 	import {
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Link,
@@ -50,16 +50,24 @@
 	let showMobHeadingMenu = $state(false);
 	let activeFormats = $state<ActiveFormats>({ ...EMPTY_FORMATS });
 
+	/**
+	 * Offline fallback shared by the star/pin/lock toggles: apply the toggle
+	 * optimistically and record the desired state in IndexedDB so sync
+	 * reconciles it on reconnect. A genuine server rejection still surfaces.
+	 */
+	async function toggleFlagOffline(err: unknown, flag: 'starred' | 'pinned' | 'locked') {
+		if (!(err instanceof OfflineError)) throw err;
+		if (!note) return;
+		note = { ...note, [flag]: !note[flag] };
+		await markNoteFlagsOffline(note, noteTags.map((t) => ({ id: t.id, name: t.name })));
+	}
+
 	async function mobToggleStar() {
 		if (!note) return;
 		try {
 			note = await api.notes.toggleStar(noteId);
 		} catch (err) {
-			// Offline — star/pin/lock replay isn't queued (the API only offers
-			// toggle endpoints, so replaying them blind risks double-flips).
-			// Leave the state as-is rather than lying about it. A genuine
-			// server rejection still surfaces.
-			if (!(err instanceof OfflineError)) throw err;
+			await toggleFlagOffline(err, 'starred');
 		}
 	}
 
@@ -68,8 +76,7 @@
 		try {
 			note = await api.notes.togglePin(noteId);
 		} catch (err) {
-			// Offline — see mobToggleStar.
-			if (!(err instanceof OfflineError)) throw err;
+			await toggleFlagOffline(err, 'pinned');
 		}
 		showActionSheet = false;
 	}
@@ -79,8 +86,7 @@
 		try {
 			note = await api.notes.toggleLock(noteId);
 		} catch (err) {
-			// Offline — see mobToggleStar.
-			if (!(err instanceof OfflineError)) throw err;
+			await toggleFlagOffline(err, 'locked');
 		}
 		showActionSheet = false;
 	}

@@ -26,7 +26,7 @@
 	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote } from '$lib/offlineDB';
 	import type { CachedNote } from '$lib/offlineDB';
 	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
-	import { markNoteDeletedOffline, markNoteArchivedOffline } from '$lib/offlineActions';
+	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 
 	// PUBLIC_OFFLINE_NOTES_COUNT can be set at build time via the PUBLIC_ prefix env var.
 	const OFFLINE_NOTES_COUNT = Math.max(1, parseInt(
@@ -348,8 +348,9 @@
 		for (const note of serverNotes) {
 			if (!toKeep.has(note.id)) continue;
 			const existing = await getNote(db, note.id);
-			// Don't overwrite unsync'd local changes or pending delete/archive replays
-			if (existing?.is_dirty || existing?.deleted_offline || existing?.archived_offline) continue;
+			// Don't overwrite unsync'd local changes, pending flag toggles, or
+			// pending delete/archive replays
+			if (existing?.is_dirty || existing?.flags_dirty || existing?.deleted_offline || existing?.archived_offline) continue;
 			// Fetch tags for this note so they're available offline
 			const noteTags = await api.tags.listForNote(note.id).catch(() => existing?.tags ?? []);
 			await upsertNote(db, {
@@ -371,7 +372,7 @@
 		// for a delete or archive replay)
 		const allCached = await getAllNotes(db);
 		for (const c of allCached) {
-			if (!toKeep.has(c.id) && !c.is_dirty && !c.is_new && !c.deleted_offline && !c.archived_offline) {
+			if (!toKeep.has(c.id) && !c.is_dirty && !c.flags_dirty && !c.is_new && !c.deleted_offline && !c.archived_offline) {
 				await deleteOfflineNote(db, c.id);
 			}
 		}
@@ -402,14 +403,18 @@
 		const dirtyById = new Map<number, CachedNote>();
 		for (const c of cached) {
 			if (c.deleted_offline || c.archived_offline) hiddenIds.add(c.id);
-			else if (c.is_dirty && !c.is_new) dirtyById.set(c.id, c);
+			else if ((c.is_dirty || c.flags_dirty) && !c.is_new) dirtyById.set(c.id, c);
 		}
 		const merged: Note[] = serverNotes
 			.filter((n) => !hiddenIds.has(n.id))
 			.map((n) => {
 				const d = dirtyById.get(n.id);
 				if (!d) return n;
-				return { ...n, title: d.title, body: d.body, updated_at: d.local_updated_at };
+				const flags = d.flags_dirty
+					? { starred: d.starred, pinned: d.pinned, locked: d.locked ?? n.locked }
+					: {};
+				if (!d.is_dirty) return { ...n, ...flags };
+				return { ...n, ...flags, title: d.title, body: d.body, updated_at: d.local_updated_at };
 			});
 
 		// Include offline-created notes (not yet on the server) — apply the
@@ -982,14 +987,46 @@
 		}, 800);
 	}
 
+	/**
+	 * Offline fallback shared by the star/pin/lock toggles: flip the flag
+	 * locally, record the desired state in IndexedDB for sync to reconcile
+	 * on reconnect, and return the toggled note for the caller's list
+	 * update. A genuine server rejection still surfaces.
+	 */
+	async function toggleFlagOffline(
+		err: unknown,
+		id: number,
+		flag: 'starred' | 'pinned' | 'locked'
+	): Promise<Note | null> {
+		if (!(err instanceof OfflineError)) throw err;
+		const note = notes.find((n) => n.id === id);
+		if (!note) return null;
+		const toggled = { ...note, [flag]: !note[flag] };
+		await markNoteFlagsOffline(toggled);
+		syncStatus = 'unsynced';
+		return toggled;
+	}
+
 	async function toggleStar(id: number) {
-		const updated = await api.notes.toggleStar(id);
+		let updated: Note | null;
+		try {
+			updated = await api.notes.toggleStar(id);
+		} catch (err) {
+			updated = await toggleFlagOffline(err, id, 'starred');
+		}
+		if (!updated) return;
 		listVersion++; // invalidate in-flight list loads carrying the old state
 		notes = notes.map((n) => (n.id === updated.id ? updated : n));
 	}
 
 	async function togglePin(id: number) {
-		const updated = await api.notes.togglePin(id);
+		let updated: Note | null;
+		try {
+			updated = await api.notes.togglePin(id);
+		} catch (err) {
+			updated = await toggleFlagOffline(err, id, 'pinned');
+		}
+		if (!updated) return;
 		listVersion++; // invalidate in-flight list loads carrying the old state
 		const rest = notes.filter((n) => n.id !== updated.id);
 		const full = [updated, ...rest];
@@ -997,7 +1034,13 @@
 	}
 
 	async function toggleLock(id: number) {
-		const updated = await api.notes.toggleLock(id);
+		let updated: Note | null;
+		try {
+			updated = await api.notes.toggleLock(id);
+		} catch (err) {
+			updated = await toggleFlagOffline(err, id, 'locked');
+		}
+		if (!updated) return;
 		listVersion++; // invalidate in-flight list loads carrying the old state
 		notes = notes.map((n) => (n.id === updated.id ? updated : n));
 	}

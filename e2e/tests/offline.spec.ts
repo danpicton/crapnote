@@ -204,3 +204,117 @@ test.describe('Offline immediately after login (no reload, no prior clicks)', ()
     await expect(page.locator('.mob-wordmark, .page-title').first()).toBeVisible();
   });
 });
+
+test.describe('Offline edit and lock-toggle replay', () => {
+  test.afterEach(async ({ context }) => {
+    await context.setOffline(false);
+  });
+
+  // Together with the delete/archive spec above, this gives every sync verb
+  // (create, edit, delete, archive, flag toggle) an end-to-end regression
+  // test — a future change that silently breaks replay fails here in CI.
+  test('an offline title edit and an offline unlock both reach the server on reconnect', async ({
+    page,
+    context,
+  }) => {
+    // Reconnect sync is driven by the window 'online' event AND a 30s
+    // heartbeat; Playwright's emulation doesn't reliably deliver the event,
+    // so allow a full heartbeat interval before judging the replay.
+    test.setTimeout(120_000);
+    await page.setViewportSize({ width: 390, height: 844 }); // phone layout
+    await login(page);
+
+    const api = context.request;
+    const runTag = Date.now().toString(36);
+    const EDIT = `Offline Edit Target ${runTag}`;
+    const EDITED = `Edited Offline ${runTag}`;
+    const LOCKED = `Offline Unlock Target ${runTag}`;
+
+    const mkNote = async (title: string) => {
+      const res = await api.post('/api/notes', { data: { title, body: `Body of ${title}` } });
+      expect(res.ok()).toBeTruthy();
+      return (await res.json()) as { id: number };
+    };
+    const editNote = await mkNote(EDIT);
+    const lockedNote = await mkNote(LOCKED);
+    const lockRes = await api.patch(`/api/notes/${lockedNote.id}/lock`);
+    expect(lockRes.ok()).toBeTruthy();
+
+    // SW controlled + shell cached + both notes mirrored into IndexedDB.
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+    await page.waitForFunction(() => caches.match('/').then((res) => !!res));
+    await page.reload();
+    await expect
+      .poll(() => offlineHasNotes(page, [editNote.id, lockedNote.id]), {
+        message: 'offline cache should hold both seeded notes',
+        timeout: 15_000,
+      })
+      .toBe(true);
+
+    // ── Airplane mode ────────────────────────────────────────────────────
+    await context.setOffline(true);
+    await page.reload();
+
+    // Unlock the locked note offline — the reported bug: the unlock must
+    // stick in the list, not just in the note view.
+    await page.locator('.note-item').filter({ hasText: LOCKED }).first().click();
+    await page.locator(`.mob-topbar button[aria-label="Unlock note"]`).click();
+    await expect(page.locator(`.mob-topbar button[aria-label="Lock note"]`)).toBeVisible();
+    await page.locator('a.mob-topbar-btn').click(); // back to list
+
+    // Edit the other note's title offline.
+    await page.locator('.note-item').filter({ hasText: EDIT }).first().click();
+    const title = page.getByPlaceholder('Note title').first();
+    await expect(title).toHaveValue(EDIT);
+    await title.fill(EDITED);
+    await title.blur();
+    // Wait for the debounced autosave to land in IndexedDB.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            (id) =>
+              new Promise<string>((resolve) => {
+                const req = indexedDB.open('crapnote-notes-v2');
+                req.onsuccess = () => {
+                  const db = req.result;
+                  const get = db.transaction('notes', 'readonly').objectStore('notes').get(id);
+                  get.onsuccess = () => {
+                    db.close();
+                    resolve((get.result as { title?: string } | undefined)?.title ?? '');
+                  };
+                  get.onerror = () => {
+                    db.close();
+                    resolve('');
+                  };
+                };
+                req.onerror = () => resolve('');
+              }),
+            editNote.id,
+          ),
+        { message: 'offline edit should be persisted to IndexedDB', timeout: 15_000 },
+      )
+      .toBe(EDITED);
+    await page.locator('a.mob-topbar-btn').click(); // back to list (sync page)
+
+    // ── Reconnect: both the edit and the unlock replay ───────────────────
+    await context.setOffline(false);
+
+    await expect
+      .poll(
+        async () => {
+          const [editRes, lockCheck] = await Promise.all([
+            api.get(`/api/notes/${editNote.id}`),
+            api.get(`/api/notes/${lockedNote.id}`),
+          ]);
+          if (!editRes.ok() || !lockCheck.ok()) return 'fetch-failed';
+          const editServer = (await editRes.json()) as { title: string };
+          const lockServer = (await lockCheck.json()) as { locked: boolean };
+          return { title: editServer.title, locked: lockServer.locked };
+        },
+        { message: 'offline edit + unlock should replay to the server', timeout: 60_000 },
+      )
+      .toEqual({ title: EDITED, locked: false });
+  });
+});

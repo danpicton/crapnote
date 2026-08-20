@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import 'fake-indexeddb/auto';
-import { markNoteDeletedOffline, markNoteArchivedOffline } from './offlineActions';
+import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from './offlineActions';
 import { openOfflineDB, getNote, upsertNote, deleteOfflineDB } from './offlineDB';
 import type { Note } from './api';
 
@@ -116,5 +116,38 @@ describe('markNoteArchivedOffline', () => {
 		check.close();
 		expect(cached?.archived_offline).toBe(true);
 		expect(cached?.is_new).toBe(true);
+	});
+});
+
+describe('markNoteFlagsOffline', () => {
+	it('records the desired flag state and marks flags_dirty, preserving content state', async () => {
+		const db = await openOfflineDB();
+		await upsertNote(db, {
+			id: 10, title: 'T', body: 'B', starred: false, pinned: false, locked: true, tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			is_dirty: false, is_new: false,
+		});
+		db.close();
+
+		await markNoteFlagsOffline(serverNote({ id: 10, locked: false, starred: true }));
+
+		const check = await openOfflineDB();
+		const cached = await getNote(check, 10);
+		check.close();
+		expect(cached?.locked).toBe(false);
+		expect(cached?.starred).toBe(true);
+		expect(cached?.flags_dirty).toBe(true);
+		expect(cached?.is_dirty).toBe(false); // content untouched
+		expect(cached?.title).toBe('T');
+	});
+
+	it('creates a cache entry for an uncached note so the toggle still syncs', async () => {
+		await markNoteFlagsOffline(serverNote({ id: 21, locked: false }));
+
+		const check = await openOfflineDB();
+		const cached = await getNote(check, 21);
+		check.close();
+		expect(cached?.flags_dirty).toBe(true);
+		expect(cached?.locked).toBe(false);
 	});
 });

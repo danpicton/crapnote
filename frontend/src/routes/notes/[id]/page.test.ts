@@ -440,3 +440,27 @@ describe('Mobile lock control', () => {
 		expect(container.querySelector('.mob-topbar button[aria-label="Unlock note"]')).toBeTruthy();
 	});
 });
+
+describe('Offline lock toggle', () => {
+	it('unlocking offline applies optimistically and queues the desired state for sync', async () => {
+		const { OfflineError } = await import('$lib/api');
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ locked: true }));
+		vi.mocked(api.notes.toggleLock).mockRejectedValue(new OfflineError());
+
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.click(screen.getByTitle('Unlock note'));
+
+		// UI reflects the unlock immediately…
+		await waitFor(() => expect(screen.getByTitle('Lock note')).toBeTruthy());
+		// …and the desired state is recorded for the sync reconcile.
+		await waitFor(() =>
+			expect(offlineDB.upsertNote).toHaveBeenCalledWith(
+				expect.anything(),
+				expect.objectContaining({ id: 42, locked: false, flags_dirty: true })
+			)
+		);
+	});
+});
