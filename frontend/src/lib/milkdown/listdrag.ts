@@ -1,88 +1,20 @@
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { findListItem, moveListItemAt } from './listmove';
+import {
+	createEdgeAutoScroll,
+	dropIndexFromY,
+	findScrollParent,
+	type DragRect,
+	type EdgeAutoScroll,
+} from '$lib/dragReorder';
 
 /**
- * Pointer-driven drag reordering for list items.
+ * Drag-to-reorder for the editor's list items.
  *
- * Uses pointer events rather than HTML5 drag-and-drop so the same code path
- * serves mouse, pen and touch — the latter matters because CrapNote is a PWA
- * that is mostly used on a phone.
+ * The pointer geometry, edge autoscrolling and drop-slot maths live in
+ * $lib/dragReorder, shared with the pinned-note drag in the notes list. What
+ * stays here is the part that knows about ProseMirror.
  */
-
-export interface DragRect {
-	top: number;
-	height: number;
-}
-
-/**
- * Work out which slot the dragged item should land in, given the on-screen
- * geometry of its siblings and the current pointer position.
- *
- * `rects` covers every sibling in document order, including the item being
- * dragged, which is excluded here so the returned index is relative to the list
- * with that item removed — exactly what moveListItemAt expects.
- */
-export function dropIndexFromY(rects: DragRect[], originIndex: number, clientY: number): number {
-	let index = 0;
-	for (let i = 0; i < rects.length; i++) {
-		if (i === originIndex) continue;
-		const { top, height } = rects[i];
-		if (clientY > top + height / 2) index++;
-	}
-	return index;
-}
-
-/** How close to a scroller's edge the pointer must get before it scrolls. */
-export const EDGE_SCROLL_ZONE_PX = 48;
-/** Fastest edge scroll, in px per animation frame. */
-export const MAX_EDGE_SCROLL_PX = 14;
-
-export interface EdgeRect {
-	top: number;
-	bottom: number;
-}
-
-/**
- * How far to scroll this frame, given where the pointer sits relative to the
- * scrolling container. Negative scrolls up, positive down, 0 leaves it alone.
- *
- * Without this a drag could only reach items already on screen — on a phone,
- * often three or four of them.
- */
-export function edgeScrollDelta(
-	rect: EdgeRect,
-	clientY: number,
-	zone = EDGE_SCROLL_ZONE_PX,
-	maxSpeed = MAX_EDGE_SCROLL_PX
-): number {
-	const fromTop = clientY - rect.top;
-	if (fromTop < zone) {
-		// Ramps from 0 at the zone boundary to maxSpeed at the edge, and stays
-		// pinned there if the pointer leaves the container entirely.
-		const ratio = Math.min(1, (zone - fromTop) / zone);
-		return -Math.ceil(ratio * maxSpeed);
-	}
-	const fromBottom = rect.bottom - clientY;
-	if (fromBottom < zone) {
-		const ratio = Math.min(1, (zone - fromBottom) / zone);
-		return Math.ceil(ratio * maxSpeed);
-	}
-	return 0;
-}
-
-/** The nearest ancestor that actually scrolls vertically, if any. */
-export function findScrollParent(el: HTMLElement | null): HTMLElement | null {
-	for (let node = el?.parentElement ?? null; node; node = node.parentElement) {
-		const { overflowY } = getComputedStyle(node);
-		if (
-			(overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') &&
-			node.scrollHeight > node.clientHeight
-		) {
-			return node;
-		}
-	}
-	return null;
-}
 
 /** The grip element shown in the gutter of each list item. */
 export function createDragHandle(): HTMLElement {
@@ -117,8 +49,7 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 	let originIndex = -1;
 	let dropIndex = -1;
 	let activePointer: number | null = null;
-	let scroller: HTMLElement | null = null;
-	let scrollFrame: number | null = null;
+	let edgeScroll: EdgeAutoScroll | null = null;
 	let lastClientY = 0;
 
 	const siblingRects = (): DragRect[] =>
@@ -150,38 +81,10 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 		showIndicator(dropIndex);
 	};
 
-	const stopEdgeScroll = () => {
-		if (scrollFrame != null) cancelAnimationFrame(scrollFrame);
-		scrollFrame = null;
-	};
-
-	/**
-	 * While the pointer sits near the scroller's edge, keep scrolling and
-	 * re-deriving the drop slot — the rows move under a stationary finger, so
-	 * the indicator has to be recomputed each frame, not just on pointermove.
-	 */
-	const stepEdgeScroll = () => {
-		scrollFrame = null;
-		if (originIndex < 0 || !scroller) return;
-
-		const rect = scroller.getBoundingClientRect();
-		const delta = edgeScrollDelta(rect, lastClientY);
-		if (delta !== 0) {
-			const before = scroller.scrollTop;
-			scroller.scrollTop = before + delta;
-			if (scroller.scrollTop !== before) refreshDropTarget();
-		}
-		scrollFrame = requestAnimationFrame(stepEdgeScroll);
-	};
-
-	const startEdgeScroll = () => {
-		if (scrollFrame == null && scroller) scrollFrame = requestAnimationFrame(stepEdgeScroll);
-	};
-
 	const finish = (commit: boolean) => {
 		if (originIndex < 0) return;
 
-		stopEdgeScroll();
+		edgeScroll?.stop();
 		clearIndicators();
 		dom.classList.remove('list-item-dragging');
 		if (activePointer != null) {
@@ -198,7 +101,7 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 		dropIndex = -1;
 		activePointer = null;
 		siblings = [];
-		scroller = null;
+		edgeScroll = null;
 
 		if (!commit || to < 0 || to === from) return;
 
@@ -216,7 +119,7 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 		e.preventDefault();
 		lastClientY = e.clientY;
 		refreshDropTarget();
-		startEdgeScroll();
+		edgeScroll?.start();
 	};
 
 	const onPointerUp = (e: PointerEvent) => {
@@ -257,7 +160,11 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 		dropIndex = index;
 		activePointer = e.pointerId;
 		lastClientY = e.clientY;
-		scroller = findScrollParent(dom);
+		edgeScroll = createEdgeAutoScroll({
+			scroller: findScrollParent(dom),
+			getClientY: () => lastClientY,
+			onScroll: refreshDropTarget,
+		});
 
 		dom.classList.add('list-item-dragging');
 		try {

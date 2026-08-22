@@ -1,5 +1,5 @@
 import { api, ApiError, OfflineError } from '$lib/api';
-import { openOfflineDB, getDirtyNotes, upsertNote, deleteNote, getOfflineOwner, setOfflineOwner } from '$lib/offlineDB';
+import { openOfflineDB, getDirtyNotes, upsertNote, deleteNote, getOfflineOwner, setOfflineOwner, noteFlags } from '$lib/offlineDB';
 import type { CachedNote } from '$lib/offlineDB';
 
 export interface IdMapping {
@@ -286,14 +286,7 @@ async function syncNewNote(db: IDBDatabase, note: CachedNote, result: SyncResult
 		body: serverNote.body,
 		// Desired flag values stay when toggles are queued; otherwise mirror
 		// the server's (default) values.
-		...(note.flags_dirty
-			? {}
-			: {
-					starred: serverNote.starred,
-					pinned: serverNote.pinned,
-					locked: serverNote.locked,
-					pin_order: serverNote.pin_order,
-				}),
+		...(note.flags_dirty ? {} : noteFlags(serverNote)),
 		server_updated_at: serverNote.updated_at,
 		local_updated_at: serverNote.updated_at,
 		is_dirty: false,
@@ -360,12 +353,10 @@ async function reconcileFlagsCheckpoint(
 
 	const entry: CachedNote = {
 		...note,
-		starred: current.starred,
-		pinned: current.pinned,
-		locked: lockDeferred ? true : current.locked,
-		// The server owns pin_order — a note pinned offline carries only the
-		// client's guess (nextPinOrder), which this reconcile must replace.
-		pin_order: current.pin_order ?? note.pin_order,
+		// The server owns these now — in particular pin_order, where a note
+		// pinned offline carries only the client's guess (nextPinOrder).
+		...noteFlags(current, note),
+		...(lockDeferred ? { locked: true } : {}),
 		flags_dirty: lockDeferred,
 		flags_toggled: lockDeferred ? { locked: true } : undefined,
 		...(note.is_dirty && serverChanged
@@ -414,10 +405,7 @@ async function pushContentCheckpoint(
 			...note,
 			title: serverNote.title,
 			body: serverNote.body,
-			starred: serverNote.starred,
-			pinned: serverNote.pinned,
-			locked: serverNote.locked,
-			pin_order: serverNote.pin_order ?? note.pin_order,
+			...noteFlags(serverNote, note),
 			server_updated_at: serverNote.updated_at,
 			local_updated_at: serverNote.updated_at,
 			is_dirty: false,

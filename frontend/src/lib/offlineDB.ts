@@ -26,6 +26,47 @@ export interface CachedNote {
 	flags_toggled?: { starred?: boolean; pinned?: boolean; locked?: boolean };
 }
 
+/**
+ * The per-note flags that must travel together whenever a cached note is
+ * rebuilt — they are all server-owned, and a record carrying some of them from
+ * the server and the rest from a stale local copy is incoherent.
+ */
+export interface NoteFlags {
+	starred: boolean;
+	pinned: boolean;
+	locked: boolean;
+	pin_order: number;
+}
+
+/**
+ * Pull the flag set off `source`, filling anything it omits from `fallback`.
+ *
+ * Several places rebuild a CachedNote — the sync reconcilers, the conflict
+ * path, the offline action queue, the list merge. Each used to spell these
+ * fields out by hand, and twice now a newly added field (`pin_order`) was
+ * fixed in some of those literals and silently dropped by the others. Adding a
+ * field here reaches every rebuild at once.
+ *
+ * Coalescing is `??`, never `||`: a deliberate `false` or `0` must survive
+ * rather than fall through to the fallback.
+ */
+export function noteFlags(
+	source: Partial<NoteFlags> | null | undefined,
+	fallback?: Partial<NoteFlags> | null
+): NoteFlags {
+	const from = source ?? {};
+	// Callers routinely pass a lookup that may have missed (getNote returns
+	// null for an uncached note), so absorb that here rather than making every
+	// call site guard.
+	const or = fallback ?? {};
+	return {
+		starred: from.starred ?? or.starred ?? false,
+		pinned: from.pinned ?? or.pinned ?? false,
+		locked: from.locked ?? or.locked ?? false,
+		pin_order: from.pin_order ?? or.pin_order ?? 0,
+	};
+}
+
 const DB_NAME = 'crapnote-notes-v2';
 const DB_VERSION = 2;
 const STORE = 'notes';

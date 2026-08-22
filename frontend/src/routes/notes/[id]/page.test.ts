@@ -77,7 +77,9 @@ vi.mock('$lib/api', () => {
 };
 });
 
-vi.mock('$lib/offlineDB', () => ({
+// Stub the IndexedDB entry points only; pure helpers stay real.
+vi.mock('$lib/offlineDB', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/offlineDB')>()),
 	openOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
 	getNote: vi.fn().mockResolvedValue(null),
 	upsertNote: vi.fn().mockResolvedValue(undefined),

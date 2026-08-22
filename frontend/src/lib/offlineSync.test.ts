@@ -27,7 +27,11 @@ vi.mock('$lib/api', () => {
 };
 });
 
-vi.mock('$lib/offlineDB', () => ({
+// Only the IndexedDB entry points are stubbed. Pure helpers (noteFlags) stay
+// real — mocking them would hide exactly the field-drop bugs they exist to
+// prevent.
+vi.mock('$lib/offlineDB', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/offlineDB')>()),
 	openOfflineDB: vi.fn(),
 	getDirtyNotes: vi.fn(),
 	upsertNote: vi.fn(),

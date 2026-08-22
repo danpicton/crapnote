@@ -23,12 +23,17 @@
 	import { shortcuts, matchShortcut, type ShortcutId } from '$lib/stores/shortcuts.svelte';
 	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
-	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote } from '$lib/offlineDB';
+	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote, noteFlags } from '$lib/offlineDB';
 	import type { CachedNote } from '$lib/offlineDB';
 	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 	import { sortNotes, reorderPinned, nextPinOrder } from '$lib/noteOrder';
-	import { dropIndexFromY } from '$lib/milkdown/listdrag';
+	import {
+		dropIndexFromY,
+		findScrollParent,
+		createEdgeAutoScroll,
+		type EdgeAutoScroll,
+	} from '$lib/dragReorder';
 
 	// PUBLIC_OFFLINE_NOTES_COUNT can be set at build time via the PUBLIC_ prefix env var.
 	const OFFLINE_NOTES_COUNT = Math.max(1, parseInt(
@@ -96,6 +101,8 @@
 	let pinDropIndex = $state(-1);
 	let pinDragOrigin = -1;
 	let pinRows: HTMLElement[] = [];
+	let pinEdgeScroll: EdgeAutoScroll | null = null;
+	let pinLastClientY = 0;
 
 	/**
 	 * Which row shows the drop line, and on which edge. pinDropIndex counts
@@ -133,6 +140,12 @@
 		pinDragOrigin = index;
 		pinDropIndex = index;
 		pinDragId = noteId;
+		pinLastClientY = e.clientY;
+		pinEdgeScroll = createEdgeAutoScroll({
+			scroller: findScrollParent(rows[index]),
+			getClientY: () => pinLastClientY,
+			onScroll: refreshPinDropTarget,
+		});
 		try {
 			(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
 		} catch {
@@ -140,20 +153,31 @@
 		}
 	}
 
-	function onPinDragMove(e: PointerEvent) {
-		if (pinDragId === null) return;
-		e.preventDefault();
+	/** Recompute the drop slot from the pointer's last known position. */
+	function refreshPinDropTarget() {
 		pinDropIndex = dropIndexFromY(
 			pinRows.map((el) => {
 				const r = el.getBoundingClientRect();
 				return { top: r.top, height: r.height };
 			}),
 			pinDragOrigin,
-			e.clientY
+			pinLastClientY
 		);
 	}
 
+	function onPinDragMove(e: PointerEvent) {
+		if (pinDragId === null) return;
+		e.preventDefault();
+		pinLastClientY = e.clientY;
+		refreshPinDropTarget();
+		// Dragging to the edge of a long list has to scroll it, or only the
+		// pinned notes already on screen would be reachable.
+		pinEdgeScroll?.start();
+	}
+
 	function endPinDrag() {
+		pinEdgeScroll?.stop();
+		pinEdgeScroll = null;
 		pinDragId = null;
 		pinDropIndex = -1;
 		pinDragOrigin = -1;
@@ -380,11 +404,8 @@
 			id: c.id,
 			title: c.title,
 			body: c.body,
-			starred: c.starred,
-			pinned: c.pinned,
 			archived: false,
-			locked: c.locked ?? false,
-			pin_order: c.pin_order ?? 0,
+			...noteFlags(c),
 			created_at: c.server_updated_at,
 			updated_at: c.local_updated_at,
 		};
@@ -462,10 +483,7 @@
 				id: note.id,
 				title: note.title,
 				body: note.body,
-				starred: note.starred,
-				pinned: note.pinned,
-				locked: note.locked,
-				pin_order: note.pin_order,
+				...noteFlags(note),
 				tags: noteTags.map(t => ({ id: t.id, name: t.name })),
 				server_updated_at: note.updated_at,
 				local_updated_at: note.updated_at,
@@ -516,18 +534,12 @@
 			.map((n) => {
 				const d = dirtyById.get(n.id);
 				if (!d) return n;
-				const flags = d.flags_dirty
-					? {
-							starred: d.starred,
-							pinned: d.pinned,
-							locked: d.locked ?? n.locked,
-							// The local slot too: a note pinned offline holds a
-							// client-assigned pin_order the server hasn't seen
-							// yet, and without it the note would sort by the
-							// server's stale 0 instead of at the top.
-							pin_order: d.pin_order ?? n.pin_order,
-						}
-					: {};
+				// The desired local state wins, falling back to the server's for
+				// anything the cache entry doesn't carry. pin_order matters
+				// here: a note pinned offline holds a client-assigned slot the
+				// server hasn't seen, and without it the note would sort by the
+				// server's stale 0 instead of at the top.
+				const flags = d.flags_dirty ? noteFlags(d, n) : {};
 				if (!d.is_dirty) return { ...n, ...flags };
 				return { ...n, ...flags, title: d.title, body: d.body, updated_at: d.local_updated_at };
 			});

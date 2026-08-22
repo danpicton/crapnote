@@ -82,7 +82,10 @@ vi.mock('$lib/offlineActions', () => ({
 	markNoteFlagsOffline: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('$lib/offlineDB', () => ({
+// Only the IndexedDB entry points are stubbed; pure helpers (noteFlags) stay
+// real, since mocking them would hide the field-drop bugs they prevent.
+vi.mock('$lib/offlineDB', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/offlineDB')>()),
 	openOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
 	getAllNotes: vi.fn().mockResolvedValue([]),
 	getDirtyNotes: vi.fn().mockResolvedValue([]),
@@ -1179,5 +1182,42 @@ describe('pinned note reordering', () => {
 		await waitFor(() =>
 			expect(renderedTitles(container)).toEqual(['Alpha', 'Beta', 'Gamma', 'Plain'])
 		);
+	});
+
+	it('scrolls the list when a drag reaches its top edge', async () => {
+		const { container } = render(Page);
+		await waitFor(() => expect(screen.getByText('Gamma')).toBeInTheDocument());
+		stubRowGeometry(container);
+
+		// A list taller than its viewport, scrolled part-way down.
+		const list = container.querySelector('ul.note-list') as HTMLElement;
+		list.getBoundingClientRect = () =>
+			({ top: 0, bottom: 300, height: 300, left: 0, right: 200, width: 200,
+				x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+		Object.defineProperty(list, 'clientHeight', { value: 300, configurable: true });
+		Object.defineProperty(list, 'scrollHeight', { value: 900, configurable: true });
+		list.style.overflowY = 'auto';
+		list.scrollTop = 400;
+
+		// Frames are pumped by hand so the assertion doesn't race a real rAF.
+		const frames: FrameRequestCallback[] = [];
+		vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
+			frames.push(cb);
+			return frames.length;
+		});
+		vi.stubGlobal('cancelAnimationFrame', () => {});
+
+		const grip = handles(container)[2];
+		await fireEvent(grip, pointer('pointerdown', 90));
+		// Held right at the top edge of the scroller.
+		await fireEvent(grip, pointer('pointermove', 2));
+
+		expect(frames.length).toBeGreaterThan(0);
+		frames.shift()!(0);
+
+		expect(list.scrollTop).toBeLessThan(400);
+
+		await fireEvent(grip, pointer('pointerup', 2));
+		vi.unstubAllGlobals();
 	});
 });
