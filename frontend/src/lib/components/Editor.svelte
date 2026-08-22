@@ -163,9 +163,9 @@
 
 	.editor-container :global(.milkdown) {
 		/* 720px wrapped far too early on a desktop pane. Wider, but still
-		   capped and centred — an uncapped column is hard to read. */
+		   capped — an uncapped column is hard to read. Left-aligned, as it
+		   has always been: the toolbar above it starts at the left edge. */
 		max-width: min(1100px, 100%);
-		margin-inline: auto;
 		min-height: 100%;
 	}
 
