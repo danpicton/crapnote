@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { dropIndexFromY, createDragHandle } from './listdrag';
+import {
+	dropIndexFromY,
+	createDragHandle,
+	edgeScrollDelta,
+	EDGE_SCROLL_ZONE_PX,
+	MAX_EDGE_SCROLL_PX,
+} from './listdrag';
 
 // Four 20px-tall rows stacked from y=0: midpoints at 10, 30, 50, 70.
 const rows = [
@@ -50,5 +56,38 @@ describe('createDragHandle', () => {
 		expect(handle.getAttribute('contenteditable')).toBe('false');
 		expect(handle.getAttribute('aria-hidden')).toBe('true');
 		expect(handle.className).toContain('list-drag-handle');
+	});
+});
+
+describe('edgeScrollDelta', () => {
+	// A 400px-tall scroller starting at y=100.
+	const rect = { top: 100, bottom: 500 };
+
+	it('does not scroll while the pointer is clear of both edges', () => {
+		expect(edgeScrollDelta(rect, 300)).toBe(0);
+	});
+
+	it('scrolls up when the pointer nears the top edge', () => {
+		expect(edgeScrollDelta(rect, rect.top + 5)).toBeLessThan(0);
+	});
+
+	it('scrolls down when the pointer nears the bottom edge', () => {
+		expect(edgeScrollDelta(rect, rect.bottom - 5)).toBeGreaterThan(0);
+	});
+
+	it('scrolls faster the closer the pointer gets to the edge', () => {
+		const near = edgeScrollDelta(rect, rect.bottom - 2);
+		const far = edgeScrollDelta(rect, rect.bottom - EDGE_SCROLL_ZONE_PX + 2);
+		expect(near).toBeGreaterThan(far);
+	});
+
+	it('caps the speed at the maximum, even past the edge', () => {
+		expect(edgeScrollDelta(rect, rect.bottom + 500)).toBe(MAX_EDGE_SCROLL_PX);
+		expect(edgeScrollDelta(rect, rect.top - 500)).toBe(-MAX_EDGE_SCROLL_PX);
+	});
+
+	it('is inert exactly at the zone boundary', () => {
+		expect(edgeScrollDelta(rect, rect.top + EDGE_SCROLL_ZONE_PX)).toBe(0);
+		expect(edgeScrollDelta(rect, rect.bottom - EDGE_SCROLL_ZONE_PX)).toBe(0);
 	});
 });

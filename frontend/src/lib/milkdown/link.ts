@@ -72,10 +72,13 @@ export const linkKeymapPlugin = $prose(() =>
 		props: {
 			// Open links on click.
 			handleDOMEvents: {
-				click(_view: EditorView, event: MouseEvent): boolean {
+				click(view: EditorView, event: MouseEvent): boolean {
 					const anchor = (event.target as HTMLElement).closest('a');
 					const href = anchor?.getAttribute('href');
 					if (!anchor || !href) return false;
+					// A drag-select that happens to finish on a link is a
+					// selection, not a click through to the target.
+					if (!view.state.selection.empty) return false;
 					event.preventDefault();
 					// safeLinkMarkSchema keeps unsafe hrefs out of the DOM, but
 					// refuse to navigate to one here too in case an <a> arrives

@@ -32,6 +32,58 @@ export function dropIndexFromY(rects: DragRect[], originIndex: number, clientY: 
 	return index;
 }
 
+/** How close to a scroller's edge the pointer must get before it scrolls. */
+export const EDGE_SCROLL_ZONE_PX = 48;
+/** Fastest edge scroll, in px per animation frame. */
+export const MAX_EDGE_SCROLL_PX = 14;
+
+export interface EdgeRect {
+	top: number;
+	bottom: number;
+}
+
+/**
+ * How far to scroll this frame, given where the pointer sits relative to the
+ * scrolling container. Negative scrolls up, positive down, 0 leaves it alone.
+ *
+ * Without this a drag could only reach items already on screen — on a phone,
+ * often three or four of them.
+ */
+export function edgeScrollDelta(
+	rect: EdgeRect,
+	clientY: number,
+	zone = EDGE_SCROLL_ZONE_PX,
+	maxSpeed = MAX_EDGE_SCROLL_PX
+): number {
+	const fromTop = clientY - rect.top;
+	if (fromTop < zone) {
+		// Ramps from 0 at the zone boundary to maxSpeed at the edge, and stays
+		// pinned there if the pointer leaves the container entirely.
+		const ratio = Math.min(1, (zone - fromTop) / zone);
+		return -Math.ceil(ratio * maxSpeed);
+	}
+	const fromBottom = rect.bottom - clientY;
+	if (fromBottom < zone) {
+		const ratio = Math.min(1, (zone - fromBottom) / zone);
+		return Math.ceil(ratio * maxSpeed);
+	}
+	return 0;
+}
+
+/** The nearest ancestor that actually scrolls vertically, if any. */
+export function findScrollParent(el: HTMLElement | null): HTMLElement | null {
+	for (let node = el?.parentElement ?? null; node; node = node.parentElement) {
+		const { overflowY } = getComputedStyle(node);
+		if (
+			(overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') &&
+			node.scrollHeight > node.clientHeight
+		) {
+			return node;
+		}
+	}
+	return null;
+}
+
 /** The grip element shown in the gutter of each list item. */
 export function createDragHandle(): HTMLElement {
 	const handle = document.createElement('span');
@@ -65,6 +117,9 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 	let originIndex = -1;
 	let dropIndex = -1;
 	let activePointer: number | null = null;
+	let scroller: HTMLElement | null = null;
+	let scrollFrame: number | null = null;
+	let lastClientY = 0;
 
 	const siblingRects = (): DragRect[] =>
 		siblings.map((el) => {
@@ -89,9 +144,44 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 		}
 	};
 
+	/** Recompute the drop slot from the pointer's last known position. */
+	const refreshDropTarget = () => {
+		dropIndex = dropIndexFromY(siblingRects(), originIndex, lastClientY);
+		showIndicator(dropIndex);
+	};
+
+	const stopEdgeScroll = () => {
+		if (scrollFrame != null) cancelAnimationFrame(scrollFrame);
+		scrollFrame = null;
+	};
+
+	/**
+	 * While the pointer sits near the scroller's edge, keep scrolling and
+	 * re-deriving the drop slot — the rows move under a stationary finger, so
+	 * the indicator has to be recomputed each frame, not just on pointermove.
+	 */
+	const stepEdgeScroll = () => {
+		scrollFrame = null;
+		if (originIndex < 0 || !scroller) return;
+
+		const rect = scroller.getBoundingClientRect();
+		const delta = edgeScrollDelta(rect, lastClientY);
+		if (delta !== 0) {
+			const before = scroller.scrollTop;
+			scroller.scrollTop = before + delta;
+			if (scroller.scrollTop !== before) refreshDropTarget();
+		}
+		scrollFrame = requestAnimationFrame(stepEdgeScroll);
+	};
+
+	const startEdgeScroll = () => {
+		if (scrollFrame == null && scroller) scrollFrame = requestAnimationFrame(stepEdgeScroll);
+	};
+
 	const finish = (commit: boolean) => {
 		if (originIndex < 0) return;
 
+		stopEdgeScroll();
 		clearIndicators();
 		dom.classList.remove('list-item-dragging');
 		if (activePointer != null) {
@@ -108,6 +198,7 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 		dropIndex = -1;
 		activePointer = null;
 		siblings = [];
+		scroller = null;
 
 		if (!commit || to < 0 || to === from) return;
 
@@ -123,8 +214,9 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 	const onPointerMove = (e: PointerEvent) => {
 		if (originIndex < 0) return;
 		e.preventDefault();
-		dropIndex = dropIndexFromY(siblingRects(), originIndex, e.clientY);
-		showIndicator(dropIndex);
+		lastClientY = e.clientY;
+		refreshDropTarget();
+		startEdgeScroll();
 	};
 
 	const onPointerUp = (e: PointerEvent) => {
@@ -164,6 +256,8 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 		originIndex = index;
 		dropIndex = index;
 		activePointer = e.pointerId;
+		lastClientY = e.clientY;
+		scroller = findScrollParent(dom);
 
 		dom.classList.add('list-item-dragging');
 		try {
