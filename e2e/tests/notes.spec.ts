@@ -102,6 +102,28 @@ test.describe('Notes', () => {
     await expect(page.getByText('To Archive')).not.toBeVisible();
   });
 
+  test('can reach the trash from the sidebar and restore a note', async ({ page }) => {
+    await createNote(page, 'To Untrash');
+
+    const noteItem = page.locator('.note-item.selected');
+    await noteItem.hover();
+    await noteItem.getByTitle('Delete').click();
+    await expect(page.locator('.note-item').filter({ hasText: 'To Untrash' })).not.toBeVisible();
+
+    // The trash must be reachable from the nav, not just by typing the URL.
+    const trashed = page.waitForResponse((r) => r.url().includes('/api/trash'));
+    await page.getByTitle('Trash').click();
+    await expect(page).toHaveURL('/trash');
+    await trashed;
+    await expect(page.getByText('To Untrash')).toBeVisible();
+
+    await page.getByRole('button', { name: /restore note/i }).click();
+    await expect(page.getByText('To Untrash')).not.toBeVisible();
+
+    await page.goto('/');
+    await expect(page.locator('.note-item').filter({ hasText: 'To Untrash' })).toBeVisible();
+  });
+
   test('search filters the note list', async ({ page }) => {
     await createNote(page, 'Apple note');
     await createNote(page, 'Banana note');

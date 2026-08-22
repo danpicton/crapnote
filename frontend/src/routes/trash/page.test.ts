@@ -123,3 +123,22 @@ describe('Trash page offline', () => {
 		expect(screen.queryByText(/isn't available offline/i)).not.toBeInTheDocument();
 	});
 });
+
+describe('trash navigation', () => {
+	it('shows the mobile tab bar with Trash as the current tab', async () => {
+		render(TrashPage);
+
+		const tab = await screen.findByRole('link', { name: 'Trash' });
+		expect(tab.getAttribute('href')).toBe('/trash');
+		expect(tab.getAttribute('aria-current')).toBe('page');
+	});
+
+	it('offers the other tabs alongside it', async () => {
+		render(TrashPage);
+
+		expect((await screen.findByRole('link', { name: 'Notes' })).getAttribute('href')).toBe('/');
+		expect((await screen.findByRole('link', { name: 'Archive' })).getAttribute('href')).toBe(
+			'/archive'
+		);
+	});
+});

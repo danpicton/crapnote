@@ -1493,6 +1493,7 @@
 					{#if syncStatus === 'synced'}<CheckCircle2 size={14} />{:else}<CloudUpload size={14} />{/if}
 				</button>
 				<a href="/archive" class="bottom-btn" title="Archive"><Archive size={15} /></a>
+				<a href="/trash" class="bottom-btn" title="Trash"><Trash2 size={15} /></a>
 				<a href="/settings" class="bottom-btn" title="Settings"><Settings size={15} /></a>
 				<button class="bottom-btn" onclick={handleLogout} title="Log out"><LogOut size={15} /></button>
 			</div>

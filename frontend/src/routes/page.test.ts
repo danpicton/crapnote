@@ -203,6 +203,14 @@ describe('Notes page', () => {
 		});
 	});
 
+	it('shows a trash nav link in the sidebar bottom', async () => {
+		render(Page);
+		await waitFor(() => {
+			const trashLink = screen.getByTitle('Trash');
+			expect(trashLink.getAttribute('href')).toBe('/trash');
+		});
+	});
+
 	it('calls archive when archive button clicked on note', async () => {
 		vi.mocked(api.notes.archive).mockResolvedValueOnce(undefined);
 		render(Page);
