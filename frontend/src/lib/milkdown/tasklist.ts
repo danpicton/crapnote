@@ -79,6 +79,11 @@ export function createTaskListItemView(
 	dom.appendChild(handle);
 
 	let checkbox: HTMLInputElement | null = null;
+	// Tracks what the item is actually checked to. initialNode is the node
+	// captured at construction and is never reassigned — update() reuses this
+	// NodeView for a plain checked-state change, so reading it later would
+	// give the value from mount rather than the current one.
+	let checkedNow = initialNode.attrs.checked === true;
 
 	if (isTaskItem) {
 		dom.setAttribute('data-item-type', 'task');
@@ -106,7 +111,9 @@ export function createTaskListItemView(
 			// still land, then be dropped by the autosave lock guard and lost
 			// silently on reload.
 			if (!view.editable) {
-				if (checkbox) checkbox.checked = initialNode.attrs.checked === true;
+				// The browser has already flipped the native input; put it back
+				// to what the document says.
+				if (checkbox) checkbox.checked = checkedNow;
 				return;
 			}
 			const pos = typeof getPos === 'function' ? getPos() : undefined;
@@ -135,7 +142,8 @@ export function createTaskListItemView(
 			// If task-ness changed, let ProseMirror recreate the NodeView
 			if ((updatedNode.attrs.checked != null) !== isTaskItem) return false;
 			if (isTaskItem && checkbox) {
-				checkbox.checked = updatedNode.attrs.checked === true;
+				checkedNow = updatedNode.attrs.checked === true;
+				checkbox.checked = checkedNow;
 				dom.setAttribute('data-checked', String(updatedNode.attrs.checked));
 			}
 			return true;

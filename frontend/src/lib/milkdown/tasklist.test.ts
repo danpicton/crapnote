@@ -48,7 +48,7 @@ function mountItem(opts: { checked?: boolean | null; editable?: boolean } = {}) 
 		: doc.nodeAt(ITEM_POS)!;
 
 	const nodeView = createTaskListItemView(node, view, () => ITEM_POS);
-	return { nodeView, dispatch, dom: nodeView.dom as HTMLElement };
+	return { nodeView, dispatch, view, dom: nodeView.dom as HTMLElement };
 }
 
 describe('task list item view', () => {
@@ -81,5 +81,33 @@ describe('task list item view', () => {
 		const { dom } = mountItem({ checked: null });
 		expect(dom.querySelector('.task-check-hit')).toBeNull();
 		expect(dom.querySelector('.list-drag-handle')).not.toBeNull();
+	});
+});
+
+describe('locked checkbox revert', () => {
+	it('reverts to the current checked state, not the one from mount', () => {
+		const { nodeView, dom, dispatch, view } = mountItem({ checked: false });
+		const box = dom.querySelector('input.task-checkbox') as HTMLInputElement;
+
+		// The item is ticked while editable. Task-ness is unchanged, so
+		// ProseMirror reuses this NodeView and only calls update().
+		const ticked = schema.node('list_item', { checked: true }, [
+			schema.node('paragraph', null, [schema.text('milk')]),
+		]);
+		nodeView.update!(ticked);
+		expect(box.checked).toBe(true);
+
+		// The note is then locked. setProps({ editable }) does not rebuild
+		// NodeViews, so this same instance handles the click.
+		(view as unknown as { editable: boolean }).editable = false;
+
+		box.checked = false; // the browser toggles before our handler runs
+		(dom.querySelector('.task-check-hit') as HTMLElement).dispatchEvent(
+			new MouseEvent('click', { bubbles: true })
+		);
+
+		expect(dispatch).not.toHaveBeenCalled();
+		expect(box.checked).toBe(true);
+		expect(dom.getAttribute('data-checked')).toBe('true');
 	});
 });

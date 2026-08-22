@@ -517,7 +517,16 @@
 				const d = dirtyById.get(n.id);
 				if (!d) return n;
 				const flags = d.flags_dirty
-					? { starred: d.starred, pinned: d.pinned, locked: d.locked ?? n.locked }
+					? {
+							starred: d.starred,
+							pinned: d.pinned,
+							locked: d.locked ?? n.locked,
+							// The local slot too: a note pinned offline holds a
+							// client-assigned pin_order the server hasn't seen
+							// yet, and without it the note would sort by the
+							// server's stale 0 instead of at the top.
+							pin_order: d.pin_order ?? n.pin_order,
+						}
 					: {};
 				if (!d.is_dirty) return { ...n, ...flags };
 				return { ...n, ...flags, title: d.title, body: d.body, updated_at: d.local_updated_at };

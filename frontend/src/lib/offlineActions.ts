@@ -18,6 +18,7 @@ function cachedFromNote(note: Note, tags: Array<{ id: number; name: string }>): 
 		starred: note.starred,
 		pinned: note.pinned,
 		locked: note.locked,
+		pin_order: note.pin_order,
 		tags,
 		server_updated_at: note.updated_at,
 		local_updated_at: new Date().toISOString(),

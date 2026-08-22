@@ -288,7 +288,12 @@ async function syncNewNote(db: IDBDatabase, note: CachedNote, result: SyncResult
 		// the server's (default) values.
 		...(note.flags_dirty
 			? {}
-			: { starred: serverNote.starred, pinned: serverNote.pinned, locked: serverNote.locked }),
+			: {
+					starred: serverNote.starred,
+					pinned: serverNote.pinned,
+					locked: serverNote.locked,
+					pin_order: serverNote.pin_order,
+				}),
 		server_updated_at: serverNote.updated_at,
 		local_updated_at: serverNote.updated_at,
 		is_dirty: false,
@@ -358,6 +363,9 @@ async function reconcileFlagsCheckpoint(
 		starred: current.starred,
 		pinned: current.pinned,
 		locked: lockDeferred ? true : current.locked,
+		// The server owns pin_order — a note pinned offline carries only the
+		// client's guess (nextPinOrder), which this reconcile must replace.
+		pin_order: current.pin_order ?? note.pin_order,
 		flags_dirty: lockDeferred,
 		flags_toggled: lockDeferred ? { locked: true } : undefined,
 		...(note.is_dirty && serverChanged
@@ -409,6 +417,7 @@ async function pushContentCheckpoint(
 			starred: serverNote.starred,
 			pinned: serverNote.pinned,
 			locked: serverNote.locked,
+			pin_order: serverNote.pin_order ?? note.pin_order,
 			server_updated_at: serverNote.updated_at,
 			local_updated_at: serverNote.updated_at,
 			is_dirty: false,

@@ -692,6 +692,31 @@ describe('Offline mode', () => {
 		expect(titles).toEqual(['Pin Me Offline', 'Already Pinned']);
 	});
 
+	it('keeps an offline pin at the top when the server list lands before sync', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		// Pinned offline (flags_dirty, client-assigned slot), but the server
+		// still reports it unpinned at pin_order 0.
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ id: 7, title: 'Pinned Offline', body: '', starred: false, pinned: true, pin_order: -3,
+			  tags: [], server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			  is_dirty: false, is_new: false, flags_dirty: true, flags_toggled: { pinned: true } },
+		]);
+		vi.mocked(api.notes.list).mockResolvedValue([
+			mockNote({ id: 6, title: 'Pinned Online', pinned: true, pin_order: -1 }),
+			mockNote({ id: 7, title: 'Pinned Offline', pinned: false, pin_order: 0 }),
+		]);
+
+		render(Page);
+		await waitFor(() => screen.getByText('Pinned Offline'));
+
+		await waitFor(() => {
+			const titles = Array.from(document.querySelectorAll('li.note-item .note-title')).map(
+				(el) => el.textContent
+			);
+			expect(titles).toEqual(['Pinned Offline', 'Pinned Online']);
+		});
+	});
+
 	it('caches notes to IndexedDB after a successful online load', async () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: true });
 		vi.mocked(api.notes.list).mockResolvedValue([
