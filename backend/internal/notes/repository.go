@@ -45,14 +45,14 @@ func (r *Repo) Get(ctx context.Context, id, userID int64) (*Note, error) {
 	var starred, pinned, archived, locked int
 	err := r.db.QueryRowContext(ctx, `
 		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,
-		       n.created_at, n.updated_at
+		       n.pin_order, n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.id = ? AND n.user_id = ?
 		  AND n.archived = 0
 		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)
 	`, id, userID).Scan(
 		&n.ID, &n.UserID, &n.Title, &n.Body,
-		&starred, &pinned, &archived, &locked, &n.CreatedAt, &n.UpdatedAt,
+		&starred, &pinned, &archived, &locked, &n.PinOrder, &n.CreatedAt, &n.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -86,11 +86,12 @@ func (r *Repo) IsLocked(ctx context.Context, id, userID int64) (bool, error) {
 }
 
 // List returns all non-trashed notes for a user, with optional filters.
-// Pinned notes appear first, then ordered by updated_at DESC.
+// Pinned notes appear first in their user-chosen order, then the rest by
+// updated_at DESC.
 func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*Note, error) {
 	query := `
 		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,
-		       n.created_at, n.updated_at
+		       n.pin_order, n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.user_id = ?
 		  AND n.archived = 0
@@ -120,7 +121,9 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 		args = append(args, `"`+escaped+`"*`)
 	}
 
-	query += ` ORDER BY n.pinned DESC, n.updated_at DESC`
+	// pin_order is the user's drag order among pinned notes. It is always 0
+	// for unpinned notes, so for those this collapses to updated_at DESC.
+	query += ` ORDER BY n.pinned DESC, n.pin_order ASC, n.updated_at DESC`
 
 	if filter.Limit > 0 {
 		query += ` LIMIT ? OFFSET ?`
@@ -167,7 +170,7 @@ func scanNotes(rows *sql.Rows) ([]*Note, error) {
 		var starred, pinned, archived, locked int
 		if err := rows.Scan(
 			&n.ID, &n.UserID, &n.Title, &n.Body,
-			&starred, &pinned, &archived, &locked, &n.CreatedAt, &n.UpdatedAt,
+			&starred, &pinned, &archived, &locked, &n.PinOrder, &n.CreatedAt, &n.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -216,8 +219,76 @@ func (r *Repo) AutoLockStale(ctx context.Context, olderThan time.Duration) (int6
 }
 
 // SetPinned toggles the pinned flag for a note.
+//
+// Pinning also claims the top slot, which is where a freshly pinned note has
+// always appeared; unpinning resets the slot to 0 so the note sorts purely by
+// updated_at among the unpinned ones. Neither touches updated_at — pinning is
+// not a content edit.
 func (r *Repo) SetPinned(ctx context.Context, id, userID int64, pinned bool) error {
-	return r.setBool(ctx, "pinned", id, userID, pinned)
+	var res sql.Result
+	var err error
+	if pinned {
+		res, err = r.db.ExecContext(ctx, `
+			UPDATE notes
+			SET pinned = 1,
+			    pin_order = COALESCE(
+			        (SELECT MIN(p.pin_order) - 1 FROM notes p
+			          WHERE p.user_id = ? AND p.pinned = 1 AND p.id <> notes.id),
+			        0)
+			WHERE id = ? AND user_id = ?`,
+			userID, id, userID,
+		)
+	} else {
+		res, err = r.db.ExecContext(ctx,
+			`UPDATE notes SET pinned = 0, pin_order = 0 WHERE id = ? AND user_id = ?`,
+			id, userID,
+		)
+	}
+	if err != nil {
+		return fmt.Errorf("set pinned: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// ReorderPins writes an explicit order over the user's pinned notes, given
+// their IDs top-first.
+//
+// IDs that aren't the caller's, or aren't currently pinned, are skipped rather
+// than rejected: the client sends the order it just rendered, and a note
+// unpinned on another device in the meantime shouldn't fail the whole request.
+// Like SetPinned it leaves updated_at alone.
+func (r *Repo) ReorderPins(ctx context.Context, userID int64, ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("reorder pins: %w", err)
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op once committed
+
+	stmt, err := tx.PrepareContext(ctx,
+		`UPDATE notes SET pin_order = ? WHERE id = ? AND user_id = ? AND pinned = 1`)
+	if err != nil {
+		return fmt.Errorf("reorder pins: %w", err)
+	}
+	defer stmt.Close() //nolint:errcheck
+
+	for i, id := range ids {
+		if _, err := stmt.ExecContext(ctx, i, id, userID); err != nil {
+			return fmt.Errorf("reorder pins: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("reorder pins: %w", err)
+	}
+	return nil
 }
 
 func (r *Repo) setBool(ctx context.Context, col string, id, userID int64, val bool) error {
@@ -285,7 +356,7 @@ func (r *Repo) Unarchive(ctx context.Context, id, userID int64) error {
 func (r *Repo) ListArchived(ctx context.Context, userID int64, limit, offset int) ([]*Note, error) {
 	query := `
 		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,
-		       n.created_at, n.updated_at
+		       n.pin_order, n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.user_id = ?
 		  AND n.archived = 1

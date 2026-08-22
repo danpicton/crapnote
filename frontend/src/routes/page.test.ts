@@ -49,6 +49,7 @@ vi.mock('$lib/api', () => {
 			toggleLock: vi.fn(),
 			archive: vi.fn(),
 			listArchived: vi.fn(),
+			reorderPins: vi.fn(),
 		},
 		tags: { list: vi.fn(), listForNote: vi.fn().mockResolvedValue([]) },
 		auth: { logout: vi.fn() },
@@ -1001,5 +1002,109 @@ describe('Lock controls in the note list', () => {
 
 		await fireEvent.click(panel.querySelector('.mob-swipe-lock') as HTMLElement);
 		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(1));
+	});
+});
+
+describe('pinned note reordering', () => {
+	const pinnedFixture = [
+		mockNote({ id: 1, title: 'Alpha', pinned: true, pin_order: 0 }),
+		mockNote({ id: 2, title: 'Beta', pinned: true, pin_order: 1 }),
+		mockNote({ id: 3, title: 'Gamma', pinned: true, pin_order: 2 }),
+		mockNote({ id: 9, title: 'Plain', pinned: false }),
+	];
+
+	/** Titles in the rendered list, top first. */
+	function renderedTitles(container: HTMLElement): string[] {
+		return Array.from(container.querySelectorAll('li.note-item .note-title')).map(
+			(el) => el.textContent ?? ''
+		);
+	}
+
+	function handles(container: HTMLElement): HTMLElement[] {
+		return Array.from(container.querySelectorAll<HTMLElement>('.pin-drag-handle'));
+	}
+
+	/** Rows report a fixed 40px height so the drop maths is predictable. */
+	function stubRowGeometry(container: HTMLElement) {
+		container.querySelectorAll<HTMLElement>('li.note-item.pinned').forEach((row, i) => {
+			row.getBoundingClientRect = () =>
+				({ top: i * 40, bottom: i * 40 + 40, height: 40, left: 0, right: 100, width: 100,
+					x: 0, y: i * 40, toJSON: () => ({}) }) as DOMRect;
+		});
+	}
+
+	function pointer(type: string, clientY: number): PointerEvent {
+		// jsdom has no PointerEvent constructor; MouseEvent carries what the
+		// handlers actually read (button, clientY, pointerId is optional).
+		const e = new MouseEvent(type, { bubbles: true, button: 0, clientY });
+		Object.defineProperty(e, 'pointerId', { value: 1 });
+		return e as unknown as PointerEvent;
+	}
+
+	beforeEach(() => {
+		// clearAllMocks wipes calls but not implementations, so an offline-note
+		// fixture left by an earlier test would still merge into this list.
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([]);
+		vi.mocked(api.notes.list).mockResolvedValue(pinnedFixture);
+		vi.mocked(api.notes.reorderPins).mockResolvedValue(undefined);
+	});
+
+	it('offers a drag handle on pinned notes only', async () => {
+		const { container } = render(Page);
+		await waitFor(() => expect(screen.getByText('Gamma')).toBeInTheDocument());
+
+		expect(handles(container)).toHaveLength(3);
+		const plain = Array.from(container.querySelectorAll('li.note-item')).find((li) =>
+			li.textContent?.includes('Plain')
+		);
+		expect(plain?.querySelector('.pin-drag-handle')).toBeNull();
+	});
+
+	it('reorders the list and persists the new order', async () => {
+		const { container } = render(Page);
+		await waitFor(() => expect(screen.getByText('Gamma')).toBeInTheDocument());
+		stubRowGeometry(container);
+
+		// Drag Gamma (third pinned row) up above Alpha.
+		const grip = handles(container)[2];
+		await fireEvent(grip, pointer('pointerdown', 90));
+		await fireEvent(grip, pointer('pointermove', 5));
+		await fireEvent(grip, pointer('pointerup', 5));
+
+		await waitFor(() =>
+			expect(renderedTitles(container)).toEqual(['Gamma', 'Alpha', 'Beta', 'Plain'])
+		);
+		expect(api.notes.reorderPins).toHaveBeenCalledWith([3, 1, 2]);
+	});
+
+	it('leaves the order alone when the note is dropped where it started', async () => {
+		const { container } = render(Page);
+		await waitFor(() => expect(screen.getByText('Gamma')).toBeInTheDocument());
+		stubRowGeometry(container);
+
+		const grip = handles(container)[0];
+		await fireEvent(grip, pointer('pointerdown', 10));
+		await fireEvent(grip, pointer('pointermove', 10));
+		await fireEvent(grip, pointer('pointerup', 10));
+
+		expect(api.notes.reorderPins).not.toHaveBeenCalled();
+		expect(renderedTitles(container)).toEqual(['Alpha', 'Beta', 'Gamma', 'Plain']);
+	});
+
+	it('rolls the list back when saving the order fails', async () => {
+		vi.mocked(api.notes.reorderPins).mockRejectedValue(new Error('boom'));
+		const { container } = render(Page);
+		await waitFor(() => expect(screen.getByText('Gamma')).toBeInTheDocument());
+		stubRowGeometry(container);
+
+		const grip = handles(container)[2];
+		await fireEvent(grip, pointer('pointerdown', 90));
+		await fireEvent(grip, pointer('pointermove', 5));
+		await fireEvent(grip, pointer('pointerup', 5));
+
+		await waitFor(() => expect(api.notes.reorderPins).toHaveBeenCalled());
+		await waitFor(() =>
+			expect(renderedTitles(container)).toEqual(['Alpha', 'Beta', 'Gamma', 'Plain'])
+		);
 	});
 });

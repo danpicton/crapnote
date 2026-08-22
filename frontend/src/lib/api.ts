@@ -35,6 +35,13 @@ export interface Note {
 	pinned: boolean;
 	archived: boolean;
 	locked: boolean;
+	/**
+	 * Position among the user's pinned notes, ascending; always 0 when unpinned.
+	 * Optional because notes built locally (offline creates, cached records
+	 * written before this shipped) have no server-assigned position yet — the
+	 * ordering helpers treat a missing value as 0.
+	 */
+	pin_order?: number;
 	created_at: string;
 	updated_at: string;
 }
@@ -137,6 +144,8 @@ export const api = {
 		delete: (id: number) => request<void>('DELETE', `/api/notes/${id}`),
 		toggleStar: (id: number) => request<Note>('PATCH', `/api/notes/${id}/star`),
 		togglePin: (id: number) => request<Note>('PATCH', `/api/notes/${id}/pin`),
+		/** Records the drag order of the caller's pinned notes, top first. */
+		reorderPins: (ids: number[]) => request<void>('PUT', '/api/notes/pins/order', { ids }),
 		toggleLock: (id: number) => request<Note>('PATCH', `/api/notes/${id}/lock`),
 		archive: (id: number) => request<void>('PATCH', `/api/notes/${id}/archive`),
 		unarchive: (id: number) => request<void>('PATCH', `/api/notes/${id}/unarchive`),

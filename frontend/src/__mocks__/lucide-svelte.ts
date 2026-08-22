@@ -22,6 +22,7 @@ export {
 	noop as Eye,
 	noop as EyeOff,
 	noop as FileCode2,
+	noop as GripVertical,
 	noop as Home,
 	noop as Image,
 	noop as Info,

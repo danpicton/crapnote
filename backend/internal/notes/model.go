@@ -14,12 +14,15 @@ var ErrLocked = errors.New("note is locked")
 
 // Note represents a single user note.
 type Note struct {
-	ID        int64
-	UserID    int64
-	Title     string
-	Body      string
-	Starred   bool
-	Pinned    bool
+	ID      int64
+	UserID  int64
+	Title   string
+	Body    string
+	Starred bool
+	Pinned  bool
+	// PinOrder positions this note among the user's pinned notes (ascending).
+	// Always 0 for unpinned notes, so ordering falls through to UpdatedAt.
+	PinOrder  int
 	Archived  bool
 	Locked    bool
 	CreatedAt time.Time

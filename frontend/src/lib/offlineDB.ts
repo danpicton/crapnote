@@ -5,6 +5,7 @@ export interface CachedNote {
 	starred: boolean;
 	pinned: boolean;
 	locked?: boolean;           // absent on records cached before locking shipped
+	pin_order?: number;         // drag position among pinned notes; absent means 0
 	tags: Array<{ id: number; name: string }>;  // cached for offline tag-filtering
 	server_updated_at: string;  // server's updated_at when we last fetched — used for conflict detection
 	local_updated_at: string;   // ISO string of last local modification

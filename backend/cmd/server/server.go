@@ -17,18 +17,18 @@ import (
 )
 
 func newMux(
-	authHandler    *auth.Handler,
-	adminHandler   *auth.AdminHandler,
-	setupHandler   *auth.SetupHandler,
-	notesHandler   *notes.Handler,
-	tagsHandler    *tags.Handler,
-	trashHandler   *trash.Handler,
-	exportHandler  *export.Handler,
-	imagesHandler  *images.Handler,
-	tokensHandler  *tokens.Handler,
+	authHandler *auth.Handler,
+	adminHandler *auth.AdminHandler,
+	setupHandler *auth.SetupHandler,
+	notesHandler *notes.Handler,
+	tagsHandler *tags.Handler,
+	trashHandler *trash.Handler,
+	exportHandler *export.Handler,
+	imagesHandler *images.Handler,
+	tokensHandler *tokens.Handler,
 	settingsHandler *settings.Handler,
-	loginLimiter   *ratelimit.Limiter,
-	bearerLimiter  *ratelimit.Limiter,
+	loginLimiter *ratelimit.Limiter,
+	bearerLimiter *ratelimit.Limiter,
 ) *http.ServeMux {
 	mux := http.NewServeMux()
 
@@ -124,6 +124,8 @@ func newMux(
 	protectedWrite("PATCH", "/api/notes/{id}/star", notesHandler.ToggleStar)
 	protectedWrite("PATCH", "/api/notes/{id}/pin", notesHandler.TogglePin)
 	protectedWrite("PATCH", "/api/notes/{id}/lock", notesHandler.ToggleLock)
+	// Three segments, so this can never be shadowed by /api/notes/{id}.
+	protectedWrite("PUT", "/api/notes/pins/order", notesHandler.ReorderPins)
 	protectedWrite("PATCH", "/api/notes/{id}/archive", notesHandler.Archive)
 	protectedWrite("PATCH", "/api/notes/{id}/unarchive", notesHandler.Unarchive)
 	protected("GET", "/api/archive", notesHandler.ListArchived)

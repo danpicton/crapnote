@@ -115,10 +115,13 @@ test.describe('Notes', () => {
     await page.getByTitle('Trash').click();
     await expect(page).toHaveURL('/trash');
     await trashed;
-    await expect(page.getByText('To Untrash')).toBeVisible();
+    // The suite shares one database, so other tests' deletions sit here too —
+    // scope to this note's row.
+    const row = page.locator('li.entry').filter({ hasText: 'To Untrash' });
+    await expect(row).toBeVisible();
 
-    await page.getByRole('button', { name: /restore note/i }).click();
-    await expect(page.getByText('To Untrash')).not.toBeVisible();
+    await row.getByRole('button', { name: /restore note/i }).click();
+    await expect(row).not.toBeVisible();
 
     await page.goto('/');
     await expect(page.locator('.note-item').filter({ hasText: 'To Untrash' })).toBeVisible();
