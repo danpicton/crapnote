@@ -27,7 +27,7 @@
 	import type { CachedNote } from '$lib/offlineDB';
 	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
-	import { sortNotes, reorderPinned } from '$lib/noteOrder';
+	import { sortNotes, reorderPinned, nextPinOrder } from '$lib/noteOrder';
 	import { dropIndexFromY } from '$lib/milkdown/listdrag';
 
 	// PUBLIC_OFFLINE_NOTES_COUNT can be set at build time via the PUBLIC_ prefix env var.
@@ -118,7 +118,7 @@
 
 	function onPinDragStart(e: PointerEvent, noteId: number) {
 		// Reordering is a server write; there is no offline replay for it.
-		if (!isOnline) return;
+		if (!pinDragEnabled) return;
 		if (e.button !== 0) return;
 
 		const rows = Array.from(
@@ -305,6 +305,16 @@
 	let panelNewTagName = $state('');
 	let activeTagId = $state<number | null>(null);
 	let starredOnly = $state(false);
+
+	/**
+	 * Dragging needs the full pinned set in view. Under a search/tag/starred
+	 * filter the list is a subset, so a drag could only ever express an order
+	 * over the pinned notes that happen to be visible — and reordering is a
+	 * property of the whole list, not of the current view.
+	 */
+	let pinDragEnabled = $derived(
+		isOnline && !search && activeTagId === null && !starredOnly
+	);
 	let showTagsPanel = $state(false);
 	// Note action menu
 	let showNoteMenu = $state(false);
@@ -1096,7 +1106,13 @@
 		if (!(err instanceof OfflineError)) throw err;
 		const note = notes.find((n) => n.id === id);
 		if (!note) return null;
-		const toggled = { ...note, [flag]: !note[flag] };
+		const toggled: Note = { ...note, [flag]: !note[flag] };
+		if (flag === 'pinned') {
+			// Online, the server assigns the top slot (MIN(pin_order) - 1) on
+			// pin and clears it on unpin. Offline nothing does, so the note
+			// would keep its stale 0 and sort below notes pinned earlier.
+			toggled.pin_order = toggled.pinned ? nextPinOrder(notes) : 0;
+		}
 		await markNoteFlagsOffline(toggled, flag);
 		syncStatus = 'unsynced';
 		return toggled;
@@ -1123,8 +1139,9 @@
 		}
 		if (!updated) return;
 		listVersion++; // invalidate in-flight list loads carrying the old state
-		// A freshly pinned note claims pin_order 0 server-side; re-sorting on the
-		// shared comparator puts it at the top and leaves the rest as they were.
+		// A freshly pinned note claims the top slot — server-side when online,
+		// via nextPinOrder when not — so re-sorting on the shared comparator
+		// puts it at the top and leaves the rest as they were.
 		notes = sortNotes(
 			notes.map((n) => (n.id === updated.id ? updated : n)),
 			(n) => n.updated_at
@@ -1424,7 +1441,7 @@
 					data-note-id={note.id}
 					style="--swipe-x: {swipeX[note.id] ?? 0}px"
 				>
-					{#if note.pinned && isOnline && (swipeX[note.id] ?? 0) === 0}
+					{#if note.pinned && pinDragEnabled && (swipeX[note.id] ?? 0) === 0}
 						<!-- Only pinned notes reorder by hand; the rest follow last touch. -->
 						<span
 							class="pin-drag-handle"

@@ -661,6 +661,37 @@ describe('Offline mode', () => {
 		));
 	});
 
+	it('pinning a note offline sends it to the top of the pinned group', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		const cached = (id: number, title: string, pinned: boolean, pin_order?: number) => ({
+			id, title, body: '', starred: false, pinned, pin_order, tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			is_dirty: false, is_new: false,
+		});
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			cached(6, 'Already Pinned', true, -2),
+			cached(7, 'Pin Me Offline', false),
+		]);
+		vi.mocked(api.notes.togglePin).mockRejectedValue(new OfflineError());
+
+		render(Page);
+		await waitFor(() => screen.getByText('Pin Me Offline'));
+
+		const item = screen.getByText('Pin Me Offline').closest('.note-item') as HTMLElement;
+		await fireEvent.click(item.querySelector('[aria-label="Pin note"]') as HTMLElement);
+
+		// Without a locally-assigned slot it would keep pin_order 0 and sort
+		// below the note pinned earlier online.
+		await waitFor(() => expect(markNoteFlagsOffline).toHaveBeenCalledWith(
+			expect.objectContaining({ id: 7, pinned: true, pin_order: -3 }),
+			'pinned'
+		));
+		const titles = Array.from(document.querySelectorAll('li.note-item .note-title')).map(
+			(el) => el.textContent
+		);
+		expect(titles).toEqual(['Pin Me Offline', 'Already Pinned']);
+	});
+
 	it('caches notes to IndexedDB after a successful online load', async () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: true });
 		vi.mocked(api.notes.list).mockResolvedValue([
@@ -1089,6 +1120,23 @@ describe('pinned note reordering', () => {
 
 		expect(api.notes.reorderPins).not.toHaveBeenCalled();
 		expect(renderedTitles(container)).toEqual(['Alpha', 'Beta', 'Gamma', 'Plain']);
+	});
+
+	it('hides the drag handle while a filter narrows the list', async () => {
+		const { container } = render(Page);
+		await waitFor(() => expect(screen.getByText('Gamma')).toBeInTheDocument());
+		expect(handles(container)).toHaveLength(3);
+
+		// A filtered list only shows some of the pinned notes, so a drag could
+		// only ever send a partial order.
+		vi.mocked(api.notes.list).mockResolvedValue([pinnedFixture[0], pinnedFixture[2]]);
+		const searchBox = screen.getByPlaceholderText(/search/i);
+		await fireEvent.input(searchBox, { target: { value: 'a' } });
+
+		// Wait for the filtered list to settle before judging the handles.
+		await waitFor(() => expect(screen.queryByText('Beta')).not.toBeInTheDocument());
+		await waitFor(() => expect(screen.getByText('Gamma')).toBeInTheDocument());
+		expect(handles(container)).toHaveLength(0);
 	});
 
 	it('rolls the list back when saving the order fails', async () => {

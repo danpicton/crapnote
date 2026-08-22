@@ -1,5 +1,10 @@
-import { describe, it, expect } from 'vitest';
-import { shouldPlaceCaretAtEnd, pointerTravel, DRAG_THRESHOLD_PX } from './editorclick';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import {
+	shouldPlaceCaretAtEnd,
+	pointerTravel,
+	hasLiveSelectionIn,
+	DRAG_THRESHOLD_PX,
+} from './editorclick';
 
 const base = { insideProse: false, selectionCollapsed: true, pointerTravelPx: 0 };
 
@@ -36,5 +41,47 @@ describe('pointerTravel', () => {
 
 	it('measures the straight-line distance', () => {
 		expect(pointerTravel({ x: 0, y: 0 }, { x: 3, y: 4 })).toBe(5);
+	});
+});
+
+describe('hasLiveSelectionIn', () => {
+	function selectionOver(node: Node | null, collapsed: boolean): Selection {
+		return { isCollapsed: collapsed, anchorNode: node, focusNode: node } as Selection;
+	}
+
+	let container: HTMLElement;
+	let inside: HTMLElement;
+	let outside: HTMLElement;
+
+	beforeEach(() => {
+		container = document.createElement('div');
+		inside = document.createElement('p');
+		container.appendChild(inside);
+		outside = document.createElement('p');
+		document.body.append(container, outside);
+	});
+
+	afterEach(() => {
+		container.remove();
+		outside.remove();
+	});
+
+	it('sees a live selection made inside the editor', () => {
+		expect(hasLiveSelectionIn(selectionOver(inside, false), container)).toBe(true);
+	});
+
+	it('ignores a selection living elsewhere on the page', () => {
+		// A note-list preview left selected must not veto a genuine click in
+		// the editor's empty space.
+		expect(hasLiveSelectionIn(selectionOver(outside, false), container)).toBe(false);
+	});
+
+	it('ignores a collapsed selection inside the editor', () => {
+		expect(hasLiveSelectionIn(selectionOver(inside, true), container)).toBe(false);
+	});
+
+	it('copes with no selection at all', () => {
+		expect(hasLiveSelectionIn(null, container)).toBe(false);
+		expect(hasLiveSelectionIn(selectionOver(null, false), container)).toBe(false);
 	});
 });

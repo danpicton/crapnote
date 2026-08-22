@@ -16,7 +16,11 @@
 	import { taskListPlugin } from '$lib/milkdown/tasklist';
 	import { listMovePlugin } from '$lib/milkdown/listmove';
 	import { listEditPlugin } from '$lib/milkdown/listedit';
-	import { shouldPlaceCaretAtEnd, pointerTravel } from '$lib/milkdown/editorclick';
+	import {
+		shouldPlaceCaretAtEnd,
+		pointerTravel,
+		hasLiveSelectionIn,
+	} from '$lib/milkdown/editorclick';
 
 	export interface EditorRef {
 		call: (key: string | CmdKey<unknown>, payload?: unknown) => void;
@@ -105,11 +109,12 @@
 			if (!_editor) return;
 			const travel = pointerTravel(pressedAt, { x: e.clientX, y: e.clientY });
 			pressedAt = null;
-			const domSelection = document.getSelection();
 			if (
 				!shouldPlaceCaretAtEnd({
 					insideProse: !!(e.target as Element).closest('.ProseMirror'),
-					selectionCollapsed: !domSelection || domSelection.isCollapsed,
+					// Scoped to this editor: a selection elsewhere on the page
+					// is not this click's business.
+					selectionCollapsed: !hasLiveSelectionIn(document.getSelection(), container),
 					pointerTravelPx: travel,
 				})
 			) {

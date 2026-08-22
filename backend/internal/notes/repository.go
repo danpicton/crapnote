@@ -257,10 +257,17 @@ func (r *Repo) SetPinned(ctx context.Context, id, userID int64, pinned bool) err
 // ReorderPins writes an explicit order over the user's pinned notes, given
 // their IDs top-first.
 //
+// The whole pinned set is renumbered, not just the IDs passed in: the named
+// ones take the top slots in the order given, and any pinned note the caller
+// did not mention keeps its relative position below them. A filtered list view
+// can only ever send the pinned notes it can see, and renumbering just those
+// would collide with the positions held by the ones outside the filter —
+// scrambling an order the user never touched.
+//
 // IDs that aren't the caller's, or aren't currently pinned, are skipped rather
 // than rejected: the client sends the order it just rendered, and a note
-// unpinned on another device in the meantime shouldn't fail the whole request.
-// Like SetPinned it leaves updated_at alone.
+// unpinned on another device shouldn't fail the whole request. Like SetPinned
+// this leaves updated_at alone.
 func (r *Repo) ReorderPins(ctx context.Context, userID int64, ids []int64) error {
 	if len(ids) == 0 {
 		return nil
@@ -272,6 +279,16 @@ func (r *Repo) ReorderPins(ctx context.Context, userID int64, ids []int64) error
 	}
 	defer tx.Rollback() //nolint:errcheck // no-op once committed
 
+	current, err := pinnedIDs(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	if len(current) == 0 {
+		return tx.Commit()
+	}
+
+	final := mergePinOrder(current, ids)
+
 	stmt, err := tx.PrepareContext(ctx,
 		`UPDATE notes SET pin_order = ? WHERE id = ? AND user_id = ? AND pinned = 1`)
 	if err != nil {
@@ -279,7 +296,7 @@ func (r *Repo) ReorderPins(ctx context.Context, userID int64, ids []int64) error
 	}
 	defer stmt.Close() //nolint:errcheck
 
-	for i, id := range ids {
+	for i, id := range final {
 		if _, err := stmt.ExecContext(ctx, i, id, userID); err != nil {
 			return fmt.Errorf("reorder pins: %w", err)
 		}
@@ -289,6 +306,58 @@ func (r *Repo) ReorderPins(ctx context.Context, userID int64, ids []int64) error
 		return fmt.Errorf("reorder pins: %w", err)
 	}
 	return nil
+}
+
+// pinnedIDs lists the user's pinned note IDs in their current display order.
+func pinnedIDs(ctx context.Context, tx *sql.Tx, userID int64) ([]int64, error) {
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id FROM notes
+		WHERE user_id = ? AND pinned = 1
+		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = notes.id)
+		ORDER BY pin_order ASC, updated_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("reorder pins: %w", err)
+	}
+	defer rows.Close()
+
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("reorder pins: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("reorder pins: %w", err)
+	}
+	return out, nil
+}
+
+// mergePinOrder puts the requested IDs first, in the order asked for, and the
+// remaining pinned IDs after them in their existing order. Requested IDs that
+// aren't pinned (or aren't the caller's) drop out, and duplicates are ignored.
+func mergePinOrder(current, requested []int64) []int64 {
+	pinned := make(map[int64]bool, len(current))
+	for _, id := range current {
+		pinned[id] = true
+	}
+
+	final := make([]int64, 0, len(current))
+	placed := make(map[int64]bool, len(current))
+	for _, id := range requested {
+		if !pinned[id] || placed[id] {
+			continue
+		}
+		placed[id] = true
+		final = append(final, id)
+	}
+	for _, id := range current {
+		if !placed[id] {
+			final = append(final, id)
+		}
+	}
+	return final
 }
 
 func (r *Repo) setBool(ctx context.Context, col string, id, userID int64, val bool) error {

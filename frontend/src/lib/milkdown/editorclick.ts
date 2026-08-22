@@ -37,3 +37,21 @@ export function pointerTravel(
 	if (!from) return 0;
 	return Math.hypot(to.x - from.x, to.y - from.y);
 }
+
+/**
+ * Whether `selection` is a real, non-collapsed selection living inside `root`.
+ *
+ * The document selection is page-wide: text left selected somewhere else (a
+ * note-list preview, say) would otherwise look like a drag that had just
+ * finished in the editor, and veto a genuine click on its empty space.
+ */
+export function hasLiveSelectionIn(selection: Selection | null, root: Node): boolean {
+	if (!selection || selection.isCollapsed) return false;
+	const { anchorNode, focusNode } = selection;
+	if (!anchorNode && !focusNode) return false;
+	// Either end being inside is enough — a selection dragged out of the
+	// editor still belongs to it.
+	return (
+		(!!anchorNode && root.contains(anchorNode)) || (!!focusNode && root.contains(focusNode))
+	);
+}

@@ -203,3 +203,47 @@ func TestNoteRepo_ReorderPinsAcceptsAnEmptyList(t *testing.T) {
 		t.Fatalf("reorder: %v", err)
 	}
 }
+
+// A filtered view can only ever send the pinned notes it can see. Renumbering
+// just those would collide with the positions held by the pinned notes outside
+// the filter, scrambling the real order.
+func TestNoteRepo_ReorderPinsWithAPartialListKeepsATotalOrder(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	pinned := seedPinned(t, repo, userID, "a", "b", "c", "d")
+	// Displayed order after pinning is d, c, b, a.
+	if err := repo.ReorderPins(ctx, userID, []int64{
+		pinned[3].ID, pinned[2].ID, pinned[1].ID, pinned[0].ID,
+	}); err != nil {
+		t.Fatalf("seed order: %v", err)
+	}
+
+	// A filter showing only c and a; the user swaps them.
+	if err := repo.ReorderPins(ctx, userID, []int64{pinned[0].ID, pinned[2].ID}); err != nil {
+		t.Fatalf("partial reorder: %v", err)
+	}
+
+	list, err := repo.List(ctx, userID, notes.ListFilter{})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+
+	seen := map[int]bool{}
+	for _, n := range list {
+		if !n.Pinned {
+			continue
+		}
+		if seen[n.PinOrder] {
+			t.Fatalf("two pinned notes share pin_order %d: %v", n.PinOrder, ids(list))
+		}
+		seen[n.PinOrder] = true
+	}
+	// The named pair takes the top slots in the order given; everything else
+	// keeps its relative order below them.
+	if !equalIDs(ids(list), pinned[0].ID, pinned[2].ID, pinned[3].ID, pinned[1].ID) {
+		t.Fatalf("got %v", ids(list))
+	}
+}

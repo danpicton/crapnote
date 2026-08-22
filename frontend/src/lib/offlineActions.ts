@@ -76,6 +76,9 @@ export async function markNoteFlagsOffline(
 			starred: note.starred,
 			pinned: note.pinned,
 			locked: note.locked,
+			// Carried so a note pinned offline keeps the top slot the caller
+			// assigned it across a reload, before any sync has run.
+			pin_order: note.pin_order ?? existing?.pin_order ?? 0,
 			flags_dirty: true,
 			flags_toggled: { ...existing?.flags_toggled, [flag]: true },
 			local_updated_at: new Date().toISOString(),

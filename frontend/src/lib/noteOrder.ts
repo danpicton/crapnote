@@ -63,3 +63,17 @@ export function reorderPinned<T extends OrderableNote>(list: T[], from: number, 
 	if (moved === pinned) return list;
 	return [...moved.map((n, i) => ({ ...n, pin_order: i })), ...rest];
 }
+
+/**
+ * The pin_order a note should take to sit above every currently pinned note —
+ * the client-side mirror of the server's `MIN(pin_order) - 1` in SetPinned.
+ *
+ * Needed for pinning while offline, where no server round-trip assigns one and
+ * the note would otherwise keep its stale 0 and sort below notes pinned
+ * earlier online.
+ */
+export function nextPinOrder(list: OrderableNote[]): number {
+	const orders = list.filter((n) => n.pinned).map((n) => n.pin_order ?? 0);
+	if (orders.length === 0) return 0;
+	return Math.min(...orders) - 1;
+}

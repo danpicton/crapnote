@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { compareNotes, sortNotes, moveItem, reorderPinned } from './noteOrder';
+import { compareNotes, sortNotes, moveItem, reorderPinned, nextPinOrder } from './noteOrder';
 
 interface N {
 	id: number;
@@ -96,5 +96,27 @@ describe('reorderPinned', () => {
 	it('returns the original list when the move is a no-op', () => {
 		const list = [note(1, true, 0), note(2, true, 1)];
 		expect(reorderPinned(list, 1, 1)).toBe(list);
+	});
+});
+
+describe('nextPinOrder', () => {
+	it('claims the slot above every pinned note', () => {
+		// Mirrors the server's MIN(pin_order) - 1 in SetPinned.
+		expect(nextPinOrder([note(1, true, 0), note(2, true, -3), note(9, false)])).toBe(-4);
+	});
+
+	it('is 0 when nothing is pinned yet', () => {
+		expect(nextPinOrder([note(9, false)])).toBe(0);
+	});
+
+	it('ignores the pin_order of unpinned notes', () => {
+		const stale: N = { id: 9, pinned: false, pin_order: -50, updated_at: '2024-01-01T00:00:00Z' };
+		expect(nextPinOrder([note(1, true, 0), stale])).toBe(-1);
+	});
+
+	it('sorts a note given the next slot to the top', () => {
+		const list = [note(1, true, 0), note(2, true, -1), note(3, false)];
+		const promoted = { ...note(3, true, nextPinOrder(list)), pinned: true };
+		expect(ids(sortNotes([...list.slice(0, 2), promoted], at))).toEqual([3, 2, 1]);
 	});
 });
