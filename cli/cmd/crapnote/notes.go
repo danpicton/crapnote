@@ -293,6 +293,9 @@ func noteFlags(n client.Note) string {
 	if n.Archived {
 		flags += "A"
 	}
+	if n.Locked {
+		flags += "L"
+	}
 	if flags == "" {
 		flags = "-"
 	}

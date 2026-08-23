@@ -15,6 +15,12 @@
 	import { linkPlugin } from '$lib/milkdown/link';
 	import { taskListPlugin } from '$lib/milkdown/tasklist';
 	import { listMovePlugin } from '$lib/milkdown/listmove';
+	import { listEditPlugin } from '$lib/milkdown/listedit';
+	import {
+		shouldPlaceCaretAtEnd,
+		pointerTravel,
+		hasLiveSelectionIn,
+	} from '$lib/milkdown/editorclick';
 
 	export interface EditorRef {
 		call: (key: string | CmdKey<unknown>, payload?: unknown) => void;
@@ -81,6 +87,7 @@
 			.use(gfm)
 			.use(taskListPlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(listMovePlugin as Parameters<typeof Editor.prototype.use>[0])
+			.use(listEditPlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(underlinePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(imagePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(linkPlugin as Parameters<typeof Editor.prototype.use>[0])
@@ -91,16 +98,33 @@
 
 		container.addEventListener('crapnote:insert-link', () => oninsertlink?.());
 
-		// Click in empty space below content → place cursor at end
+		// Click in empty space below (or beside) the content → place cursor at
+		// end. Where the pointer went down is tracked so a selection dragged
+		// out into that empty space isn't mistaken for such a click.
+		let pressedAt: { x: number; y: number } | null = null;
+		container.addEventListener('pointerdown', (e) => {
+			pressedAt = { x: e.clientX, y: e.clientY };
+		});
 		container.addEventListener('click', (e) => {
 			if (!_editor) return;
-			if (!(e.target as Element).closest('.ProseMirror')) {
-				_editor.action((ctx) => {
-					const view = ctx.get(editorViewCtx);
-					view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
-					view.focus();
-				});
+			const travel = pointerTravel(pressedAt, { x: e.clientX, y: e.clientY });
+			pressedAt = null;
+			if (
+				!shouldPlaceCaretAtEnd({
+					insideProse: !!(e.target as Element).closest('.ProseMirror'),
+					// Scoped to this editor: a selection elsewhere on the page
+					// is not this click's business.
+					selectionCollapsed: !hasLiveSelectionIn(document.getSelection(), container),
+					pointerTravelPx: travel,
+				})
+			) {
+				return;
 			}
+			_editor.action((ctx) => {
+				const view = ctx.get(editorViewCtx);
+				view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
+				view.focus();
+			});
 		});
 
 		ref = {
@@ -143,7 +167,10 @@
 	.editor-container.readonly :global(.ProseMirror) { cursor: default; caret-color: transparent; }
 
 	.editor-container :global(.milkdown) {
-		max-width: 720px;
+		/* 720px wrapped far too early on a desktop pane. Wider, but still
+		   capped — an uncapped column is hard to read. Left-aligned, as it
+		   has always been: the toolbar above it starts at the left edge. */
+		max-width: min(1100px, 100%);
 		min-height: 100%;
 	}
 
@@ -198,7 +225,9 @@
 		color: var(--text-3);
 		opacity: 0;
 		cursor: grab;
-		user-select: none;
+		/* Deliberately NOT user-select: none — the grip sits in the gutter a
+		   backwards selection drags through, and an unselectable island there
+		   fragments the selection. The handle holds no text anyway. */
 		/* Claim the gesture so a touch-drag reorders instead of scrolling. */
 		touch-action: none;
 		transition: opacity 0.12s;
@@ -271,13 +300,50 @@
 		gap: 0.375em;
 		margin-left: -1.25em; /* pull into ul padding so text aligns with regular <li> text */
 	}
+	/* The tap target, not the box. Padding grows the hit area and the equal
+	   negative margin pulls the layout back, so the checkbox sits exactly
+	   where it did before. */
+	.editor-container :global(.ProseMirror li[data-item-type="task"] .task-check-hit) {
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: 0.45em 0.4em;
+		margin: -0.45em -0.4em;
+		cursor: pointer;
+		-webkit-tap-highlight-color: transparent;
+	}
 	.editor-container :global(.ProseMirror li[data-item-type="task"] .task-checkbox) {
 		flex-shrink: 0;
-		width: 0.875em;
-		height: 0.875em;
+		width: 1.05em;
+		height: 1.05em;
+		margin: 0;
 		accent-color: var(--accent);
 		cursor: pointer;
 	}
+	/* A locked note must not toggle. The click handler already refuses, but
+	   killing pointer events stops the native input flicking first. Left
+	   visible (rather than `disabled`) so the checked state still reads. */
+	.editor-container.readonly :global(.ProseMirror .task-check-hit),
+	.editor-container.readonly :global(.ProseMirror .task-checkbox) {
+		pointer-events: none;
+		cursor: default;
+	}
+	/* Phones: the box grows and the hit area goes to ~40px square. Vertical
+	   padding stops short of a full 44px on purpose — any taller and
+	   neighbouring rows' targets would overlap enough to swallow each
+	   other's taps. */
+	@media (max-width: 640px) {
+		.editor-container :global(.ProseMirror li[data-item-type="task"] .task-check-hit) {
+			padding: 10px 9px;
+			margin: -10px -9px;
+		}
+		.editor-container :global(.ProseMirror li[data-item-type="task"] .task-checkbox) {
+			width: 20px;
+			height: 20px;
+		}
+	}
+
 	.editor-container :global(.ProseMirror li[data-item-type="task"] .task-content) {
 		flex: 1;
 		min-width: 0;

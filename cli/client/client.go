@@ -43,6 +43,7 @@ type Note struct {
 	Starred   bool   `json:"starred"`
 	Pinned    bool   `json:"pinned"`
 	Archived  bool   `json:"archived"`
+	Locked    bool   `json:"locked"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }

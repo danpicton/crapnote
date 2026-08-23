@@ -486,3 +486,111 @@ func TestNotesHandler_List_ClampsExcessiveLimit(t *testing.T) {
 		t.Fatalf("expected response clamped to 100, got %d", len(resp))
 	}
 }
+
+// createPinned makes a note through the handler and pins it, returning its ID.
+func createPinned(t *testing.T, h *notes.Handler, user *auth.User, title string) int64 {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/notes",
+		bytes.NewBufferString(fmt.Sprintf(`{"title":%q,"body":""}`, title)))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.Create(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create %s: %d: %s", title, w.Code, w.Body.String())
+	}
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
+
+	pin := httptest.NewRequest(http.MethodPatch,
+		fmt.Sprintf("/api/notes/%d/pin", created.ID), nil)
+	pin.SetPathValue("id", fmt.Sprint(created.ID))
+	pin = withUser(pin, user)
+	pw := httptest.NewRecorder()
+	h.TogglePin(pw, pin)
+	if pw.Code != http.StatusOK {
+		t.Fatalf("pin %s: %d: %s", title, pw.Code, pw.Body.String())
+	}
+	return created.ID
+}
+
+func listIDs(t *testing.T, h *notes.Handler, user *auth.User) []int64 {
+	t.Helper()
+	req := withUser(httptest.NewRequest(http.MethodGet, "/api/notes", nil), user)
+	w := httptest.NewRecorder()
+	h.List(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list: %d: %s", w.Code, w.Body.String())
+	}
+	var got []struct {
+		ID int64 `json:"id"`
+	}
+	json.NewDecoder(w.Body).Decode(&got) //nolint:errcheck
+	out := make([]int64, len(got))
+	for i, n := range got {
+		out[i] = n.ID
+	}
+	return out
+}
+
+func TestNotesHandler_ReorderPins(t *testing.T) {
+	h, user := newHandlerFixture(t)
+
+	a := createPinned(t, h, user, "a")
+	b := createPinned(t, h, user, "b")
+	c := createPinned(t, h, user, "c")
+
+	body := fmt.Sprintf(`{"ids":[%d,%d,%d]}`, b, c, a)
+	req := httptest.NewRequest(http.MethodPut, "/api/notes/pins/order",
+		bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+
+	h.ReorderPins(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	got := listIDs(t, h, user)
+	if len(got) != 3 || got[0] != b || got[1] != c || got[2] != a {
+		t.Fatalf("got order %v, want %v", got, []int64{b, c, a})
+	}
+}
+
+func TestNotesHandler_ReorderPinsExposesPinOrder(t *testing.T) {
+	h, user := newHandlerFixture(t)
+	createPinned(t, h, user, "a")
+
+	req := withUser(httptest.NewRequest(http.MethodGet, "/api/notes", nil), user)
+	w := httptest.NewRecorder()
+	h.List(w, req)
+
+	var got []map[string]any
+	json.NewDecoder(w.Body).Decode(&got) //nolint:errcheck
+	if len(got) != 1 {
+		t.Fatalf("expected one note, got %d", len(got))
+	}
+	if _, ok := got[0]["pin_order"]; !ok {
+		t.Fatalf("pin_order missing from the note response: %v", got[0])
+	}
+}
+
+func TestNotesHandler_ReorderPinsRejectsBadBody(t *testing.T) {
+	h, user := newHandlerFixture(t)
+
+	req := httptest.NewRequest(http.MethodPut, "/api/notes/pins/order",
+		bytes.NewBufferString(`{"ids":"nope"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+
+	h.ReorderPins(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}

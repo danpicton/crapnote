@@ -27,7 +27,11 @@ vi.mock('$lib/api', () => {
 };
 });
 
-vi.mock('$lib/offlineDB', () => ({
+// Only the IndexedDB entry points are stubbed. Pure helpers (noteFlags) stay
+// real — mocking them would hide exactly the field-drop bugs they exist to
+// prevent.
+vi.mock('$lib/offlineDB', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/offlineDB')>()),
 	openOfflineDB: vi.fn(),
 	getDirtyNotes: vi.fn(),
 	upsertNote: vi.fn(),
@@ -636,6 +640,31 @@ describe('syncOfflineChanges — flag reconcile (star/pin/lock toggled offline)'
 		expect(result.conflicts).toBe(0); // our own toggle bump is NOT a conflict
 	});
 
+	it("keeps the server's authoritative pin_order after an offline pin syncs", async () => {
+		// Pinned offline: the client guessed a top-of-stack slot; the server
+		// assigns the real one. The cache must end up holding the server's.
+		const note = fakeCachedNote({
+			id: 5, is_dirty: false, flags_dirty: true, pinned: true, pin_order: -1,
+			flags_toggled: { pinned: true },
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(
+			fakeServerNote({ id: 5, pinned: false, pin_order: 0 })
+		);
+		vi.mocked(api.notes.togglePin).mockResolvedValue(
+			fakeServerNote({ id: 5, pinned: true, pin_order: -7, updated_at: '2024-01-06T00:00:00Z' })
+		);
+		vi.mocked(offlineDB.getNote).mockResolvedValue(note);
+
+		await syncOfflineChanges('online', 1);
+
+		expect(api.notes.togglePin).toHaveBeenCalledWith(5);
+		expect(offlineDB.upsertNote).toHaveBeenCalledWith(
+			fakeDB,
+			expect.objectContaining({ id: 5, pinned: true, pin_order: -7 })
+		);
+	});
+
 	it('drops the entry when the note is already gone server-side', async () => {
 		const note = fakeCachedNote({ id: 5, is_dirty: false, flags_dirty: true });
 		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
@@ -897,5 +926,48 @@ describe('syncOfflineChanges — lock safety and ordering', () => {
 		expect(result.conflicts).toBe(1);
 		expect(result.errors).toBe(0);
 		expect(result.pushed.archived).toBe(1);
+	});
+});
+
+describe('syncOfflineChanges — pin_order carries through every cache rebuild', () => {
+	it("takes the server's pin_order when a new offline note is created", async () => {
+		const note = fakeCachedNote({ id: -1000, is_new: true, title: 'New', pinned: false });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.create).mockResolvedValue(
+			fakeServerNote({ id: 42, title: 'New', pinned: true, pin_order: -2 })
+		);
+
+		await syncOfflineChanges('online', 1);
+
+		expect(offlineDB.upsertNote).toHaveBeenCalledWith(
+			fakeDB,
+			expect.objectContaining({ id: 42, pinned: true, pin_order: -2 })
+		);
+	});
+
+	it("takes the server's pin_order when a lock conflict preserves the local edit", async () => {
+		// Server changed under us and wins; its pin_order comes with it.
+		const note = fakeCachedNote({
+			id: 5, is_dirty: true, title: 'Mine', body: 'Mine',
+			server_updated_at: '2024-01-01T00:00:00Z',
+			local_updated_at: '2024-01-02T00:00:00Z',
+			pin_order: -1,
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(
+			fakeServerNote({
+				id: 5, title: 'Theirs', body: 'Theirs', pinned: true, pin_order: -9,
+				updated_at: '2024-01-05T00:00:00Z',
+			})
+		);
+		vi.mocked(api.notes.update).mockRejectedValue(new ApiError(423, 'locked'));
+		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 99 }));
+
+		await syncOfflineChanges('online', 1);
+
+		expect(offlineDB.upsertNote).toHaveBeenCalledWith(
+			fakeDB,
+			expect.objectContaining({ id: 5, pin_order: -9 })
+		);
 	});
 });

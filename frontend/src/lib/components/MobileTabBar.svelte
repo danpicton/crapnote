@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
-	import { BookOpen, Archive, Settings, LogOut } from 'lucide-svelte';
+	import { BookOpen, Archive, Trash2, Settings, LogOut } from 'lucide-svelte';
 
-	let { activeTab }: { activeTab: 'notes' | 'archive' | 'settings' } = $props();
+	let { activeTab }: { activeTab: 'notes' | 'archive' | 'trash' | 'settings' } = $props();
 
 	let showSignOutConfirm = $state(false);
 
@@ -22,6 +22,10 @@
 	<a href="/archive" class="tab" class:tab-active={activeTab === 'archive'} aria-current={activeTab === 'archive' ? 'page' : undefined}>
 		<Archive size={22} aria-hidden="true" />
 		<span class="tab-label">Archive</span>
+	</a>
+	<a href="/trash" class="tab" class:tab-active={activeTab === 'trash'} aria-current={activeTab === 'trash' ? 'page' : undefined}>
+		<Trash2 size={22} aria-hidden="true" />
+		<span class="tab-label">Trash</span>
 	</a>
 	<a href="/settings" class="tab" class:tab-active={activeTab === 'settings'} aria-current={activeTab === 'settings' ? 'page' : undefined}>
 		<Settings size={22} aria-hidden="true" />

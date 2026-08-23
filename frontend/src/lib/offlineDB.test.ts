@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import 'fake-indexeddb/auto';
-import { openOfflineDB, upsertNote, getNote, getAllNotes, getDirtyNotes, deleteNote } from './offlineDB';
+import { openOfflineDB, upsertNote, getNote, getAllNotes, getDirtyNotes, deleteNote, noteFlags } from './offlineDB';
 
 const makeNote = (overrides: Partial<Parameters<typeof upsertNote>[1]> = {}) => ({
 	title: 'Test',
@@ -79,5 +79,47 @@ describe('offlineDB', () => {
 		const note = await getNote(db, 40);
 		expect(note).toBeNull();
 		db.close();
+	});
+});
+
+describe('noteFlags', () => {
+	const full = { starred: true, pinned: true, locked: true, pin_order: -3 };
+
+	it('takes every field from the source', () => {
+		expect(noteFlags(full)).toEqual(full);
+	});
+
+	it('falls back per field for whatever the source omits', () => {
+		expect(noteFlags({ starred: true }, { pinned: true, locked: true, pin_order: -9 })).toEqual({
+			starred: true,
+			pinned: true,
+			locked: true,
+			pin_order: -9,
+		});
+	});
+
+	it('keeps a deliberate false rather than reaching for the fallback', () => {
+		// The bug this guards: a note explicitly unlocked offline must not have
+		// a cached `locked: true` reinstated by the fallback.
+		expect(noteFlags({ locked: false }, { locked: true }).locked).toBe(false);
+		expect(noteFlags({ pin_order: 0 }, { pin_order: -5 }).pin_order).toBe(0);
+	});
+
+	it('defaults to unset when neither side supplies a value', () => {
+		expect(noteFlags({})).toEqual({
+			starred: false,
+			pinned: false,
+			locked: false,
+			pin_order: 0,
+		});
+	});
+
+	it('covers exactly the flag fields — the set that must travel together', () => {
+		expect(Object.keys(noteFlags({})).sort()).toEqual([
+			'locked',
+			'pin_order',
+			'pinned',
+			'starred',
+		]);
 	});
 });

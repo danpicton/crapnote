@@ -211,6 +211,31 @@ func (h *Handler) TogglePin(w http.ResponseWriter, r *http.Request) {
 	h.toggleFlag(w, r, h.svc.TogglePin)
 }
 
+// ReorderPins handles PUT /api/notes/pins/order
+//
+// Body: {"ids": [3, 7, 1]} — the caller's pinned notes, top first.
+func (h *Handler) ReorderPins(w http.ResponseWriter, r *http.Request) {
+	u := auth.UserFromContext(r.Context())
+	if u == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+
+	var req struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if err := h.svc.ReorderPins(r.Context(), u.ID, req.IDs); err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // ToggleLock handles PATCH /api/notes/{id}/lock
 func (h *Handler) ToggleLock(w http.ResponseWriter, r *http.Request) {
 	h.toggleFlag(w, r, h.svc.ToggleLock)
@@ -330,6 +355,7 @@ type noteResponse struct {
 	Pinned    bool   `json:"pinned"`
 	Archived  bool   `json:"archived"`
 	Locked    bool   `json:"locked"`
+	PinOrder  int    `json:"pin_order"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -343,6 +369,7 @@ func noteToResponse(n *Note) noteResponse {
 		Pinned:    n.Pinned,
 		Archived:  n.Archived,
 		Locked:    n.Locked,
+		PinOrder:  n.PinOrder,
 		CreatedAt: n.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt: n.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 	}

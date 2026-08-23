@@ -1,4 +1,4 @@
-import { openOfflineDB, getNote, upsertNote, deleteNote } from '$lib/offlineDB';
+import { openOfflineDB, getNote, upsertNote, deleteNote, noteFlags } from '$lib/offlineDB';
 import type { CachedNote } from '$lib/offlineDB';
 import type { Note } from '$lib/api';
 
@@ -15,9 +15,7 @@ function cachedFromNote(note: Note, tags: Array<{ id: number; name: string }>): 
 		id: note.id,
 		title: note.title,
 		body: note.body,
-		starred: note.starred,
-		pinned: note.pinned,
-		locked: note.locked,
+		...noteFlags(note),
 		tags,
 		server_updated_at: note.updated_at,
 		local_updated_at: new Date().toISOString(),
@@ -73,9 +71,10 @@ export async function markNoteFlagsOffline(
 		const existing = await getNote(db, note.id);
 		await upsertNote(db, {
 			...(existing ?? cachedFromNote(note, tags)),
-			starred: note.starred,
-			pinned: note.pinned,
-			locked: note.locked,
+			// The caller's desired state wins; anything it leaves unset (a note
+			// pinned offline keeps the top slot it was given) falls back to
+			// what is already cached.
+			...noteFlags(note, existing),
 			flags_dirty: true,
 			flags_toggled: { ...existing?.flags_toggled, [flag]: true },
 			local_updated_at: new Date().toISOString(),

@@ -123,6 +123,13 @@ func (s *Service) AutoLockStale(ctx context.Context, olderThan time.Duration) (i
 	return s.repo.AutoLockStale(ctx, olderThan)
 }
 
+// ReorderPins records the user's drag order for their pinned notes, given the
+// note IDs top-first. IDs that are not the user's, or no longer pinned, are
+// ignored.
+func (s *Service) ReorderPins(ctx context.Context, userID int64, ids []int64) error {
+	return s.repo.ReorderPins(ctx, userID, ids)
+}
+
 // TogglePin flips the pinned flag and returns the updated note.
 func (s *Service) TogglePin(ctx context.Context, id, userID int64) (*Note, error) {
 	note, err := s.repo.Get(ctx, id, userID)

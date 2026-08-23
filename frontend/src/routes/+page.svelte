@@ -23,10 +23,17 @@
 	import { shortcuts, matchShortcut, type ShortcutId } from '$lib/stores/shortcuts.svelte';
 	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
-	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote } from '$lib/offlineDB';
+	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote, noteFlags } from '$lib/offlineDB';
 	import type { CachedNote } from '$lib/offlineDB';
 	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
+	import { sortNotes, reorderPinned, nextPinOrder } from '$lib/noteOrder';
+	import {
+		dropIndexFromY,
+		findScrollParent,
+		createEdgeAutoScroll,
+		type EdgeAutoScroll,
+	} from '$lib/dragReorder';
 
 	// PUBLIC_OFFLINE_NOTES_COUNT can be set at build time via the PUBLIC_ prefix env var.
 	const OFFLINE_NOTES_COUNT = Math.max(1, parseInt(
@@ -41,7 +48,7 @@
 	import {
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Image, Link,
-		Plus, Star, Pin, Archive, Trash2, Settings, LogOut,
+		Plus, Star, Pin, GripVertical, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search,
 		CloudUpload, CheckCircle2, Lock, LockOpen, ImageOff, MoreHorizontal,
 		RefreshCw, WifiOff, X,
@@ -84,6 +91,120 @@
 	let pullY = $state(0);
 	let pullStartY = 0;
 	let pullAtTop = false;
+
+	// ── Pinned-note drag reordering ──────────────────────────────────────
+	// Only pinned notes are draggable: everything below them is ordered by
+	// last touch, and letting those be dragged would silently fight the next
+	// edit. Pointer events (not HTML5 DnD) so mouse, pen and touch share a
+	// path — the same reason the editor's list handles use them.
+	let pinDragId = $state<number | null>(null);
+	let pinDropIndex = $state(-1);
+	let pinDragOrigin = -1;
+	let pinRows: HTMLElement[] = [];
+	let pinEdgeScroll: EdgeAutoScroll | null = null;
+	let pinLastClientY = 0;
+
+	/**
+	 * Which row shows the drop line, and on which edge. pinDropIndex counts
+	 * slots in the pinned list *without* the row being dragged — the same
+	 * convention dropIndexFromY returns and moveItem consumes.
+	 */
+	const pinDropTarget = $derived.by(() => {
+		if (pinDragId === null || pinDropIndex < 0) return null;
+		const others = notes.filter((n) => n.pinned && n.id !== pinDragId);
+		if (others.length === 0) return null;
+		if (pinDropIndex < others.length) {
+			return { id: others[pinDropIndex].id, edge: 'before' as const };
+		}
+		return { id: others[others.length - 1].id, edge: 'after' as const };
+	});
+
+	function pinnedIds(): number[] {
+		return notes.filter((n) => n.pinned).map((n) => n.id);
+	}
+
+	function onPinDragStart(e: PointerEvent, noteId: number) {
+		// Reordering is a server write; there is no offline replay for it.
+		if (!pinDragEnabled) return;
+		if (e.button !== 0) return;
+
+		const rows = Array.from(
+			noteListEl?.querySelectorAll<HTMLElement>('li.note-item.pinned') ?? []
+		);
+		const index = rows.findIndex((el) => el.dataset.noteId === String(noteId));
+		if (index < 0 || rows.length < 2) return;
+
+		e.preventDefault();
+		e.stopPropagation();
+		pinRows = rows;
+		pinDragOrigin = index;
+		pinDropIndex = index;
+		pinDragId = noteId;
+		pinLastClientY = e.clientY;
+		pinEdgeScroll = createEdgeAutoScroll({
+			scroller: findScrollParent(rows[index]),
+			getClientY: () => pinLastClientY,
+			onScroll: refreshPinDropTarget,
+		});
+		try {
+			(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+		} catch {
+			// Capture is best-effort; the handlers still fire without it.
+		}
+	}
+
+	/** Recompute the drop slot from the pointer's last known position. */
+	function refreshPinDropTarget() {
+		pinDropIndex = dropIndexFromY(
+			pinRows.map((el) => {
+				const r = el.getBoundingClientRect();
+				return { top: r.top, height: r.height };
+			}),
+			pinDragOrigin,
+			pinLastClientY
+		);
+	}
+
+	function onPinDragMove(e: PointerEvent) {
+		if (pinDragId === null) return;
+		e.preventDefault();
+		pinLastClientY = e.clientY;
+		refreshPinDropTarget();
+		// Dragging to the edge of a long list has to scroll it, or only the
+		// pinned notes already on screen would be reachable.
+		pinEdgeScroll?.start();
+	}
+
+	function endPinDrag() {
+		pinEdgeScroll?.stop();
+		pinEdgeScroll = null;
+		pinDragId = null;
+		pinDropIndex = -1;
+		pinDragOrigin = -1;
+		pinRows = [];
+	}
+
+	async function onPinDragEnd(e: PointerEvent) {
+		if (pinDragId === null) return;
+		e.preventDefault();
+		const from = pinDragOrigin;
+		const to = pinDropIndex;
+		endPinDrag();
+		if (to < 0 || to === from) return;
+
+		const previous = notes;
+		// Optimistic: the list snaps into place, then the order is persisted.
+		notes = reorderPinned(notes, from, to);
+		listVersion++; // in-flight list loads carry the old order
+		try {
+			await api.notes.reorderPins(pinnedIds());
+		} catch {
+			// Roll back to what the server last told us, then re-fetch so the
+			// list can't drift from the stored order.
+			notes = previous;
+			void loadNotes();
+		}
+	}
 
 	function onSwipeStart(e: TouchEvent, noteId: number) {
 		swipeStartX = e.touches[0].clientX;
@@ -208,6 +329,16 @@
 	let panelNewTagName = $state('');
 	let activeTagId = $state<number | null>(null);
 	let starredOnly = $state(false);
+
+	/**
+	 * Dragging needs the full pinned set in view. Under a search/tag/starred
+	 * filter the list is a subset, so a drag could only ever express an order
+	 * over the pinned notes that happen to be visible — and reordering is a
+	 * property of the whole list, not of the current view.
+	 */
+	let pinDragEnabled = $derived(
+		isOnline && !search && activeTagId === null && !starredOnly
+	);
 	let showTagsPanel = $state(false);
 	// Note action menu
 	let showNoteMenu = $state(false);
@@ -273,10 +404,8 @@
 			id: c.id,
 			title: c.title,
 			body: c.body,
-			starred: c.starred,
-			pinned: c.pinned,
 			archived: false,
-			locked: c.locked ?? false,
+			...noteFlags(c),
 			created_at: c.server_updated_at,
 			updated_at: c.local_updated_at,
 		};
@@ -298,13 +427,8 @@
 				n.title.toLowerCase().includes(term) || n.body.toLowerCase().includes(term)
 			);
 		}
-		// Pinned first, then most recently updated
-		return filtered
-			.sort((a, b) => {
-				if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
-				return new Date(b.local_updated_at).getTime() - new Date(a.local_updated_at).getTime();
-			})
-			.map(cachedToNote);
+		// Pinned first in their drag order, then most recently updated.
+		return sortNotes(filtered, (n) => n.local_updated_at).map(cachedToNote);
 	}
 
 	/**
@@ -359,9 +483,7 @@
 				id: note.id,
 				title: note.title,
 				body: note.body,
-				starred: note.starred,
-				pinned: note.pinned,
-				locked: note.locked,
+				...noteFlags(note),
 				tags: noteTags.map(t => ({ id: t.id, name: t.name })),
 				server_updated_at: note.updated_at,
 				local_updated_at: note.updated_at,
@@ -412,9 +534,12 @@
 			.map((n) => {
 				const d = dirtyById.get(n.id);
 				if (!d) return n;
-				const flags = d.flags_dirty
-					? { starred: d.starred, pinned: d.pinned, locked: d.locked ?? n.locked }
-					: {};
+				// The desired local state wins, falling back to the server's for
+				// anything the cache entry doesn't carry. pin_order matters
+				// here: a note pinned offline holds a client-assigned slot the
+				// server hasn't seen, and without it the note would sort by the
+				// server's stale 0 instead of at the top.
+				const flags = d.flags_dirty ? noteFlags(d, n) : {};
 				if (!d.is_dirty) return { ...n, ...flags };
 				return { ...n, ...flags, title: d.title, body: d.body, updated_at: d.local_updated_at };
 			});
@@ -432,11 +557,8 @@
 			merged.push(cachedToNote(c));
 		}
 
-		// Re-sort: pinned first, then most recently updated.
-		return merged.sort((a, b) => {
-			if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
-			return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-		});
+		// Re-sort: pinned first in their drag order, then most recently updated.
+		return sortNotes(merged, (n) => n.updated_at);
 	}
 
 	// Monotonic token guarding the notes list against stale writes. Every new
@@ -1005,7 +1127,13 @@
 		if (!(err instanceof OfflineError)) throw err;
 		const note = notes.find((n) => n.id === id);
 		if (!note) return null;
-		const toggled = { ...note, [flag]: !note[flag] };
+		const toggled: Note = { ...note, [flag]: !note[flag] };
+		if (flag === 'pinned') {
+			// Online, the server assigns the top slot (MIN(pin_order) - 1) on
+			// pin and clears it on unpin. Offline nothing does, so the note
+			// would keep its stale 0 and sort below notes pinned earlier.
+			toggled.pin_order = toggled.pinned ? nextPinOrder(notes) : 0;
+		}
 		await markNoteFlagsOffline(toggled, flag);
 		syncStatus = 'unsynced';
 		return toggled;
@@ -1032,9 +1160,13 @@
 		}
 		if (!updated) return;
 		listVersion++; // invalidate in-flight list loads carrying the old state
-		const rest = notes.filter((n) => n.id !== updated.id);
-		const full = [updated, ...rest];
-		notes = [...full.filter((n) => n.pinned), ...full.filter((n) => !n.pinned)];
+		// A freshly pinned note claims the top slot — server-side when online,
+		// via nextPinOrder when not — so re-sorting on the shared comparator
+		// puts it at the top and leaves the rest as they were.
+		notes = sortNotes(
+			notes.map((n) => (n.id === updated.id ? updated : n)),
+			(n) => n.updated_at
+		);
 	}
 
 	async function toggleLock(id: number) {
@@ -1323,8 +1455,30 @@
 				<li
 					class="note-item"
 					class:selected={note.id === selectedId}
+					class:pinned={note.pinned}
+					class:pin-dragging={pinDragId === note.id}
+					class:pin-drop-before={pinDropTarget?.id === note.id && pinDropTarget.edge === 'before'}
+					class:pin-drop-after={pinDropTarget?.id === note.id && pinDropTarget.edge === 'after'}
+					data-note-id={note.id}
 					style="--swipe-x: {swipeX[note.id] ?? 0}px"
 				>
+					{#if note.pinned && pinDragEnabled && (swipeX[note.id] ?? 0) === 0}
+						<!-- Only pinned notes reorder by hand; the rest follow last touch. -->
+						<span
+							class="pin-drag-handle"
+							role="button"
+							tabindex="-1"
+							title="Drag to reorder"
+							aria-label="Reorder pinned note {note.title || 'Untitled'}"
+							onpointerdown={(e) => onPinDragStart(e, note.id)}
+							onpointermove={onPinDragMove}
+							onpointerup={(e) => void onPinDragEnd(e)}
+							onpointercancel={endPinDrag}
+						>
+							<GripVertical size={13} aria-hidden="true" />
+						</span>
+					{/if}
+
 					<!-- Mobile swipe action panels -->
 					<div class="mob-swipe-left" class:mob-swipe-visible={(swipeX[note.id] ?? 0) > 4}>
 						<button
@@ -1493,6 +1647,7 @@
 					{#if syncStatus === 'synced'}<CheckCircle2 size={14} />{:else}<CloudUpload size={14} />{/if}
 				</button>
 				<a href="/archive" class="bottom-btn" title="Archive"><Archive size={15} /></a>
+				<a href="/trash" class="bottom-btn" title="Trash"><Trash2 size={15} /></a>
 				<a href="/settings" class="bottom-btn" title="Settings"><Settings size={15} /></a>
 				<button class="bottom-btn" onclick={handleLogout} title="Log out"><LogOut size={15} /></button>
 			</div>
@@ -1942,6 +2097,55 @@
 		margin-bottom: 1px;
 	}
 	.note-item.selected { background: var(--bg-select); box-shadow: inset 2px 0 0 var(--accent); }
+
+	/* ── Pinned-note drag reordering ── */
+	.pin-drag-handle {
+		position: absolute;
+		left: 3px;
+		top: 0.75rem;
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 14px;
+		height: 18px;
+		color: var(--text-4);
+		opacity: 0;
+		cursor: grab;
+		/* Claim the gesture so a touch-drag reorders instead of scrolling. */
+		touch-action: none;
+		transition: opacity 0.12s;
+	}
+	/* Widen the hit area without moving the grip. */
+	.pin-drag-handle::after {
+		content: '';
+		position: absolute;
+		inset: -10px -8px;
+	}
+	.note-item.pinned:hover .pin-drag-handle,
+	.note-item.pin-dragging .pin-drag-handle { opacity: 0.6; }
+	.pin-drag-handle:active { cursor: grabbing; opacity: 0.9; }
+	/* Touch devices never hover, so a hover-only grip would be undraggable. */
+	@media (hover: none) {
+		.pin-drag-handle { opacity: 0.4; }
+	}
+
+	.note-item.pin-dragging { opacity: 0.45; }
+
+	.note-item.pin-drop-before::before,
+	.note-item.pin-drop-after::after {
+		content: '';
+		position: absolute;
+		left: 0;
+		right: 0;
+		height: 2px;
+		background: var(--accent);
+		border-radius: 1px;
+		pointer-events: none;
+		z-index: 3;
+	}
+	.note-item.pin-drop-before::before { top: -1px; }
+	.note-item.pin-drop-after::after { bottom: -1px; }
 	.note-item:not(.selected):hover { background: var(--bg-hover); }
 
 	.note-btn {

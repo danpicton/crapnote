@@ -64,6 +64,11 @@ Subcommands:
   tag ID TAG_ID | untag ID TAG_ID
       Attach or detach a tag (create tags with 'crapnote tags create').
 
+Flags column (list/search output and 'notes get'):
+  P  pinned      *  starred
+  A  archived    L  locked
+  -  no flags set
+
 Examples:
   crapnote notes create --title "Meeting" --body-file - < notes.md
   crapnote notes list --tag 3 --starred

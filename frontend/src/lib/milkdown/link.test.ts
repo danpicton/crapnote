@@ -17,7 +17,8 @@ vi.mock('@milkdown/kit/preset/commonmark', () => ({
 	},
 }));
 
-import { isUrl, normalizeUrl, isSafeHref, sanitizeHref, safeLinkMarkSchema } from './link';
+import { Plugin } from '@milkdown/kit/prose/state';
+import { isUrl, normalizeUrl, isSafeHref, sanitizeHref, safeLinkMarkSchema, linkKeymapPlugin } from './link';
 
 describe('isUrl', () => {
 	it('accepts https URLs', () => {
@@ -162,5 +163,43 @@ describe('safeLinkMarkSchema', () => {
 		const attrs = spec.parseDOM[0].getAttrs(a);
 		expect(attrs && attrs.href).toBe('https://example.com/x');
 		expect(attrs && attrs.title).toBe('t');
+	});
+});
+
+describe('link click handling', () => {
+	/** Build the plugin and dig out the click handler it registered. */
+	function clickHandler() {
+		vi.mocked(Plugin).mockClear();
+		(linkKeymapPlugin as unknown as () => unknown)();
+		const config = vi.mocked(Plugin).mock.calls[0][0] as {
+			props: { handleDOMEvents: { click: (view: unknown, e: MouseEvent) => boolean } };
+		};
+		return config.props.handleDOMEvents.click;
+	}
+
+	function anchorEvent() {
+		const a = document.createElement('a');
+		a.setAttribute('href', 'https://example.com');
+		const event = new MouseEvent('click', { bubbles: true });
+		Object.defineProperty(event, 'target', { value: a });
+		return event;
+	}
+
+	it('opens the link on a plain click', () => {
+		const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+		const view = { state: { selection: { empty: true } } };
+
+		expect(clickHandler()(view, anchorEvent())).toBe(true);
+		expect(open).toHaveBeenCalled();
+		open.mockRestore();
+	});
+
+	it('does not navigate when a drag-select finished on the link', () => {
+		const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+		const view = { state: { selection: { empty: false } } };
+
+		expect(clickHandler()(view, anchorEvent())).toBe(false);
+		expect(open).not.toHaveBeenCalled();
+		open.mockRestore();
 	});
 });

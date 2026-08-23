@@ -1,36 +1,20 @@
 import type { EditorView } from '@milkdown/kit/prose/view';
 import { findListItem, moveListItemAt } from './listmove';
+import {
+	createEdgeAutoScroll,
+	dropIndexFromY,
+	findScrollParent,
+	type DragRect,
+	type EdgeAutoScroll,
+} from '$lib/dragReorder';
 
 /**
- * Pointer-driven drag reordering for list items.
+ * Drag-to-reorder for the editor's list items.
  *
- * Uses pointer events rather than HTML5 drag-and-drop so the same code path
- * serves mouse, pen and touch — the latter matters because CrapNote is a PWA
- * that is mostly used on a phone.
+ * The pointer geometry, edge autoscrolling and drop-slot maths live in
+ * $lib/dragReorder, shared with the pinned-note drag in the notes list. What
+ * stays here is the part that knows about ProseMirror.
  */
-
-export interface DragRect {
-	top: number;
-	height: number;
-}
-
-/**
- * Work out which slot the dragged item should land in, given the on-screen
- * geometry of its siblings and the current pointer position.
- *
- * `rects` covers every sibling in document order, including the item being
- * dragged, which is excluded here so the returned index is relative to the list
- * with that item removed — exactly what moveListItemAt expects.
- */
-export function dropIndexFromY(rects: DragRect[], originIndex: number, clientY: number): number {
-	let index = 0;
-	for (let i = 0; i < rects.length; i++) {
-		if (i === originIndex) continue;
-		const { top, height } = rects[i];
-		if (clientY > top + height / 2) index++;
-	}
-	return index;
-}
 
 /** The grip element shown in the gutter of each list item. */
 export function createDragHandle(): HTMLElement {
@@ -65,6 +49,8 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 	let originIndex = -1;
 	let dropIndex = -1;
 	let activePointer: number | null = null;
+	let edgeScroll: EdgeAutoScroll | null = null;
+	let lastClientY = 0;
 
 	const siblingRects = (): DragRect[] =>
 		siblings.map((el) => {
@@ -89,9 +75,16 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 		}
 	};
 
+	/** Recompute the drop slot from the pointer's last known position. */
+	const refreshDropTarget = () => {
+		dropIndex = dropIndexFromY(siblingRects(), originIndex, lastClientY);
+		showIndicator(dropIndex);
+	};
+
 	const finish = (commit: boolean) => {
 		if (originIndex < 0) return;
 
+		edgeScroll?.stop();
 		clearIndicators();
 		dom.classList.remove('list-item-dragging');
 		if (activePointer != null) {
@@ -108,6 +101,7 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 		dropIndex = -1;
 		activePointer = null;
 		siblings = [];
+		edgeScroll = null;
 
 		if (!commit || to < 0 || to === from) return;
 
@@ -123,8 +117,9 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 	const onPointerMove = (e: PointerEvent) => {
 		if (originIndex < 0) return;
 		e.preventDefault();
-		dropIndex = dropIndexFromY(siblingRects(), originIndex, e.clientY);
-		showIndicator(dropIndex);
+		lastClientY = e.clientY;
+		refreshDropTarget();
+		edgeScroll?.start();
 	};
 
 	const onPointerUp = (e: PointerEvent) => {
@@ -164,6 +159,12 @@ export function enableListItemDrag({ handle, dom, view, getPos }: DragOptions): 
 		originIndex = index;
 		dropIndex = index;
 		activePointer = e.pointerId;
+		lastClientY = e.clientY;
+		edgeScroll = createEdgeAutoScroll({
+			scroller: findScrollParent(dom),
+			getClientY: () => lastClientY,
+			onScroll: refreshDropTarget,
+		});
 
 		dom.classList.add('list-item-dragging');
 		try {
