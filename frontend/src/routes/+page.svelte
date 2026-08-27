@@ -254,11 +254,17 @@
 
 	// Pull-to-sync touch handlers
 	function onListTouchStart(e: TouchEvent) {
+		// A pinned note being dragged downwards is a reorder, not a pull —
+		// letting both run would drag the sync banner open under the note.
+		if (pinDragId !== null) { pullAtTop = false; return; }
 		pullStartY = e.touches[0].clientY;
 		pullAtTop = (noteListEl?.scrollTop ?? 0) === 0;
 	}
 
 	function onListTouchMove(e: TouchEvent) {
+		// The drag can begin after the touch did (the pointer has to move
+		// before it is a drag), so re-check rather than trusting pullAtTop.
+		if (pinDragId !== null) { pullAtTop = false; pullY = 0; return; }
 		if (!pullAtTop) return;
 		const dy = e.touches[0].clientY - pullStartY;
 		if (dy <= 0) { pullY = 0; return; }
@@ -267,6 +273,7 @@
 	}
 
 	async function onListTouchEnd() {
+		if (pinDragId !== null) { pullY = 0; return; }
 		if (pullY >= 56) {
 			pullY = 0;
 			await heartbeatSync('manual');
@@ -1456,6 +1463,7 @@
 					class="note-item"
 					class:selected={note.id === selectedId}
 					class:pinned={note.pinned}
+					class:pin-draggable={note.pinned && pinDragEnabled}
 					class:pin-dragging={pinDragId === note.id}
 					class:pin-drop-before={pinDropTarget?.id === note.id && pinDropTarget.edge === 'before'}
 					class:pin-drop-after={pinDropTarget?.id === note.id && pinDropTarget.edge === 'after'}
@@ -1475,7 +1483,7 @@
 							onpointerup={(e) => void onPinDragEnd(e)}
 							onpointercancel={endPinDrag}
 						>
-							<GripVertical size={13} aria-hidden="true" />
+							<GripVertical size={16} aria-hidden="true" />
 						</span>
 					{/if}
 
@@ -2101,14 +2109,14 @@
 	/* ── Pinned-note drag reordering ── */
 	.pin-drag-handle {
 		position: absolute;
-		left: 3px;
-		top: 0.75rem;
+		left: 2px;
+		top: 0.625rem;
 		z-index: 2;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		width: 14px;
-		height: 18px;
+		width: 16px;
+		height: 22px;
 		color: var(--text-4);
 		opacity: 0;
 		cursor: grab;
@@ -2120,14 +2128,14 @@
 	.pin-drag-handle::after {
 		content: '';
 		position: absolute;
-		inset: -10px -8px;
+		inset: -12px -8px;
 	}
 	.note-item.pinned:hover .pin-drag-handle,
 	.note-item.pin-dragging .pin-drag-handle { opacity: 0.6; }
 	.pin-drag-handle:active { cursor: grabbing; opacity: 0.9; }
 	/* Touch devices never hover, so a hover-only grip would be undraggable. */
 	@media (hover: none) {
-		.pin-drag-handle { opacity: 0.4; }
+		.pin-drag-handle { opacity: 0.55; }
 	}
 
 	.note-item.pin-dragging { opacity: 0.45; }
@@ -2811,6 +2819,30 @@
 			background: transparent;
 			box-shadow: none;
 		}
+
+		/* Pinned drag handle: a full-height grip strip down the left edge, so
+		   a thumb can find it without aiming. The row's text is indented to
+		   clear it, so grabbing the grip never competes with tapping the note
+		   open. Nothing is clipped by the row's overflow:hidden either.
+
+		   The grip itself rides at the top, level with the title's first
+		   line, rather than centred in a row whose height varies with the
+		   preview text — 16px of .note-btn padding plus half the slack
+		   between the 22.5px line box and the 20px icon. The hit area stays
+		   the full strip: ::after is positioned against the padding box, so
+		   the padding that drops the icon does not shrink it. */
+		.pin-drag-handle {
+			left: 0;
+			top: 0;
+			bottom: 0;
+			width: 36px;
+			height: auto;
+			align-items: flex-start;
+			padding-top: 17px;
+		}
+		.pin-drag-handle::after { inset: 0; }
+		.pin-drag-handle :global(svg) { width: 20px; height: 20px; }
+		.note-item.pin-draggable .note-btn { padding-left: 40px; }
 
 		/* Swipe action panels */
 		.mob-swipe-left,
