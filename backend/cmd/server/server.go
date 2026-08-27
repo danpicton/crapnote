@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
+	"github.com/danpicton/crapnote/internal/apispec"
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/export"
 	"github.com/danpicton/crapnote/internal/images"
+	"github.com/danpicton/crapnote/internal/mcp"
 	"github.com/danpicton/crapnote/internal/middleware"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/ratelimit"
@@ -35,14 +38,72 @@ func newMux(
 	// Observability (public — Prometheus scrapes this).
 	mux.Handle("GET /metrics", middleware.MetricsHandler())
 
-	// Public.
-	mux.HandleFunc("GET /api/health", handleHealth)
-	// Global theme is public: the login screen must be able to render the
-	// admin-chosen default before any session exists.
-	mux.HandleFunc("GET /api/theme", settingsHandler.GetTheme)
-	mux.Handle("POST /api/auth/login",
-		ratelimit.Middleware(loginLimiter, ratelimit.ClientIP)(http.HandlerFunc(authHandler.Login)),
-	)
+	// Every /api route is declared in the apispec registry and bound to its
+	// handler here. newMux panics (at startup, and in every test that builds
+	// a mux) if the two drift: an op with no binding, or a binding with no
+	// op. Middleware wrapping — auth, scope, admin, cookie-only, rate
+	// limits — derives from the op's registry metadata, so the registry is
+	// authoritative about what each endpoint permits.
+	bindings := map[string]http.HandlerFunc{
+		"health":    handleHealth,
+		"theme_get": settingsHandler.GetTheme,
+
+		"auth_login":           authHandler.Login,
+		"auth_logout":          authHandler.Logout,
+		"auth_me":              authHandler.Me,
+		"auth_change_password": authHandler.ChangePassword,
+
+		"setup_get":      setupHandler.Get,
+		"setup_complete": setupHandler.Complete,
+
+		"tokens_list":       tokensHandler.List,
+		"tokens_create":     tokensHandler.Create,
+		"tokens_revoke":     tokensHandler.Revoke,
+		"tokens_revoke_all": tokensHandler.RevokeAll,
+
+		"notes_list":         notesHandler.List,
+		"notes_create":       notesHandler.Create,
+		"notes_get":          notesHandler.Get,
+		"notes_update":       notesHandler.Update,
+		"notes_delete":       notesHandler.Delete,
+		"notes_toggle_star":  notesHandler.ToggleStar,
+		"notes_toggle_pin":   notesHandler.TogglePin,
+		"notes_toggle_lock":  notesHandler.ToggleLock,
+		"notes_reorder_pins": notesHandler.ReorderPins,
+		"notes_archive":      notesHandler.Archive,
+		"notes_unarchive":    notesHandler.Unarchive,
+		"archive_list":       notesHandler.ListArchived,
+
+		"note_tags_list":   tagsHandler.GetForNote,
+		"note_tags_add":    tagsHandler.AddToNote,
+		"note_tags_remove": tagsHandler.RemoveFromNote,
+
+		"tags_list":   tagsHandler.List,
+		"tags_create": tagsHandler.Create,
+		"tags_rename": tagsHandler.Rename,
+		"tags_delete": tagsHandler.Delete,
+
+		"export": exportHandler.Export,
+
+		"images_upload": imagesHandler.Upload,
+		"images_get":    imagesHandler.Serve,
+
+		"trash_list":    trashHandler.List,
+		"trash_restore": trashHandler.Restore,
+		"trash_delete":  trashHandler.DeleteOne,
+		"trash_empty":   trashHandler.Empty,
+
+		"admin_users_list":             adminHandler.ListUsers,
+		"admin_users_create":           adminHandler.CreateUser,
+		"admin_users_delete":           adminHandler.DeleteUser,
+		"admin_user_api_tokens":        adminHandler.SetAPITokensEnabled,
+		"admin_user_set_password":      adminHandler.SetUserPassword,
+		"admin_user_lock":              adminHandler.LockUser,
+		"admin_user_unlock":            adminHandler.UnlockUser,
+		"admin_users_invite":           adminHandler.InviteUser,
+		"admin_user_regenerate_invite": adminHandler.RegenerateInvite,
+		"admin_theme_set":              settingsHandler.SetTheme,
+	}
 
 	// bearerRateLimit applies a per-IP limiter only to requests that present
 	// an Authorization header — protects against credential stuffing and
@@ -58,101 +119,54 @@ func newMux(
 			next.ServeHTTP(w, r)
 		})
 	}
+	loginRateLimit := ratelimit.Middleware(loginLimiter, ratelimit.ClientIP)
 
-	// Helpers to reduce repetition.
-	protected := func(method, pattern string, h http.HandlerFunc) {
-		mux.Handle(method+" "+pattern,
-			bearerRateLimit(authHandler.RequireAuth(h)),
-		)
+	bound := map[string]bool{}
+	for _, op := range apispec.Registry() {
+		h, ok := bindings[op.Name]
+		if !ok {
+			panic(fmt.Sprintf("apispec op %q has no handler binding in newMux", op.Name))
+		}
+		bound[op.Name] = true
+
+		var handler http.Handler = h
+		if op.Scope == apispec.ScopePublic {
+			if op.LoginRateLimited {
+				// The setup-token flow shares the login limiter: the token's
+				// 256 bits of entropy plus the limiter make brute force
+				// infeasible.
+				handler = loginRateLimit(handler)
+			}
+		} else {
+			if op.AdminOnly {
+				handler = authHandler.RequireAdmin(handler)
+			}
+			if op.Scope == apispec.ScopeWrite {
+				handler = authHandler.RequireWrite(handler)
+			}
+			if op.CookieOnly {
+				handler = cookieOnly(handler)
+			}
+			handler = bearerRateLimit(authHandler.RequireAuth(handler))
+		}
+		mux.Handle(op.Method+" "+op.Path, handler)
 	}
-	// Write-scoped: requires cookie auth OR a read_write bearer token.
-	protectedWrite := func(method, pattern string, h http.HandlerFunc) {
-		mux.Handle(method+" "+pattern,
-			bearerRateLimit(authHandler.RequireAuth(authHandler.RequireWrite(h))),
-		)
+	for name := range bindings {
+		if !bound[name] {
+			panic(fmt.Sprintf("handler binding %q has no apispec op", name))
+		}
 	}
-	admin := func(method, pattern string, h http.HandlerFunc) {
-		mux.Handle(method+" "+pattern,
-			bearerRateLimit(authHandler.RequireAuth(authHandler.RequireAdmin(h))),
-		)
-	}
-	// Admin
-	admin("GET", "/api/admin/users", adminHandler.ListUsers)
-	admin("POST", "/api/admin/users", adminHandler.CreateUser)
-	admin("DELETE", "/api/admin/users/{id}", adminHandler.DeleteUser)
-	admin("PATCH", "/api/admin/users/{id}/api-tokens", adminHandler.SetAPITokensEnabled)
-	admin("PUT", "/api/admin/users/{id}/password", adminHandler.SetUserPassword)
-	admin("POST", "/api/admin/users/{id}/lock", adminHandler.LockUser)
-	admin("POST", "/api/admin/users/{id}/unlock", adminHandler.UnlockUser)
-	admin("POST", "/api/admin/users/invite", adminHandler.InviteUser)
-	admin("POST", "/api/admin/users/{id}/invite", adminHandler.RegenerateInvite)
-	admin("PUT", "/api/admin/theme", settingsHandler.SetTheme)
 
-	// Public — setup-token flow. Rate-limited by IP so the token's 256 bits
-	// of entropy plus the limiter make brute force infeasible.
-	setupLimited := func(h http.HandlerFunc) http.Handler {
-		return ratelimit.Middleware(loginLimiter, ratelimit.ClientIP)(h)
-	}
-	mux.Handle("GET /api/setup/{token}", setupLimited(setupHandler.Get))
-	mux.Handle("POST /api/setup/{token}", setupLimited(setupHandler.Complete))
-
-	// Auth
-	protected("POST", "/api/auth/logout", authHandler.Logout)
-	protected("GET", "/api/auth/me", authHandler.Me)
-	// Changing your own password is gated behind cookie auth: a leaked read-write
-	// bearer token must not be able to hijack the account by changing the
-	// password.
-	mux.Handle("POST /api/auth/password",
-		bearerRateLimit(authHandler.RequireAuth(cookieOnly(authHandler.ChangePassword))),
-	)
-
-	// API tokens (user-facing). List/Revoke are safe over read scope; Create
-	// requires cookie auth — you can't bootstrap new tokens from a token.
-	protected("GET", "/api/tokens", tokensHandler.List)
-	mux.Handle("POST /api/tokens",
-		bearerRateLimit(authHandler.RequireAuth(authHandler.RequireWrite(cookieOnly(tokensHandler.Create)))),
-	)
-	protectedWrite("DELETE", "/api/tokens/{id}", tokensHandler.Revoke)
-	protectedWrite("POST", "/api/tokens/revoke-all", tokensHandler.RevokeAll)
-
-	// Notes
-	protected("GET", "/api/notes", notesHandler.List)
-	protectedWrite("POST", "/api/notes", notesHandler.Create)
-	protected("GET", "/api/notes/{id}", notesHandler.Get)
-	protectedWrite("PUT", "/api/notes/{id}", notesHandler.Update)
-	protectedWrite("DELETE", "/api/notes/{id}", notesHandler.Delete)
-	protectedWrite("PATCH", "/api/notes/{id}/star", notesHandler.ToggleStar)
-	protectedWrite("PATCH", "/api/notes/{id}/pin", notesHandler.TogglePin)
-	protectedWrite("PATCH", "/api/notes/{id}/lock", notesHandler.ToggleLock)
-	// Three segments, so this can never be shadowed by /api/notes/{id}.
-	protectedWrite("PUT", "/api/notes/pins/order", notesHandler.ReorderPins)
-	protectedWrite("PATCH", "/api/notes/{id}/archive", notesHandler.Archive)
-	protectedWrite("PATCH", "/api/notes/{id}/unarchive", notesHandler.Unarchive)
-	protected("GET", "/api/archive", notesHandler.ListArchived)
-
-	// Note–tag associations
-	protected("GET", "/api/notes/{id}/tags", tagsHandler.GetForNote)
-	protectedWrite("POST", "/api/notes/{id}/tags", tagsHandler.AddToNote)
-	protectedWrite("DELETE", "/api/notes/{id}/tags/{tid}", tagsHandler.RemoveFromNote)
-
-	// Tags
-	protected("GET", "/api/tags", tagsHandler.List)
-	protectedWrite("POST", "/api/tags", tagsHandler.Create)
-	protectedWrite("PUT", "/api/tags/{id}", tagsHandler.Rename)
-	protectedWrite("DELETE", "/api/tags/{id}", tagsHandler.Delete)
-
-	// Export (reads data; treat as read)
-	protected("POST", "/api/export", exportHandler.Export)
-
-	// Images
-	protectedWrite("POST", "/api/images", imagesHandler.Upload)
-	protected("GET", "/api/images/{id}", imagesHandler.Serve)
-
-	// Trash
-	protected("GET", "/api/trash", trashHandler.List)
-	protectedWrite("POST", "/api/trash/{id}/restore", trashHandler.Restore)
-	protectedWrite("DELETE", "/api/trash/{id}", trashHandler.DeleteOne)
-	protectedWrite("DELETE", "/api/trash", trashHandler.Empty)
+	// Built-in MCP server: Streamable HTTP endpoint whose tools are generated
+	// from the same registry and dispatched back through this mux, so every
+	// tool call passes the real auth/scope middleware above. Requires bearer
+	// auth like any protected endpoint.
+	mcpHandler := mcp.NewHandler(apispec.MCPOps(), mux)
+	mux.Handle("POST /mcp", bearerRateLimit(authHandler.RequireAuth(mcpHandler)))
+	mux.Handle("GET /mcp", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Stateless server: no server-initiated SSE stream to offer.
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}))
 
 	// SPA frontend — catch-all after all /api/* routes.
 	mux.Handle("/", uiHandler())
@@ -163,17 +177,18 @@ func newMux(
 // cookieOnly rejects bearer-authenticated requests with 403. Applied to
 // endpoints that must not be reachable through an API token — creating new
 // tokens is the motivating case: a leaked token must not be able to issue
-// more tokens and escalate persistence.
-func cookieOnly(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+// more tokens and escalate persistence. Changing your own password is the
+// other: a leaked read-write token must not be able to hijack the account.
+func cookieOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if auth.IsBearerAuth(r.Context()) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":"this endpoint is not available via api tokens"}`))
 			return
 		}
-		next(w, r)
-	}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {

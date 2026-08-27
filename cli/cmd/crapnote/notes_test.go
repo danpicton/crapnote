@@ -136,6 +136,23 @@ func TestNotesStarTogglesAndReportsNewState(t *testing.T) {
 	}
 }
 
+func TestNotesLockTogglesAndReportsNewState(t *testing.T) {
+	srv := newAPIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/api/notes/7/lock" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = w.Write([]byte(strings.Replace(testNoteJSON, `"archived":false`, `"archived":false,"locked":true`, 1)))
+	})
+
+	stdout, _, code := runCLI(t, nil, "--url", srv.URL, "--token", "t", "notes", "lock", "7")
+	if code != 0 {
+		t.Fatalf("exit = %d", code)
+	}
+	if !strings.Contains(stdout, "now locked") {
+		t.Errorf("stdout = %q, want new locked state", stdout)
+	}
+}
+
 func TestNotesArchiveAndUnarchive(t *testing.T) {
 	var paths []string
 	srv := newAPIServer(t, func(w http.ResponseWriter, r *http.Request) {

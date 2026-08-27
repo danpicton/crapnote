@@ -227,6 +227,22 @@ Every command takes `--json` (structured output, nothing else on stdout) and
 returns distinct exit codes (0 ok · 2 usage · 3 auth · 4 forbidden · 5 not
 found). See `docs/cli-plan.md` for the full surface.
 
+### MCP server
+
+The server has a built-in [MCP](https://modelcontextprotocol.io) endpoint at
+`POST /mcp` (Streamable HTTP, stateless) authenticated with the same bearer
+tokens. It exposes one tool per bearer-reachable API operation — token scopes
+and the cookie-only restrictions below apply identically, because every tool
+call is dispatched through the real API middleware:
+
+```bash
+claude mcp add --transport http crapnote http://localhost:8080/mcp \
+  --header "Authorization: Bearer $CNP_TOKEN"
+```
+
+See `docs/mcp.md` for the tool surface and how API/CLI/MCP are kept aligned
+via the registry in `backend/internal/apispec` and `docs/api-contract.json`.
+
 Because the CLI lives in a Go submodule (`cli/`), its releases are tagged
 `cli/vX.Y.Z` — mirrored automatically from each root `vX.Y.Z` tag by CI.
 `go install` maps the module's versions to those prefixed tags, so `@latest`

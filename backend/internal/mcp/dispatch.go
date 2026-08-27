@@ -1,0 +1,228 @@
+package mcp
+
+import (
+	"bytes"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"math"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+
+	"github.com/danpicton/crapnote/internal/apispec"
+)
+
+// callResult is the MCP tools/call result payload.
+type callResult struct {
+	Content []content `json:"content"`
+	IsError bool      `json:"isError,omitempty"`
+}
+
+// content is one MCP content item (text, image, or embedded resource).
+type content struct {
+	Type     string    `json:"type"`
+	Text     string    `json:"text,omitempty"`
+	Data     string    `json:"data,omitempty"`
+	MimeType string    `json:"mimeType,omitempty"`
+	Resource *resource `json:"resource,omitempty"`
+}
+
+type resource struct {
+	URI      string `json:"uri"`
+	MimeType string `json:"mimeType"`
+	Blob     string `json:"blob"`
+}
+
+func textResult(text string) *callResult {
+	return &callResult{Content: []content{{Type: "text", Text: text}}}
+}
+
+func errorResult(format string, args ...any) *callResult {
+	r := textResult(fmt.Sprintf(format, args...))
+	r.IsError = true
+	return r
+}
+
+// dispatch executes one tool call by replaying it as a real HTTP request
+// through the server's mux, carrying the caller's credentials. The API's own
+// middleware therefore decides authorisation (token scope, cookie-only,
+// admin) — the MCP layer adds no policy of its own.
+func (h *Handler) dispatch(orig *http.Request, op apispec.Operation, args map[string]any) *callResult {
+	path := op.Path
+	query := map[string]string{}
+	body := map[string]any{}
+
+	for _, p := range op.Params {
+		val, present := args[p.Name]
+		if !present || val == nil {
+			if p.Required {
+				return errorResult("missing required argument %q", p.Name)
+			}
+			continue
+		}
+		switch p.In {
+		case apispec.InPath:
+			s, err := scalarString(p, val)
+			if err != nil {
+				return errorResult("argument %q: %v", p.Name, err)
+			}
+			path = strings.ReplaceAll(path, "{"+p.Name+"}", s)
+		case apispec.InQuery:
+			s, err := scalarString(p, val)
+			if err != nil {
+				return errorResult("argument %q: %v", p.Name, err)
+			}
+			query[p.Name] = s
+		case apispec.InBody:
+			body[p.Name] = val
+		}
+	}
+
+	var reqBody *bytes.Buffer
+	contentType := ""
+	switch op.Request {
+	case apispec.RequestMultipartImage:
+		var err error
+		reqBody, contentType, err = multipartImageBody(op, body)
+		if err != nil {
+			return errorResult("%v", err)
+		}
+	default:
+		// Always send a JSON object: several handlers decode the body
+		// unconditionally and treat EOF as a bad request.
+		data, err := json.Marshal(body)
+		if err != nil {
+			return errorResult("encode request body: %v", err)
+		}
+		reqBody = bytes.NewBuffer(data)
+		contentType = "application/json"
+	}
+
+	target := path
+	if len(query) > 0 {
+		q := url.Values{}
+		for k, v := range query {
+			q.Set(k, v)
+		}
+		target += "?" + q.Encode()
+	}
+
+	req := httptest.NewRequestWithContext(orig.Context(), op.Method, target, reqBody)
+	if op.Method != http.MethodGet {
+		req.Header.Set("Content-Type", contentType)
+	}
+	// Replay only the caller's credentials; nothing else from the MCP
+	// request leaks into the API request.
+	if v := orig.Header.Get("Authorization"); v != "" {
+		req.Header.Set("Authorization", v)
+	}
+	for _, c := range orig.Cookies() {
+		req.AddCookie(c)
+	}
+
+	rec := httptest.NewRecorder()
+	h.api.ServeHTTP(rec, req)
+	return wrapResponse(op, rec)
+}
+
+func wrapResponse(op apispec.Operation, rec *httptest.ResponseRecorder) *callResult {
+	status := rec.Code
+	if status >= 400 {
+		msg := strings.TrimSpace(rec.Body.String())
+		if msg == "" {
+			msg = http.StatusText(status)
+		}
+		return errorResult("API error %d: %s", status, msg)
+	}
+
+	switch op.Response {
+	case apispec.ResponseNone:
+		return textResult(`{"ok":true}`)
+	case apispec.ResponseImage:
+		return &callResult{Content: []content{{
+			Type:     "image",
+			Data:     base64.StdEncoding.EncodeToString(rec.Body.Bytes()),
+			MimeType: rec.Header().Get("Content-Type"),
+		}}}
+	case apispec.ResponseBinary:
+		return &callResult{Content: []content{{
+			Type: "resource",
+			Resource: &resource{
+				URI:      "crapnote://" + op.Name,
+				MimeType: rec.Header().Get("Content-Type"),
+				Blob:     base64.StdEncoding.EncodeToString(rec.Body.Bytes()),
+			},
+		}}}
+	default:
+		body := strings.TrimSpace(rec.Body.String())
+		if body == "" {
+			body = `{"ok":true}`
+		}
+		return textResult(body)
+	}
+}
+
+// scalarString renders a path/query argument as its wire string, validating
+// the declared type. JSON numbers arrive as float64.
+func scalarString(p apispec.Param, val any) (string, error) {
+	switch p.Type {
+	case apispec.TypeInteger:
+		switch v := val.(type) {
+		case float64:
+			if v != math.Trunc(v) {
+				return "", fmt.Errorf("expected an integer, got %v", v)
+			}
+			return fmt.Sprintf("%d", int64(v)), nil
+		case json.Number:
+			return v.String(), nil
+		default:
+			return "", fmt.Errorf("expected an integer, got %T", val)
+		}
+	case apispec.TypeBoolean:
+		v, ok := val.(bool)
+		if !ok {
+			return "", fmt.Errorf("expected a boolean, got %T", val)
+		}
+		return fmt.Sprintf("%t", v), nil
+	default:
+		v, ok := val.(string)
+		if !ok {
+			return "", fmt.Errorf("expected a string, got %T", val)
+		}
+		return v, nil
+	}
+}
+
+func multipartImageBody(op apispec.Operation, body map[string]any) (*bytes.Buffer, string, error) {
+	var field, b64 string
+	for _, p := range op.Params {
+		if p.In == apispec.InBody && p.Type == apispec.TypeBase64 {
+			field = p.Name
+			v, ok := body[p.Name].(string)
+			if !ok {
+				return nil, "", fmt.Errorf("argument %q must be a base64 string", p.Name)
+			}
+			b64 = v
+		}
+	}
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return nil, "", fmt.Errorf("argument %q is not valid base64: %v", field, err)
+	}
+	buf := &bytes.Buffer{}
+	mw := multipart.NewWriter(buf)
+	fw, err := mw.CreateFormFile(field, "upload")
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err := fw.Write(data); err != nil {
+		return nil, "", err
+	}
+	if err := mw.Close(); err != nil {
+		return nil, "", err
+	}
+	return buf, mw.FormDataContentType(), nil
+}

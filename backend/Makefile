@@ -5,7 +5,7 @@ export GOTOOLCHAIN := local
 FRONTEND_DIR := ../frontend
 UI_DEST      := cmd/server/ui/build
 
-.PHONY: build build-prod frontend test lint run
+.PHONY: build build-prod frontend test lint run apispec
 
 # Development build (no frontend embed; placeholder index.html served)
 build:
@@ -29,3 +29,8 @@ lint:
 
 run:
 	CGO_ENABLED=1 go run $(BUILD_FLAGS) ./cmd/server
+
+# Regenerate the machine-readable API contract from the apispec registry.
+# A test fails when this file is stale; the CLI's parity test consumes it.
+apispec:
+	go run ./cmd/apispecgen ../docs/api-contract.json

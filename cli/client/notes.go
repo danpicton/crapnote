@@ -59,6 +59,11 @@ func (c *Client) TogglePin(ctx context.Context, id int64) (*Note, error) {
 	return c.patchNote(ctx, id, "pin")
 }
 
+// ToggleLock flips the note's locked flag and returns the updated note.
+func (c *Client) ToggleLock(ctx context.Context, id int64) (*Note, error) {
+	return c.patchNote(ctx, id, "lock")
+}
+
 // ArchiveNote moves a note to the archive.
 func (c *Client) ArchiveNote(ctx context.Context, id int64) error {
 	return c.do(ctx, http.MethodPatch, notePath(id)+"/archive", nil, nil, nil)

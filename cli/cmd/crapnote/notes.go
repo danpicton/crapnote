@@ -35,6 +35,8 @@ func cmdNotes(e *env, args []string) int {
 		return notesToggle(e, rest, "star")
 	case "pin":
 		return notesToggle(e, rest, "pin")
+	case "lock":
+		return notesToggle(e, rest, "lock")
 	case "archive":
 		return notesArchiveOp(e, rest, true)
 	case "unarchive":
@@ -200,10 +202,13 @@ func notesToggle(e *env, args []string, action string) int {
 	}
 	var note *client.Note
 	var err error
-	if action == "star" {
+	switch action {
+	case "star":
 		note, err = e.client.ToggleStar(e.ctx, id)
-	} else {
+	case "pin":
 		note, err = e.client.TogglePin(e.ctx, id)
+	default:
+		note, err = e.client.ToggleLock(e.ctx, id)
 	}
 	if err != nil {
 		return e.fail(err)
@@ -212,10 +217,13 @@ func notesToggle(e *env, args []string, action string) int {
 		return e.emitJSON(note)
 	}
 	state := map[bool]string{true: "now", false: "no longer"}
-	if action == "star" {
+	switch action {
+	case "star":
 		fmt.Fprintf(e.stdout, "Note %d is %s starred.\n", note.ID, state[note.Starred])
-	} else {
+	case "pin":
 		fmt.Fprintf(e.stdout, "Note %d is %s pinned.\n", note.ID, state[note.Pinned])
+	default:
+		fmt.Fprintf(e.stdout, "Note %d is %s locked.\n", note.ID, state[note.Locked])
 	}
 	return exitOK
 }
