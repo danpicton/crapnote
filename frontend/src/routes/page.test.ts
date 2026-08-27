@@ -1092,6 +1092,14 @@ describe('pinned note reordering', () => {
 		});
 	}
 
+	function touch(type: string, clientY: number): TouchEvent {
+		// jsdom has no TouchEvent/Touch constructors; the handlers only read
+		// touches[0].clientX/clientY.
+		const e = new Event(type, { bubbles: true, cancelable: true });
+		Object.defineProperty(e, 'touches', { value: [{ clientX: 0, clientY }] });
+		return e as unknown as TouchEvent;
+	}
+
 	function pointer(type: string, clientY: number): PointerEvent {
 		// jsdom has no PointerEvent constructor; MouseEvent carries what the
 		// handlers actually read (button, clientY, pointerId is optional).
@@ -1148,6 +1156,43 @@ describe('pinned note reordering', () => {
 
 		expect(api.notes.reorderPins).not.toHaveBeenCalled();
 		expect(renderedTitles(container)).toEqual(['Alpha', 'Beta', 'Gamma', 'Plain']);
+	});
+
+	it('does not pull-to-sync while a pinned note is being dragged', async () => {
+		const { container } = render(Page);
+		await waitFor(() => expect(screen.getByText('Gamma')).toBeInTheDocument());
+		stubRowGeometry(container);
+
+		const list = container.querySelector('ul.note-list') as HTMLElement;
+		const indicator = container.querySelector('.mob-pull-indicator') as HTMLElement;
+
+		// Dragging the top pinned note downwards is a reorder, so the sync
+		// banner must stay shut even though the finger travels down from the
+		// top of an unscrolled list.
+		const grip = handles(container)[0];
+		await fireEvent(grip, pointer('pointerdown', 10));
+		await fireEvent(list, touch('touchstart', 10));
+		await fireEvent(grip, pointer('pointermove', 150));
+		await fireEvent(list, touch('touchmove', 150));
+
+		expect(indicator.style.height).toBe('0px');
+
+		await fireEvent(grip, pointer('pointerup', 150));
+		await fireEvent(list, touch('touchend', 150));
+		expect(syncOfflineChanges).not.toHaveBeenCalled();
+	});
+
+	it('still pulls to sync when no note is being dragged', async () => {
+		const { container } = render(Page);
+		await waitFor(() => expect(screen.getByText('Gamma')).toBeInTheDocument());
+
+		const list = container.querySelector('ul.note-list') as HTMLElement;
+		const indicator = container.querySelector('.mob-pull-indicator') as HTMLElement;
+
+		await fireEvent(list, touch('touchstart', 10));
+		await fireEvent(list, touch('touchmove', 150));
+
+		expect(parseFloat(indicator.style.height)).toBeGreaterThan(0);
 	});
 
 	it('hides the drag handle while a filter narrows the list', async () => {
