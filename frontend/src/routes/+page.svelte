@@ -2823,13 +2823,22 @@
 		/* Pinned drag handle: a full-height grip strip down the left edge, so
 		   a thumb can find it without aiming. The row's text is indented to
 		   clear it, so grabbing the grip never competes with tapping the note
-		   open. Nothing is clipped by the row's overflow:hidden either. */
+		   open. Nothing is clipped by the row's overflow:hidden either.
+
+		   The grip itself rides at the top, level with the title's first
+		   line, rather than centred in a row whose height varies with the
+		   preview text — 16px of .note-btn padding plus half the slack
+		   between the 22.5px line box and the 20px icon. The hit area stays
+		   the full strip: ::after is positioned against the padding box, so
+		   the padding that drops the icon does not shrink it. */
 		.pin-drag-handle {
 			left: 0;
 			top: 0;
 			bottom: 0;
 			width: 36px;
 			height: auto;
+			align-items: flex-start;
+			padding-top: 17px;
 		}
 		.pin-drag-handle::after { inset: 0; }
 		.pin-drag-handle :global(svg) { width: 20px; height: 20px; }
