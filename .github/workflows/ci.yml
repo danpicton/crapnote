@@ -33,6 +33,13 @@ jobs:
         with:
           version: v2.5.0
           working-directory: backend
+          # The action's config check fetches its JSONSchema from
+          # golangci-lint.run on every run, so a blip on that host fails the
+          # whole backend job with nothing wrong in the tree. `golangci-lint
+          # run` still parses .golangci.yml and errors on a broken one; only
+          # the schema-level strictness (unknown keys and the like) is lost,
+          # on a config that changes about once a year.
+          verify: false
 
       - name: Build (with FTS5)
         run: CGO_ENABLED=1 go build -tags sqlite_fts5 ./...
