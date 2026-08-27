@@ -206,7 +206,8 @@
         }
       ],
       "request": "json",
-      "response": "none"
+      "response": "none",
+      "destructive": true
     },
     {
       "name": "tokens_revoke_all",
@@ -234,7 +235,7 @@
           "in": "query",
           "type": "boolean",
           "required": false,
-          "description": "Filter on the starred flag: true for starred notes only, false for unstarred only. Omit for both."
+          "description": "Filter by starred flag: true returns only starred notes, false only unstarred. Omit for all notes."
         },
         {
           "name": "tag",
@@ -682,7 +683,8 @@
         }
       ],
       "request": "json",
-      "response": "none"
+      "response": "none",
+      "destructive": true
     },
     {
       "name": "export",
@@ -809,7 +811,8 @@
         }
       ],
       "request": "json",
-      "response": "none"
+      "response": "none",
+      "destructive": true
     },
     {
       "name": "trash_empty",
@@ -820,7 +823,8 @@
       "cookie_only": false,
       "description": "Permanently delete everything in the trash. Irreversible.",
       "request": "json",
-      "response": "none"
+      "response": "none",
+      "destructive": true
     },
     {
       "name": "admin_users_list",

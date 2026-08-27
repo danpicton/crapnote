@@ -47,9 +47,9 @@ func errorResult(format string, args ...any) *callResult {
 }
 
 // dispatch executes one tool call by replaying it as a real HTTP request
-// through the server's mux, carrying the caller's verified identity on the
-// request context. The API's own middleware therefore decides authorisation
-// (token scope, cookie-only, admin) — the MCP layer adds no policy of its own.
+// through the server's mux, carrying the caller's credentials. The API's own
+// middleware therefore decides authorisation (token scope, cookie-only,
+// admin) — the MCP layer adds no policy of its own.
 func (h *Handler) dispatch(orig *http.Request, op apispec.Operation, args map[string]any) *callResult {
 	path := op.Path
 	query := map[string]string{}
@@ -69,13 +69,12 @@ func (h *Handler) dispatch(orig *http.Request, op apispec.Operation, args map[st
 			if err != nil {
 				return errorResult("argument %q: %v", p.Name, err)
 			}
-			// Escape, and refuse anything that is not one path segment:
-			// raw interpolation lets an argument inject a query string or
-			// extra segments, and an unparseable target panics inside
-			// httptest.NewRequestWithContext.
-			if s == "" || strings.Contains(s, "/") {
-				return errorResult("argument %q: must be a single non-empty path segment", p.Name)
+			if s == "" {
+				return errorResult("argument %q must not be empty", p.Name)
 			}
+			// Escape before splicing: a raw value could otherwise smuggle
+			// query/fragment/extra segments into the replayed request, and
+			// characters like spaces would make request construction panic.
 			path = strings.ReplaceAll(path, "{"+p.Name+"}", url.PathEscape(s))
 		case apispec.InQuery:
 			s, err := scalarString(p, val)
@@ -117,17 +116,20 @@ func (h *Handler) dispatch(orig *http.Request, op apispec.Operation, args map[st
 		target += "?" + q.Encode()
 	}
 
+	// The MCP request's context already carries the authenticated user and
+	// auth flags (RequireAuth ran before this handler), so no credentials
+	// are copied onto the replayed request: RequireAuth passes context-
+	// authenticated requests through, and the scope middleware reads the
+	// same context. This keeps the caller's token out of a second
+	// verification (and rate-limit charge) and forwards nothing else from
+	// the MCP request.
 	req := httptest.NewRequestWithContext(orig.Context(), op.Method, target, reqBody)
 	if op.Method != http.MethodGet {
 		req.Header.Set("Content-Type", contentType)
 	}
-	// The replayed request inherits the verified identity from the MCP
-	// request's context (RequireAuth already ran on /mcp and short-circuits
-	// on a context that carries it), so the credential itself is not
-	// re-sent: verifying it twice would double every auth query, every
-	// token-usage write, and every rate-limit charge. Carry the caller's
-	// address across so the per-IP limiter and audit logs see the real
-	// client rather than httptest's placeholder 192.0.2.1.
+	// Carry the caller's address across: handlers audit-log the client IP
+	// (token revocation among them), and httptest's placeholder 192.0.2.1
+	// would attribute every MCP-driven action to the same fictional client.
 	req.RemoteAddr = orig.RemoteAddr
 
 	rec := newCaptured(maxDispatchResponse)
@@ -136,9 +138,9 @@ func (h *Handler) dispatch(orig *http.Request, op apispec.Operation, args map[st
 }
 
 // maxDispatchResponse caps how much of an API response one tool call will
-// buffer. The wrapped result is held several times over (buffer, base64
-// string, JSON encoding), so an uncapped export of a large account could
-// exhaust memory; every other body path in the app is bounded too.
+// buffer. The result is held several times over (buffer, base64 string, JSON
+// encoding), so an uncapped export of a large account could exhaust memory;
+// every other body path in the app is bounded too.
 const maxDispatchResponse = 32 << 20
 
 // captured is a bounded http.ResponseWriter: it records the status, headers,
@@ -181,15 +183,11 @@ func (c *captured) Write(p []byte) (int, error) {
 
 func wrapResponse(op apispec.Operation, rec *captured) *callResult {
 	status := rec.status
-	// Only 2xx is a result. A 3xx (ServeMux path-cleaning) or a 200 from the
-	// SPA catch-all is not this operation's response, and reporting it as
-	// success hands the caller an HTML page as data — or claims a write
-	// succeeded when nothing ran.
+	// Only 2xx is success: a 3xx here means the mux redirected (e.g. path
+	// cleaning) instead of running a handler, and returning its body as a
+	// tool result would hand the agent garbage that looks valid.
 	if status < 200 || status >= 300 {
 		msg := strings.TrimSpace(rec.body.String())
-		if status >= 300 && status < 400 {
-			msg = "unexpected redirect to " + rec.header.Get("Location")
-		}
 		if msg == "" {
 			msg = http.StatusText(status)
 		}

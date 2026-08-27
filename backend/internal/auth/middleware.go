@@ -46,14 +46,6 @@ func WithAuthFlags(ctx context.Context, viaBearer, writeAllowed bool) context.Co
 	})
 }
 
-// hasAuthFlags reports whether authorisation flags have been attached to the
-// context, i.e. whether a RequireAuth pass has already vouched for this
-// request.
-func hasAuthFlags(ctx context.Context) bool {
-	_, ok := ctx.Value(authFlagsContextKey).(authFlags)
-	return ok
-}
-
 // IsBearerAuth reports whether the request was authenticated via a bearer
 // token (rather than a session cookie).
 func IsBearerAuth(ctx context.Context) bool {
@@ -92,15 +84,15 @@ func (h *Handler) SetBearerAuthenticator(b BearerAuthenticator) {
 // Returns 401 if both are missing or invalid.
 func (h *Handler) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Already authenticated further up the chain — the MCP endpoint
-		// authenticates once and replays the call through the same mux, so
-		// the inner route would otherwise verify the same credential a
-		// second time. Only RequireAuth itself ever sets these context
-		// values; a client cannot supply them.
-		if UserFromContext(r.Context()) != nil && hasAuthFlags(r.Context()) {
+		// A user already on the context means an upstream RequireAuth ran —
+		// the MCP dispatcher replays tool calls through the mux with the
+		// /mcp request's context. Re-verifying would double-charge the
+		// bearer rate limiter and double-count token usage.
+		if UserFromContext(r.Context()) != nil {
 			next.ServeHTTP(w, r)
 			return
 		}
+
 		if raw, ok := bearerFromRequest(r); ok {
 			if h.bearer == nil {
 				writeError(w, http.StatusUnauthorized, "bearer authentication disabled")

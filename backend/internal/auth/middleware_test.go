@@ -55,6 +55,22 @@ func TestRequireAuth_InvalidSession(t *testing.T) {
 	}
 }
 
+func TestRequireAuth_ContextUserPassesThrough(t *testing.T) {
+	h, _ := newMiddlewareFixture(t)
+
+	// A request already carrying an authenticated user (the MCP dispatcher's
+	// replayed requests) must pass through without cookies or headers — and
+	// without a second token verification.
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req = req.WithContext(auth.WithUser(req.Context(), &auth.User{ID: 1, Username: "alice"}))
+	w := httptest.NewRecorder()
+	h.RequireAuth(okHandler).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for pre-authenticated context, got %d", w.Code)
+	}
+}
+
 func TestRequireAuth_ValidSession_InjectsUser(t *testing.T) {
 	h, svc := newMiddlewareFixture(t)
 	svc.SeedAdmin(t.Context(), "alice", "pass") //nolint:errcheck

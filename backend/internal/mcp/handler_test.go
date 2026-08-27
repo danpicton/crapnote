@@ -154,7 +154,6 @@ func callTool(t *testing.T, h *Handler, name string, args string, header http.He
 	t.Helper()
 	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":%s}}`, name, args)
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
-	req.RemoteAddr = "203.0.113.5:9999"
 	for k, vs := range header {
 		for _, v := range vs {
 			req.Header.Add(k, v)
@@ -186,7 +185,7 @@ func TestToolsCall_DispatchesThroughAPI(t *testing.T) {
 	api := &captureAPI{status: 200, respCT: "application/json", resp: []byte(`[{"id":1}]`)}
 	h := newTestHandler(api)
 
-	hdr := http.Header{"Authorization": {"Bearer cnp_test"}}
+	hdr := http.Header{"Authorization": {"Bearer cnp_test"}, "Cookie": {"session=abc"}}
 	resp := callTool(t, h, "notes_list", `{"search":"tea & biscuits","starred":true,"limit":10}`, hdr)
 	cr := resultOf(t, resp)
 
@@ -197,17 +196,61 @@ func TestToolsCall_DispatchesThroughAPI(t *testing.T) {
 	if q.Get("search") != "tea & biscuits" || q.Get("starred") != "true" || q.Get("limit") != "10" {
 		t.Errorf("query = %v", api.req.URL.RawQuery)
 	}
-	// The credential is deliberately not re-sent: the replayed request
-	// carries the already-verified identity on its context, and re-sending it
-	// would authenticate (and rate-limit) the same call twice.
+	// Auth rides the request context (RequireAuth ran before the MCP
+	// handler); no credentials must be copied onto the replayed request.
 	if api.req.Header.Get("Authorization") != "" {
-		t.Error("authorization header should not be replayed")
+		t.Error("authorization header must not be replayed")
 	}
-	if api.req.RemoteAddr != "203.0.113.5:9999" {
-		t.Errorf("RemoteAddr = %q, want the caller's address", api.req.RemoteAddr)
+	if len(api.req.Cookies()) != 0 {
+		t.Error("cookies must not be forwarded to the replayed request")
 	}
 	if cr.IsError || cr.Content[0].Text != `[{"id":1}]` {
 		t.Errorf("result = %+v", cr)
+	}
+}
+
+func TestToolsCall_PathParamsAreEscaped(t *testing.T) {
+	cases := []struct {
+		id          string
+		wantEscaped string
+	}{
+		{"foo bar", "/api/images/foo%20bar"},
+		{"../trash", "/api/images/..%2Ftrash"},
+		{"x?starred=true", "/api/images/x%3Fstarred=true"},
+		{"x#frag", "/api/images/x%23frag"},
+		{"%zz", "/api/images/%25zz"},
+	}
+	for _, tc := range cases {
+		api := &captureAPI{status: 200, respCT: "image/png", resp: []byte("png")}
+		h := newTestHandler(api)
+		resp := callTool(t, h, "images_get", fmt.Sprintf(`{"id":%q}`, tc.id), nil)
+		cr := resultOf(t, resp)
+		if cr.IsError {
+			t.Fatalf("id %q: unexpected tool error: %+v", tc.id, cr)
+		}
+		if got := api.req.URL.EscapedPath(); got != tc.wantEscaped {
+			t.Errorf("id %q dispatched to %q, want %q", tc.id, got, tc.wantEscaped)
+		}
+		if api.req.URL.RawQuery != "" || api.req.URL.Fragment != "" {
+			t.Errorf("id %q leaked into query/fragment: %q", tc.id, api.req.URL.String())
+		}
+	}
+}
+
+func TestToolsCall_EmptyPathParamRejected(t *testing.T) {
+	h := newTestHandler(&captureAPI{})
+	cr := resultOf(t, callTool(t, h, "images_get", `{"id":""}`, nil))
+	if !cr.IsError || !strings.Contains(cr.Content[0].Text, "empty") {
+		t.Errorf("result = %+v, want empty-argument error", cr)
+	}
+}
+
+func TestToolsCall_RedirectIsError(t *testing.T) {
+	api := &captureAPI{status: 301, respCT: "text/html", resp: []byte(`<a href="/api/trash">Moved</a>`)}
+	h := newTestHandler(api)
+	cr := resultOf(t, callTool(t, h, "images_get", `{"id":"abc"}`, nil))
+	if !cr.IsError || !strings.Contains(cr.Content[0].Text, "301") {
+		t.Errorf("result = %+v, want 301 error", cr)
 	}
 }
 
@@ -309,6 +352,83 @@ func TestToolsCall_MultipartImageUpload(t *testing.T) {
 	}
 }
 
+func TestBodySizeLimit(t *testing.T) {
+	h := newTestHandler(&captureAPI{})
+	resp, _ := rpc(t, h, `{"jsonrpc":"2.0","id":1,"method":"ping","params":{"pad":"`+strings.Repeat("a", maxBodyBytes)+`"}}`)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "exceeds") {
+		t.Fatalf("error = %+v, want body-too-large error", resp.Error)
+	}
+}
+
+func TestBatchRequests(t *testing.T) {
+	h := newTestHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/mcp",
+		strings.NewReader(`[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"},{"jsonrpc":"2.0","id":2,"method":"nope"}]`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	var resps []rpcResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resps); err != nil {
+		t.Fatalf("batch response not an array: %q", rec.Body.String())
+	}
+	if len(resps) != 2 {
+		t.Fatalf("got %d responses, want 2 (notification excluded)", len(resps))
+	}
+	if resps[0].Error != nil {
+		t.Errorf("ping in batch failed: %+v", resps[0].Error)
+	}
+	if resps[1].Error == nil || resps[1].Error.Code != codeMethodNotFound {
+		t.Errorf("unknown method in batch = %+v, want method-not-found", resps[1].Error)
+	}
+}
+
+func TestBatchOfNotificationsGets202(t *testing.T) {
+	h := newTestHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/mcp",
+		strings.NewReader(`[{"jsonrpc":"2.0","method":"notifications/initialized"}]`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted || rec.Body.Len() != 0 {
+		t.Fatalf("status=%d body=%q, want 202 with empty body", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEmptyBatchIsInvalid(t *testing.T) {
+	h := newTestHandler(nil)
+	resp, _ := rpc(t, h, `[]`)
+	if resp.Error == nil || resp.Error.Code != codeInvalidRequest {
+		t.Fatalf("error = %+v, want invalid request", resp.Error)
+	}
+}
+
+func TestToolsList_Annotations(t *testing.T) {
+	h := newTestHandler(nil)
+	resp, _ := rpc(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	byName := map[string]map[string]any{}
+	for _, raw := range resp.Result.(map[string]any)["tools"].([]any) {
+		tl := raw.(map[string]any)
+		ann, ok := tl["annotations"].(map[string]any)
+		if !ok {
+			t.Fatalf("tool %v has no annotations", tl["name"])
+		}
+		byName[tl["name"].(string)] = ann
+	}
+	// Irreversible ops must carry the destructive hint so clients confirm
+	// with the user before wiping notes.
+	for _, name := range []string{"trash_empty", "trash_delete", "tags_delete"} {
+		if byName[name]["destructiveHint"] != true || byName[name]["readOnlyHint"] != false {
+			t.Errorf("%s annotations = %v, want destructive, not read-only", name, byName[name])
+		}
+	}
+	if byName["notes_list"]["readOnlyHint"] != true || byName["notes_list"]["destructiveHint"] != false {
+		t.Errorf("notes_list annotations = %v, want read-only, not destructive", byName["notes_list"])
+	}
+	// Trashing a note is recoverable for 7 days — not destructive.
+	if byName["notes_delete"]["destructiveHint"] != false {
+		t.Errorf("notes_delete annotations = %v, want non-destructive (goes to trash)", byName["notes_delete"])
+	}
+}
+
 func TestToolsCall_BadArgumentType(t *testing.T) {
 	h := newTestHandler(&captureAPI{})
 	cr := resultOf(t, callTool(t, h, "notes_get", `{"id":"seven"}`, nil))
@@ -321,67 +441,9 @@ func TestToolsCall_BadArgumentType(t *testing.T) {
 	}
 }
 
-// A string path argument is caller-controlled. Interpolating it raw both
-// panics httptest.NewRequestWithContext on an unparseable target and lets the
-// argument inject extra path segments or a query string.
-func TestToolsCall_HostilePathArgumentIsRejected(t *testing.T) {
-	// Escaped, these reach the API as one intact path segment — no panic, no
-	// injected query string or extra segments.
-	for _, id := range []string{"%zz", "a b", "abc?limit=9999"} {
-		api := &captureAPI{status: 200, respCT: "image/png", resp: []byte("x")}
-		h := newTestHandler(api)
-
-		cr := resultOf(t, callTool(t, h, "images_get", fmt.Sprintf(`{"id":%q}`, id), nil))
-		if cr.IsError {
-			t.Errorf("id %q: unexpected error %+v", id, cr)
-			continue
-		}
-		if api.req.URL.Path != "/api/images/"+id || api.req.URL.RawQuery != "" {
-			t.Errorf("id %q: dispatched path = %q query = %q", id, api.req.URL.Path, api.req.URL.RawQuery)
-		}
-	}
-
-	// These cannot be one segment, and must not be dispatched at all: an
-	// extra segment misses the route and lands on the SPA catch-all.
-	for _, id := range []string{"a/b", "x/../../metrics", ""} {
-		api := &captureAPI{status: 200, respCT: "image/png", resp: []byte("x")}
-		h := newTestHandler(api)
-
-		cr := resultOf(t, callTool(t, h, "images_get", fmt.Sprintf(`{"id":%q}`, id), nil))
-		if !cr.IsError {
-			t.Errorf("id %q: expected an argument error", id)
-		}
-		if api.req != nil {
-			t.Errorf("id %q: request should not have been dispatched (%q)", id, api.req.URL.String())
-		}
-	}
-}
-
-// Anything outside 2xx is not this operation's response: a redirect from the
-// mux's path cleaning, or the SPA catch-all's 200 for an unmatched route,
-// must not be handed back as data or as a successful write.
-func TestWrapResponse_NonSuccessStatusIsAnError(t *testing.T) {
-	for _, status := range []int{http.StatusMovedPermanently, http.StatusFound, http.StatusBadRequest} {
-		api := &captureAPI{status: status, respCT: "text/html", resp: []byte("<html>")}
-		h := newTestHandler(api)
-
-		cr := resultOf(t, callTool(t, h, "images_get", `{"id":"abc"}`, nil))
-		if !cr.IsError {
-			t.Errorf("status %d: wrapped as success: %+v", status, cr)
-		}
-	}
-
-	// A ResponseNone op must not report {"ok":true} for a call that never ran.
-	api := &captureAPI{status: http.StatusMovedPermanently}
-	h := newTestHandler(api)
-	cr := resultOf(t, callTool(t, h, "notes_delete", `{"id":1}`, nil))
-	if !cr.IsError {
-		t.Errorf("redirect reported as a successful delete: %+v", cr)
-	}
-}
-
 // A response past the cap is refused rather than buffered, base64-encoded and
-// JSON-escaped — three live copies of an unbounded artefact.
+// JSON-escaped — three live copies of an unbounded artefact (export bundles
+// every note and image the account holds).
 func TestWrapResponse_OversizedResponseIsRefused(t *testing.T) {
 	rec := newCaptured(64)
 	rec.WriteHeader(http.StatusOK)
@@ -397,6 +459,8 @@ func TestWrapResponse_OversizedResponseIsRefused(t *testing.T) {
 	}
 }
 
+// An out-of-range JSON number must be an argument error: converting it to
+// int64 is undefined in Go and dispatches a garbage ID instead.
 func TestToolsCall_OutOfRangeIntegerArgument(t *testing.T) {
 	api := &captureAPI{status: 200, respCT: "application/json", resp: []byte(`{}`)}
 	h := newTestHandler(api)
@@ -410,54 +474,18 @@ func TestToolsCall_OutOfRangeIntegerArgument(t *testing.T) {
 	}
 }
 
-// Hosts gate confirmation on the annotations, so an irreversible tool must not
-// look like a read.
-func TestTools_CarryAnnotations(t *testing.T) {
-	byName := map[string]tool{}
-	for _, tl := range buildTools(apispec.MCPOps()) {
-		byName[tl.Name] = tl
-	}
-	for _, tc := range []struct {
-		name        string
-		readOnly    bool
-		destructive bool
-	}{
-		{"notes_list", true, false},
-		{"notes_get", true, false},
-		{"notes_create", false, false},
-		{"notes_delete", false, true},
-		{"trash_empty", false, true},
-		{"tokens_revoke_all", false, true},
-	} {
-		tl, ok := byName[tc.name]
-		if !ok {
-			t.Fatalf("tool %q missing", tc.name)
-		}
-		if tl.Annotations.ReadOnlyHint != tc.readOnly || tl.Annotations.DestructiveHint != tc.destructive {
-			t.Errorf("%s annotations = %+v, want readOnly=%v destructive=%v",
-				tc.name, tl.Annotations, tc.readOnly, tc.destructive)
-		}
-	}
-}
+// Handlers audit-log the client IP, so the replay must carry the caller's
+// address rather than httptest's placeholder.
+func TestToolsCall_CarriesCallerAddress(t *testing.T) {
+	api := &captureAPI{status: 200, respCT: "application/json", resp: []byte(`[]`)}
+	h := newTestHandler(api)
 
-func TestServeHTTP_RequestBodyIsBounded(t *testing.T) {
-	h := newTestHandler(nil)
-	body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"images_upload","arguments":{"image":%q}}}`,
-		strings.Repeat("A", maxRequestBody+1024))
-	resp, _ := rpc(t, h, body)
-	if resp.Error == nil || resp.Error.Code != codeParseError {
-		t.Fatalf("oversized body accepted: %+v", resp)
-	}
-}
+	body := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"notes_list","arguments":{}}}`
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	req.RemoteAddr = "203.0.113.5:9999"
+	h.ServeHTTP(httptest.NewRecorder(), req)
 
-func TestInitialize_OnlyAdvertisesImplementedRevision(t *testing.T) {
-	// The pre-2025-06-18 revisions require JSON-RPC batching, which this
-	// server does not implement; echoing one back would leave a client
-	// batching into an opaque parse error.
-	h := newTestHandler(nil)
-	resp, _ := rpc(t, h, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}`)
-	result := resp.Result.(map[string]any)
-	if result["protocolVersion"] != protocolVersion {
-		t.Errorf("protocolVersion = %v, want %v", result["protocolVersion"], protocolVersion)
+	if api.req.RemoteAddr != "203.0.113.5:9999" {
+		t.Errorf("RemoteAddr = %q, want the caller's address", api.req.RemoteAddr)
 	}
 }

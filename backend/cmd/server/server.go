@@ -160,8 +160,10 @@ func newMux(
 
 	// Built-in MCP server: Streamable HTTP endpoint whose tools are generated
 	// from the same registry and dispatched back through this mux, so every
-	// tool call passes the real auth/scope middleware above. Requires bearer
-	// auth like any protected endpoint.
+	// tool call passes the real auth/scope middleware above. Bearer tokens
+	// only: cookie sessions are rejected outright so /mcp is never a CSRF
+	// or DNS-rebinding target (a bearer header can't be attached by a
+	// browser cross-origin), and the dispatcher forwards no credentials.
 	//
 	// Tool calls dispatch through observe(mux) rather than the bare mux, so a
 	// note created over MCP is counted and logged as POST /api/notes like any
@@ -171,7 +173,7 @@ func newMux(
 		dispatchTarget = observe(mux)
 	}
 	mcpHandler := mcp.NewHandler(apispec.MCPOps(), dispatchTarget)
-	mux.Handle("POST /mcp", bearerRateLimit(authHandler.RequireAuth(mcpHandler)))
+	mux.Handle("POST /mcp", bearerRateLimit(bearerOnly(authHandler.RequireAuth(mcpHandler))))
 	// Methodless pattern: every verb other than POST answers 405. Registering
 	// only GET would let DELETE (the transport's session-termination verb),
 	// PUT and the rest fall through to the SPA catch-all below, which serves
@@ -198,6 +200,22 @@ func cookieOnly(next http.Handler) http.Handler {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			_, _ = w.Write([]byte(`{"error":"this endpoint is not available via api tokens"}`))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// bearerOnly rejects requests that carry no Authorization header before
+// RequireAuth can fall back to cookie auth. Applied to /mcp: MCP clients
+// authenticate with API tokens, and refusing cookies means a browser
+// session can never be tricked into driving the MCP surface.
+func bearerOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"api token required"}`))
 			return
 		}
 		next.ServeHTTP(w, r)
