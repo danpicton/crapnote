@@ -8,7 +8,12 @@
 // with no handler binding fails mux construction.
 package apispec
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/danpicton/crapnote/internal/httpx"
+)
 
 // Scope classifies who may call an operation.
 type Scope string
@@ -95,6 +100,13 @@ type Operation struct {
 	Params           []Param      `json:"params,omitempty"`
 	Request          RequestKind  `json:"request"`
 	Response         ResponseKind `json:"response"`
+	// Destructive marks an operation that irreversibly removes or
+	// invalidates state in a way its HTTP method does not convey (a DELETE
+	// is destructive by definition; a POST that revokes every token is not
+	// derivable from the method alone). MCP tools publish it as
+	// annotations.destructiveHint, which is how a host decides to ask the
+	// user first.
+	Destructive bool `json:"destructive,omitempty"`
 	// MCPWaived, when non-empty, explains why no MCP tool is generated for
 	// an otherwise bearer-reachable operation.
 	MCPWaived string `json:"mcp_waived,omitempty"`
@@ -107,8 +119,11 @@ func (o Operation) BearerReachable() bool {
 }
 
 func pageParams() []Param {
+	// Read the numbers from httpx rather than restating them: ParsePage
+	// clamps silently, so a description that promises more than the server
+	// returns is published to every MCP client and CLI user as fact.
 	return []Param{
-		{Name: "limit", In: InQuery, Type: TypeInteger, Description: "Max results per page (default 50, max 200)."},
+		{Name: "limit", In: InQuery, Type: TypeInteger, Description: fmt.Sprintf("Max results per page (default %d, max %d).", httpx.DefaultPageSize, httpx.MaxPageSize)},
 		{Name: "offset", In: InQuery, Type: TypeInteger, Description: "Number of results to skip."},
 	}
 }
@@ -201,7 +216,7 @@ func Registry() []Operation {
 			},
 		},
 		{
-			Name: "tokens_revoke_all", Method: "POST", Path: "/api/tokens/revoke-all", Scope: ScopeWrite,
+			Name: "tokens_revoke_all", Method: "POST", Path: "/api/tokens/revoke-all", Scope: ScopeWrite, Destructive: true,
 			Description: "Revoke all of your API tokens. Irreversible; this also revokes the token making the call.",
 			Response:    ResponseNone,
 		},
@@ -211,8 +226,8 @@ func Registry() []Operation {
 			Name: "notes_list", Method: "GET", Path: "/api/notes", Scope: ScopeRead,
 			Description: "List your notes, optionally filtered. Use the search param for full-text (FTS5) search.",
 			Params: append([]Param{
-				{Name: "starred", In: InQuery, Type: TypeBoolean, Description: "Only starred notes when true."},
-				{Name: "tag", In: InQuery, Type: TypeInteger, Description: "Only notes carrying this tag ID."},
+				{Name: "starred", In: InQuery, Type: TypeBoolean, Description: "Filter on the starred flag: true for starred notes only, false for unstarred only. Omit for both."},
+				{Name: "tag", In: InQuery, Type: TypeInteger, Description: "Only notes carrying this tag ID. Omit, or pass 0, for notes with any or no tag."},
 				{Name: "search", In: InQuery, Type: TypeString, Description: "Full-text search query."},
 			}, pageParams()...),
 		},

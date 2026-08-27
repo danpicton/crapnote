@@ -217,7 +217,8 @@
       "cookie_only": false,
       "description": "Revoke all of your API tokens. Irreversible; this also revokes the token making the call.",
       "request": "json",
-      "response": "none"
+      "response": "none",
+      "destructive": true
     },
     {
       "name": "notes_list",
@@ -233,14 +234,14 @@
           "in": "query",
           "type": "boolean",
           "required": false,
-          "description": "Only starred notes when true."
+          "description": "Filter on the starred flag: true for starred notes only, false for unstarred only. Omit for both."
         },
         {
           "name": "tag",
           "in": "query",
           "type": "integer",
           "required": false,
-          "description": "Only notes carrying this tag ID."
+          "description": "Only notes carrying this tag ID. Omit, or pass 0, for notes with any or no tag."
         },
         {
           "name": "search",
@@ -254,7 +255,7 @@
           "in": "query",
           "type": "integer",
           "required": false,
-          "description": "Max results per page (default 50, max 200)."
+          "description": "Max results per page (default 50, max 100)."
         },
         {
           "name": "offset",
@@ -502,7 +503,7 @@
           "in": "query",
           "type": "integer",
           "required": false,
-          "description": "Max results per page (default 50, max 200)."
+          "description": "Max results per page (default 50, max 100)."
         },
         {
           "name": "offset",
@@ -603,7 +604,7 @@
           "in": "query",
           "type": "integer",
           "required": false,
-          "description": "Max results per page (default 50, max 200)."
+          "description": "Max results per page (default 50, max 100)."
         },
         {
           "name": "offset",
@@ -757,7 +758,7 @@
           "in": "query",
           "type": "integer",
           "required": false,
-          "description": "Max results per page (default 50, max 200)."
+          "description": "Max results per page (default 50, max 100)."
         },
         {
           "name": "offset",

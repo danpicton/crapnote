@@ -47,9 +47,9 @@ func errorResult(format string, args ...any) *callResult {
 }
 
 // dispatch executes one tool call by replaying it as a real HTTP request
-// through the server's mux, carrying the caller's credentials. The API's own
-// middleware therefore decides authorisation (token scope, cookie-only,
-// admin) — the MCP layer adds no policy of its own.
+// through the server's mux, carrying the caller's verified identity on the
+// request context. The API's own middleware therefore decides authorisation
+// (token scope, cookie-only, admin) — the MCP layer adds no policy of its own.
 func (h *Handler) dispatch(orig *http.Request, op apispec.Operation, args map[string]any) *callResult {
 	path := op.Path
 	query := map[string]string{}
@@ -69,7 +69,14 @@ func (h *Handler) dispatch(orig *http.Request, op apispec.Operation, args map[st
 			if err != nil {
 				return errorResult("argument %q: %v", p.Name, err)
 			}
-			path = strings.ReplaceAll(path, "{"+p.Name+"}", s)
+			// Escape, and refuse anything that is not one path segment:
+			// raw interpolation lets an argument inject a query string or
+			// extra segments, and an unparseable target panics inside
+			// httptest.NewRequestWithContext.
+			if s == "" || strings.Contains(s, "/") {
+				return errorResult("argument %q: must be a single non-empty path segment", p.Name)
+			}
+			path = strings.ReplaceAll(path, "{"+p.Name+"}", url.PathEscape(s))
 		case apispec.InQuery:
 			s, err := scalarString(p, val)
 			if err != nil {
@@ -114,28 +121,82 @@ func (h *Handler) dispatch(orig *http.Request, op apispec.Operation, args map[st
 	if op.Method != http.MethodGet {
 		req.Header.Set("Content-Type", contentType)
 	}
-	// Replay only the caller's credentials; nothing else from the MCP
-	// request leaks into the API request.
-	if v := orig.Header.Get("Authorization"); v != "" {
-		req.Header.Set("Authorization", v)
-	}
-	for _, c := range orig.Cookies() {
-		req.AddCookie(c)
-	}
+	// The replayed request inherits the verified identity from the MCP
+	// request's context (RequireAuth already ran on /mcp and short-circuits
+	// on a context that carries it), so the credential itself is not
+	// re-sent: verifying it twice would double every auth query, every
+	// token-usage write, and every rate-limit charge. Carry the caller's
+	// address across so the per-IP limiter and audit logs see the real
+	// client rather than httptest's placeholder 192.0.2.1.
+	req.RemoteAddr = orig.RemoteAddr
 
-	rec := httptest.NewRecorder()
+	rec := newCaptured(maxDispatchResponse)
 	h.api.ServeHTTP(rec, req)
 	return wrapResponse(op, rec)
 }
 
-func wrapResponse(op apispec.Operation, rec *httptest.ResponseRecorder) *callResult {
-	status := rec.Code
-	if status >= 400 {
-		msg := strings.TrimSpace(rec.Body.String())
+// maxDispatchResponse caps how much of an API response one tool call will
+// buffer. The wrapped result is held several times over (buffer, base64
+// string, JSON encoding), so an uncapped export of a large account could
+// exhaust memory; every other body path in the app is bounded too.
+const maxDispatchResponse = 32 << 20
+
+// captured is a bounded http.ResponseWriter: it records the status, headers,
+// and up to limit bytes of body, discarding (and flagging) anything beyond.
+type captured struct {
+	header      http.Header
+	status      int
+	body        bytes.Buffer
+	limit       int
+	overflow    bool
+	wroteHeader bool
+}
+
+func newCaptured(limit int) *captured {
+	return &captured{header: make(http.Header), status: http.StatusOK, limit: limit}
+}
+
+func (c *captured) Header() http.Header { return c.header }
+
+func (c *captured) WriteHeader(status int) {
+	if c.wroteHeader {
+		return
+	}
+	c.wroteHeader = true
+	c.status = status
+}
+
+func (c *captured) Write(p []byte) (int, error) {
+	c.wroteHeader = true
+	if c.overflow {
+		return len(p), nil
+	}
+	if c.body.Len()+len(p) > c.limit {
+		c.overflow = true
+		c.body.Reset()
+		return len(p), nil
+	}
+	return c.body.Write(p)
+}
+
+func wrapResponse(op apispec.Operation, rec *captured) *callResult {
+	status := rec.status
+	// Only 2xx is a result. A 3xx (ServeMux path-cleaning) or a 200 from the
+	// SPA catch-all is not this operation's response, and reporting it as
+	// success hands the caller an HTML page as data — or claims a write
+	// succeeded when nothing ran.
+	if status < 200 || status >= 300 {
+		msg := strings.TrimSpace(rec.body.String())
+		if status >= 300 && status < 400 {
+			msg = "unexpected redirect to " + rec.header.Get("Location")
+		}
 		if msg == "" {
 			msg = http.StatusText(status)
 		}
 		return errorResult("API error %d: %s", status, msg)
+	}
+	if rec.overflow {
+		return errorResult("response is larger than %d bytes; fetch it from the HTTP API instead", rec.limit)
 	}
 
 	switch op.Response {
@@ -144,26 +205,29 @@ func wrapResponse(op apispec.Operation, rec *httptest.ResponseRecorder) *callRes
 	case apispec.ResponseImage:
 		return &callResult{Content: []content{{
 			Type:     "image",
-			Data:     base64.StdEncoding.EncodeToString(rec.Body.Bytes()),
-			MimeType: rec.Header().Get("Content-Type"),
+			Data:     base64.StdEncoding.EncodeToString(rec.body.Bytes()),
+			MimeType: rec.header.Get("Content-Type"),
 		}}}
 	case apispec.ResponseBinary:
 		return &callResult{Content: []content{{
 			Type: "resource",
 			Resource: &resource{
 				URI:      "crapnote://" + op.Name,
-				MimeType: rec.Header().Get("Content-Type"),
-				Blob:     base64.StdEncoding.EncodeToString(rec.Body.Bytes()),
+				MimeType: rec.header.Get("Content-Type"),
+				Blob:     base64.StdEncoding.EncodeToString(rec.body.Bytes()),
 			},
 		}}}
 	default:
-		body := strings.TrimSpace(rec.Body.String())
+		body := strings.TrimSpace(rec.body.String())
 		if body == "" {
 			body = `{"ok":true}`
 		}
 		return textResult(body)
 	}
 }
+
+// maxExactInt is the largest integer a JSON number represents exactly.
+const maxExactInt = 1 << 53
 
 // scalarString renders a path/query argument as its wire string, validating
 // the declared type. JSON numbers arrive as float64.
@@ -174,6 +238,12 @@ func scalarString(p apispec.Param, val any) (string, error) {
 		case float64:
 			if v != math.Trunc(v) {
 				return "", fmt.Errorf("expected an integer, got %v", v)
+			}
+			// Beyond 2^53 a JSON number has already lost precision, and
+			// converting an out-of-range float to int64 is undefined in Go
+			// (it yields a garbage ID rather than an argument error).
+			if v > maxExactInt || v < -maxExactInt {
+				return "", fmt.Errorf("integer %v is out of range", v)
 			}
 			return fmt.Sprintf("%d", int64(v)), nil
 		case json.Number:

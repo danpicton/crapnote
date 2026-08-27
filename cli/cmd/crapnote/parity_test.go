@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -117,21 +119,45 @@ func TestCLICoversEveryBearerReachableOperation(t *testing.T) {
 }
 
 // TestCoveredCommandsExist sanity-checks that every op mapped to a command
-// names a real top-level CLI command, so the table can't rot silently.
+// names a real CLI invocation — subcommand included, so renaming or deleting
+// 'notes lock' cannot leave the table silently claiming coverage while the
+// top-level 'notes' command still exists.
+//
+// Each entry is dispatched with an undefined flag: flag parsing fails before
+// any subcommand does work, so the probe reaches the real dispatcher (which
+// is what knows the subcommand) without making a request. An entry naming
+// several commands separates them with " / ".
 func TestCoveredCommandsExist(t *testing.T) {
+	var requests int
+	srv := newAPIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	for op, entry := range cliCoverage {
 		if entry.command == "" {
 			continue
 		}
-		top := entry.command
-		for i, r := range top {
-			if r == ' ' {
-				top = top[:i]
-				break
+		for _, invocation := range strings.Split(entry.command, " / ") {
+			words := strings.Fields(invocation)
+			if len(words) == 0 {
+				t.Errorf("op %q has an empty command entry %q", op, entry.command)
+				continue
+			}
+			if _, ok := commands[words[0]]; !ok {
+				t.Errorf("op %q maps to %q, but %q is not a CLI command", op, invocation, words[0])
+				continue
+			}
+			args := append([]string{"--url", srv.URL, "--token", "t"}, words...)
+			args = append(args, "--not-a-real-flag")
+			_, stderr, _ := runCLI(t, nil, args...)
+			if strings.Contains(stderr, "unknown subcommand") || strings.Contains(stderr, "unknown command") {
+				t.Errorf("op %q maps to %q, which the CLI does not recognise: %s", op, invocation, stderr)
 			}
 		}
-		if _, ok := commands[top]; !ok {
-			t.Errorf("op %q maps to command %q, but %q is not a CLI command", op, entry.command, top)
-		}
+	}
+
+	if requests != 0 {
+		t.Errorf("probing commands should make no HTTP requests, got %d", requests)
 	}
 }

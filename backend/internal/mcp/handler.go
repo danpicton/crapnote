@@ -1,9 +1,9 @@
 // Package mcp implements CrapNote's built-in MCP (Model Context Protocol)
 // server: a stateless Streamable HTTP endpoint at /mcp whose tools are
 // generated from the apispec registry — one tool per bearer-reachable API
-// operation. Tool calls are replayed through the real HTTP mux with the
-// caller's credentials, so the API's own auth and scope middleware governs
-// every call; the MCP surface cannot permit anything the API does not.
+// operation. Tool calls are replayed through the real HTTP mux carrying the
+// caller's verified identity, so the API's own auth and scope middleware
+// governs every call; the MCP surface cannot permit anything the API does not.
 //
 // The implementation is deliberately minimal (tools only, JSON responses,
 // no sessions, no server-initiated SSE streams), which the Streamable HTTP
@@ -21,10 +21,13 @@ import (
 const protocolVersion = "2025-06-18"
 
 // supportedVersions are echoed back when a client asks for one of them.
+// Only 2025-06-18 is advertised: the earlier revisions require JSON-RPC
+// batching, which this server does not implement, so a client that
+// negotiated one of them would get an opaque parse error on its first
+// batched request. Clients offering an older revision are answered with
+// 2025-06-18 and negotiate down.
 var supportedVersions = map[string]bool{
 	"2025-06-18": true,
-	"2025-03-26": true,
-	"2024-11-05": true,
 }
 
 // Handler serves the MCP Streamable HTTP endpoint.
@@ -72,7 +75,15 @@ const (
 	codeInvalidParams  = -32602
 )
 
+// maxRequestBody bounds a single JSON-RPC message. Params are retained as
+// raw JSON and an image upload is then re-materialised several times over
+// (raw message, decoded string, image bytes, multipart body), so without a
+// cap here a payload far larger than the API's own 10 MB image limit is
+// fully buffered before that limit can reject it.
+const maxRequestBody = 20 << 20
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 	var req rpcRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeRPC(w, rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: codeParseError, Message: "parse error"}})

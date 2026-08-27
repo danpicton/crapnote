@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"net/http"
+
 	"github.com/danpicton/crapnote/internal/apispec"
 )
 
@@ -9,6 +11,31 @@ type tool struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
+	Annotations annotations    `json:"annotations"`
+}
+
+// annotations are the MCP behavioural hints a host uses to decide when to
+// ask the user before running a tool. Without them an irreversible call
+// (trash_empty, notes_delete, tokens_revoke_all) is indistinguishable from
+// a read, and a host that auto-approves on readOnlyHint runs it unprompted —
+// weaker than the CLI, which gates the same operations behind --yes.
+type annotations struct {
+	ReadOnlyHint    bool `json:"readOnlyHint"`
+	DestructiveHint bool `json:"destructiveHint"`
+	IdempotentHint  bool `json:"idempotentHint"`
+}
+
+// toolAnnotations derives the hints from the registry: a read-scoped
+// operation cannot mutate anything, a DELETE (or an op the registry flags
+// Destructive) removes state for good, and PUT/DELETE repeat safely (PATCH
+// does not — the note toggles flip a flag).
+func toolAnnotations(op apispec.Operation) annotations {
+	readOnly := op.Scope == apispec.ScopeRead
+	return annotations{
+		ReadOnlyHint:    readOnly,
+		DestructiveHint: !readOnly && (op.Destructive || op.Method == http.MethodDelete),
+		IdempotentHint:  !readOnly && (op.Method == http.MethodPut || op.Method == http.MethodDelete),
+	}
 }
 
 // buildTools renders one MCP tool per registry operation.
@@ -19,6 +46,7 @@ func buildTools(ops []apispec.Operation) []tool {
 			Name:        op.Name,
 			Description: op.Description,
 			InputSchema: inputSchema(op),
+			Annotations: toolAnnotations(op),
 		})
 	}
 	return out

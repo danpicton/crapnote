@@ -44,7 +44,10 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 
 	if tagStr := r.URL.Query().Get("tag"); tagStr != "" {
 		tagID, err := strconv.ParseInt(tagStr, 10, 64)
-		if err == nil {
+		// Tag IDs start at 1, so ?tag=0 means "no tag filter" rather than a
+		// filter that can never match: a caller filling in every documented
+		// parameter would otherwise get an empty list.
+		if err == nil && tagID > 0 {
 			filter.TagID = &tagID
 		}
 	}

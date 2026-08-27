@@ -32,6 +32,7 @@ func newMux(
 	settingsHandler *settings.Handler,
 	loginLimiter *ratelimit.Limiter,
 	bearerLimiter *ratelimit.Limiter,
+	observe func(http.Handler) http.Handler,
 ) *http.ServeMux {
 	mux := http.NewServeMux()
 
@@ -161,9 +162,21 @@ func newMux(
 	// from the same registry and dispatched back through this mux, so every
 	// tool call passes the real auth/scope middleware above. Requires bearer
 	// auth like any protected endpoint.
-	mcpHandler := mcp.NewHandler(apispec.MCPOps(), mux)
+	//
+	// Tool calls dispatch through observe(mux) rather than the bare mux, so a
+	// note created over MCP is counted and logged as POST /api/notes like any
+	// other request instead of vanishing behind a single POST /mcp.
+	dispatchTarget := http.Handler(mux)
+	if observe != nil {
+		dispatchTarget = observe(mux)
+	}
+	mcpHandler := mcp.NewHandler(apispec.MCPOps(), dispatchTarget)
 	mux.Handle("POST /mcp", bearerRateLimit(authHandler.RequireAuth(mcpHandler)))
-	mux.Handle("GET /mcp", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Methodless pattern: every verb other than POST answers 405. Registering
+	// only GET would let DELETE (the transport's session-termination verb),
+	// PUT and the rest fall through to the SPA catch-all below, which serves
+	// 200 text/html to an unauthenticated caller.
+	mux.Handle("/mcp", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Stateless server: no server-initiated SSE stream to offer.
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}))

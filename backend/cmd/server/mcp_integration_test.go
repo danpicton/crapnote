@@ -165,3 +165,46 @@ func TestMCP_ReadOnlyTokenCannotWrite(t *testing.T) {
 		t.Fatalf("notes_create with read token = %q isErr=%v, want read-only refusal", text, isErr)
 	}
 }
+
+// Only POST is implemented. Every other verb must answer 405 rather than
+// falling through to the SPA catch-all, which would serve 200 text/html to an
+// unauthenticated caller — including DELETE, the transport's own
+// session-termination verb.
+func TestMCP_OtherMethodsNotSupported(t *testing.T) {
+	mux := newTestMux(t)
+	for _, method := range []string{http.MethodGet, http.MethodDelete, http.MethodPut, http.MethodOptions, http.MethodPatch} {
+		req := httptest.NewRequest(method, "/mcp", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s /mcp = %d (%s), want 405", method, w.Code, w.Header().Get("Content-Type"))
+		}
+	}
+}
+
+// A mutation made over MCP must show up in metrics and access logs under the
+// API route it actually exercised, not just as one POST /mcp.
+func TestMCP_DispatchIsObserved(t *testing.T) {
+	var observed []string
+	observe := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			observed = append(observed, r.Method+" "+r.URL.Path)
+			next.ServeHTTP(w, r)
+		})
+	}
+	mux, cookie := newAuthedMux(t, observe)
+	token := createToken(t, mux, cookie, "read_write")
+
+	_, resp := mcpCall(t, mux, token, toolCallBody("notes_create", `{"title":"observed"}`))
+	if _, isErr := toolText(t, resp); isErr {
+		t.Fatalf("tool call failed: %v", resp)
+	}
+
+	want := "POST /api/notes"
+	for _, got := range observed {
+		if got == want {
+			return
+		}
+	}
+	t.Errorf("dispatched call not observed: %v, want %q", observed, want)
+}

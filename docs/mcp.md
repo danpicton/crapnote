@@ -46,7 +46,8 @@ Deliberately absent, mirroring the API's own security posture:
 The MCP server (`backend/internal/mcp`) does not reimplement any API
 behaviour. Its tool list is generated from the apispec registry
 (`backend/internal/apispec`), and each tool call is replayed as a real HTTP
-request through the server's own mux, carrying the caller's credentials.
+request through the server's own mux, carrying the caller's verified identity
+on the request context (the credential is checked once, at `/mcp`).
 Auth, token scopes, cookie-only gates, rate limits, and validation are all
 applied by the same middleware and handlers the REST API uses — the MCP
 surface *cannot* permit anything the API does not.
