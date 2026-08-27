@@ -35,6 +35,8 @@ func cmdNotes(e *env, args []string) int {
 		return notesToggle(e, rest, "star")
 	case "pin":
 		return notesToggle(e, rest, "pin")
+	case "lock":
+		return notesToggle(e, rest, "lock")
 	case "archive":
 		return notesArchiveOp(e, rest, true)
 	case "unarchive":
@@ -192,19 +194,43 @@ func notesDelete(e *env, args []string) int {
 	return exitOK
 }
 
+// noteToggles describes each 'notes <action>' flag toggle in one place: the
+// client call, the word printed for it, and how to read the new state off the
+// returned note. One table rather than parallel switches with a catch-all, so
+// a new toggle cannot silently fall through to another one's behaviour.
+var noteToggles = map[string]struct {
+	toggle func(*env, int64) (*client.Note, error)
+	label  string
+	state  func(*client.Note) bool
+}{
+	"star": {
+		toggle: func(e *env, id int64) (*client.Note, error) { return e.client.ToggleStar(e.ctx, id) },
+		label:  "starred",
+		state:  func(n *client.Note) bool { return n.Starred },
+	},
+	"pin": {
+		toggle: func(e *env, id int64) (*client.Note, error) { return e.client.TogglePin(e.ctx, id) },
+		label:  "pinned",
+		state:  func(n *client.Note) bool { return n.Pinned },
+	},
+	"lock": {
+		toggle: func(e *env, id int64) (*client.Note, error) { return e.client.ToggleLock(e.ctx, id) },
+		label:  "locked",
+		state:  func(n *client.Note) bool { return n.Locked },
+	},
+}
+
 func notesToggle(e *env, args []string, action string) int {
+	t, ok := noteToggles[action]
+	if !ok {
+		return e.topicUsageError("notes", "notes: unknown subcommand %q", action)
+	}
 	fs := newFlagSet(e, "notes "+action)
 	id, code, ok := idArg(e, fs, args, "note")
 	if !ok {
 		return code
 	}
-	var note *client.Note
-	var err error
-	if action == "star" {
-		note, err = e.client.ToggleStar(e.ctx, id)
-	} else {
-		note, err = e.client.TogglePin(e.ctx, id)
-	}
+	note, err := t.toggle(e, id)
 	if err != nil {
 		return e.fail(err)
 	}
@@ -212,11 +238,7 @@ func notesToggle(e *env, args []string, action string) int {
 		return e.emitJSON(note)
 	}
 	state := map[bool]string{true: "now", false: "no longer"}
-	if action == "star" {
-		fmt.Fprintf(e.stdout, "Note %d is %s starred.\n", note.ID, state[note.Starred])
-	} else {
-		fmt.Fprintf(e.stdout, "Note %d is %s pinned.\n", note.ID, state[note.Pinned])
-	}
+	fmt.Fprintf(e.stdout, "Note %d is %s %s.\n", note.ID, state[t.state(note)], t.label)
 	return exitOK
 }
 

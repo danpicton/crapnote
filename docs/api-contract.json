@@ -1,0 +1,1056 @@
+{
+  "version": 1,
+  "operations": [
+    {
+      "name": "health",
+      "method": "GET",
+      "path": "/api/health",
+      "scope": "public",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Health check.",
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "theme_get",
+      "method": "GET",
+      "path": "/api/theme",
+      "scope": "public",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Get the global theme (public so the login screen can render it).",
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "auth_login",
+      "method": "POST",
+      "path": "/api/auth/login",
+      "scope": "public",
+      "admin_only": false,
+      "cookie_only": false,
+      "login_rate_limited": true,
+      "description": "Log in with username and password; sets a session cookie.",
+      "params": [
+        {
+          "name": "username",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "password",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "setup_get",
+      "method": "GET",
+      "path": "/api/setup/{token}",
+      "scope": "public",
+      "admin_only": false,
+      "cookie_only": false,
+      "login_rate_limited": true,
+      "description": "Look up a pending account-setup invite by its token.",
+      "params": [
+        {
+          "name": "token",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "Setup invite token."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "setup_complete",
+      "method": "POST",
+      "path": "/api/setup/{token}",
+      "scope": "public",
+      "admin_only": false,
+      "cookie_only": false,
+      "login_rate_limited": true,
+      "description": "Complete account setup by choosing a password.",
+      "params": [
+        {
+          "name": "token",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "Setup invite token."
+        },
+        {
+          "name": "password",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "auth_logout",
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "End the current browser session.",
+      "request": "json",
+      "response": "none",
+      "mcp_waived": "logout ends a cookie session; bearer tokens have no session to end"
+    },
+    {
+      "name": "auth_me",
+      "method": "GET",
+      "path": "/api/auth/me",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Return the authenticated user (id, username, admin flag).",
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "auth_change_password",
+      "method": "POST",
+      "path": "/api/auth/password",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": true,
+      "description": "Change your own password (cookie sessions only — a leaked token must not hijack the account).",
+      "params": [
+        {
+          "name": "new_password",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "tokens_list",
+      "method": "GET",
+      "path": "/api/tokens",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "List your API tokens (metadata only, never raw secrets).",
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "tokens_create",
+      "method": "POST",
+      "path": "/api/tokens",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": true,
+      "description": "Create an API token (cookie sessions only — tokens cannot mint tokens).",
+      "params": [
+        {
+          "name": "name",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "scope",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "\"read\" or \"read_write\"."
+        },
+        {
+          "name": "ttl_days",
+          "in": "body",
+          "type": "integer",
+          "required": false,
+          "description": "Days until expiry; 0/omitted = default (90), -1 = no expiry."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "tokens_revoke",
+      "method": "DELETE",
+      "path": "/api/tokens/{id}",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Revoke one of your API tokens.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Token ID."
+        }
+      ],
+      "request": "json",
+      "response": "none",
+      "destructive": true
+    },
+    {
+      "name": "tokens_revoke_all",
+      "method": "POST",
+      "path": "/api/tokens/revoke-all",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Revoke all of your API tokens. Irreversible; this also revokes the token making the call.",
+      "request": "json",
+      "response": "none",
+      "destructive": true
+    },
+    {
+      "name": "notes_list",
+      "method": "GET",
+      "path": "/api/notes",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "List your notes, optionally filtered. Use the search param for full-text (FTS5) search.",
+      "params": [
+        {
+          "name": "starred",
+          "in": "query",
+          "type": "boolean",
+          "required": false,
+          "description": "Filter by starred flag: true returns only starred notes, false only unstarred. Omit for all notes."
+        },
+        {
+          "name": "tag",
+          "in": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Only notes carrying this tag ID. Omit, or pass 0, for notes with any or no tag."
+        },
+        {
+          "name": "search",
+          "in": "query",
+          "type": "string",
+          "required": false,
+          "description": "Full-text search query."
+        },
+        {
+          "name": "limit",
+          "in": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Max results per page (default 50, max 100)."
+        },
+        {
+          "name": "offset",
+          "in": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Number of results to skip."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "notes_create",
+      "method": "POST",
+      "path": "/api/notes",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Create a note (markdown body).",
+      "params": [
+        {
+          "name": "title",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Title, max 500 chars."
+        },
+        {
+          "name": "body",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Markdown body, max 500k chars."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "notes_get",
+      "method": "GET",
+      "path": "/api/notes/{id}",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Fetch a single note.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "notes_update",
+      "method": "PUT",
+      "path": "/api/notes/{id}",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Update a note's title and/or body. Omitted fields are left unchanged. Fails with 423 if the note is locked.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        },
+        {
+          "name": "title",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "New title, max 500 chars."
+        },
+        {
+          "name": "body",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "New markdown body, max 500k chars."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "notes_delete",
+      "method": "DELETE",
+      "path": "/api/notes/{id}",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Move a note to the trash (recoverable for 7 days). Fails with 423 if locked.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        }
+      ],
+      "request": "json",
+      "response": "none"
+    },
+    {
+      "name": "notes_toggle_star",
+      "method": "PATCH",
+      "path": "/api/notes/{id}/star",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Toggle a note's starred flag; returns the updated note.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "notes_toggle_pin",
+      "method": "PATCH",
+      "path": "/api/notes/{id}/pin",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Toggle a note's pinned flag; returns the updated note.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "notes_toggle_lock",
+      "method": "PATCH",
+      "path": "/api/notes/{id}/lock",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Toggle a note's locked flag (locked notes refuse edits and deletion); returns the updated note.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "notes_reorder_pins",
+      "method": "PUT",
+      "path": "/api/notes/pins/order",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Set the display order of your pinned notes.",
+      "params": [
+        {
+          "name": "ids",
+          "in": "body",
+          "type": "array:integer",
+          "required": true,
+          "description": "Pinned note IDs, top first."
+        }
+      ],
+      "request": "json",
+      "response": "none"
+    },
+    {
+      "name": "notes_archive",
+      "method": "PATCH",
+      "path": "/api/notes/{id}/archive",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Archive a note (hidden from the main list).",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        }
+      ],
+      "request": "json",
+      "response": "none"
+    },
+    {
+      "name": "notes_unarchive",
+      "method": "PATCH",
+      "path": "/api/notes/{id}/unarchive",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Restore a note from the archive.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        }
+      ],
+      "request": "json",
+      "response": "none"
+    },
+    {
+      "name": "archive_list",
+      "method": "GET",
+      "path": "/api/archive",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "List your archived notes.",
+      "params": [
+        {
+          "name": "limit",
+          "in": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Max results per page (default 50, max 100)."
+        },
+        {
+          "name": "offset",
+          "in": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Number of results to skip."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "note_tags_list",
+      "method": "GET",
+      "path": "/api/notes/{id}/tags",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "List the tags on a note.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "note_tags_add",
+      "method": "POST",
+      "path": "/api/notes/{id}/tags",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Attach an existing tag to a note.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        },
+        {
+          "name": "tag_id",
+          "in": "body",
+          "type": "integer",
+          "required": true,
+          "description": "Tag ID to attach."
+        }
+      ],
+      "request": "json",
+      "response": "none"
+    },
+    {
+      "name": "note_tags_remove",
+      "method": "DELETE",
+      "path": "/api/notes/{id}/tags/{tid}",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Detach a tag from a note.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        },
+        {
+          "name": "tid",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Tag ID to detach."
+        }
+      ],
+      "request": "json",
+      "response": "none"
+    },
+    {
+      "name": "tags_list",
+      "method": "GET",
+      "path": "/api/tags",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "List your tags with note counts.",
+      "params": [
+        {
+          "name": "limit",
+          "in": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Max results per page (default 50, max 100)."
+        },
+        {
+          "name": "offset",
+          "in": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Number of results to skip."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "tags_create",
+      "method": "POST",
+      "path": "/api/tags",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Create a tag.",
+      "params": [
+        {
+          "name": "name",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "Tag name, max 100 chars."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "tags_rename",
+      "method": "PUT",
+      "path": "/api/tags/{id}",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Rename a tag.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Tag ID."
+        },
+        {
+          "name": "name",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": "New name, max 100 chars."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "tags_delete",
+      "method": "DELETE",
+      "path": "/api/tags/{id}",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Delete a tag (notes keep their other tags).",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Tag ID."
+        }
+      ],
+      "request": "json",
+      "response": "none",
+      "destructive": true
+    },
+    {
+      "name": "export",
+      "method": "POST",
+      "path": "/api/export",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Export all non-trashed notes as a ZIP of markdown files with bundled images. Optionally password-encrypted.",
+      "params": [
+        {
+          "name": "password",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Optional password to encrypt the ZIP."
+        }
+      ],
+      "request": "json",
+      "response": "binary"
+    },
+    {
+      "name": "images_upload",
+      "method": "POST",
+      "path": "/api/images",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Upload an image (PNG/JPEG/GIF/WebP); returns its URL for embedding in note markdown.",
+      "params": [
+        {
+          "name": "image",
+          "in": "body",
+          "type": "base64",
+          "required": true,
+          "description": "Image bytes, base64-encoded."
+        }
+      ],
+      "request": "multipart-image",
+      "response": "json"
+    },
+    {
+      "name": "images_get",
+      "method": "GET",
+      "path": "/api/images/{id}",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Fetch one of your images.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "string",
+          "required": true,
+          "description": "Image ID (the last path segment of an image URL)."
+        }
+      ],
+      "request": "json",
+      "response": "image"
+    },
+    {
+      "name": "trash_list",
+      "method": "GET",
+      "path": "/api/trash",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "List trashed notes and when each will be permanently deleted.",
+      "params": [
+        {
+          "name": "limit",
+          "in": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Max results per page (default 50, max 100)."
+        },
+        {
+          "name": "offset",
+          "in": "query",
+          "type": "integer",
+          "required": false,
+          "description": "Number of results to skip."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "trash_restore",
+      "method": "POST",
+      "path": "/api/trash/{id}/restore",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Restore a note from the trash.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        }
+      ],
+      "request": "json",
+      "response": "none"
+    },
+    {
+      "name": "trash_delete",
+      "method": "DELETE",
+      "path": "/api/trash/{id}",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Permanently delete one trashed note. Irreversible.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "Note ID."
+        }
+      ],
+      "request": "json",
+      "response": "none",
+      "destructive": true
+    },
+    {
+      "name": "trash_empty",
+      "method": "DELETE",
+      "path": "/api/trash",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": false,
+      "description": "Permanently delete everything in the trash. Irreversible.",
+      "request": "json",
+      "response": "none",
+      "destructive": true
+    },
+    {
+      "name": "admin_users_list",
+      "method": "GET",
+      "path": "/api/admin/users",
+      "scope": "read",
+      "admin_only": true,
+      "cookie_only": false,
+      "description": "List all users.",
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "admin_users_create",
+      "method": "POST",
+      "path": "/api/admin/users",
+      "scope": "write",
+      "admin_only": true,
+      "cookie_only": false,
+      "description": "Create a user with a password.",
+      "params": [
+        {
+          "name": "username",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "password",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "is_admin",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": ""
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "admin_users_delete",
+      "method": "DELETE",
+      "path": "/api/admin/users/{id}",
+      "scope": "write",
+      "admin_only": true,
+      "cookie_only": false,
+      "description": "Delete a user and their data.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "User ID."
+        }
+      ],
+      "request": "json",
+      "response": "none"
+    },
+    {
+      "name": "admin_user_api_tokens",
+      "method": "PATCH",
+      "path": "/api/admin/users/{id}/api-tokens",
+      "scope": "write",
+      "admin_only": true,
+      "cookie_only": false,
+      "description": "Enable or disable API tokens for a user.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "User ID."
+        },
+        {
+          "name": "enabled",
+          "in": "body",
+          "type": "boolean",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "admin_user_set_password",
+      "method": "PUT",
+      "path": "/api/admin/users/{id}/password",
+      "scope": "write",
+      "admin_only": true,
+      "cookie_only": false,
+      "description": "Set a user's password.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "User ID."
+        },
+        {
+          "name": "password",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "admin_user_lock",
+      "method": "POST",
+      "path": "/api/admin/users/{id}/lock",
+      "scope": "write",
+      "admin_only": true,
+      "cookie_only": false,
+      "description": "Lock a user account.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "User ID."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "admin_user_unlock",
+      "method": "POST",
+      "path": "/api/admin/users/{id}/unlock",
+      "scope": "write",
+      "admin_only": true,
+      "cookie_only": false,
+      "description": "Unlock a user account.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "User ID."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "admin_users_invite",
+      "method": "POST",
+      "path": "/api/admin/users/invite",
+      "scope": "write",
+      "admin_only": true,
+      "cookie_only": false,
+      "description": "Invite a user; returns a one-time setup link.",
+      "params": [
+        {
+          "name": "username",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": ""
+        },
+        {
+          "name": "is_admin",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": ""
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "admin_user_regenerate_invite",
+      "method": "POST",
+      "path": "/api/admin/users/{id}/invite",
+      "scope": "write",
+      "admin_only": true,
+      "cookie_only": false,
+      "description": "Regenerate a pending user's setup link.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "User ID."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
+      "name": "admin_theme_set",
+      "method": "PUT",
+      "path": "/api/admin/theme",
+      "scope": "write",
+      "admin_only": true,
+      "cookie_only": false,
+      "description": "Set the global theme.",
+      "params": [
+        {
+          "name": "theme",
+          "in": "body",
+          "type": "string",
+          "required": true,
+          "description": ""
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    }
+  ]
+}

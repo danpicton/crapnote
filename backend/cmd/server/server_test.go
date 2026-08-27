@@ -66,11 +66,21 @@ func newTestMux(t *testing.T) *http.ServeMux {
 		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
 		permissiveLoginLimiter(),
 		permissiveBearerLimiter(),
+		nil,
 	)
 }
 
+// observeOrNil returns the optional observability wrapper a test passed to
+// newAuthedMux, or nil for the usual case of no instrumentation.
+func observeOrNil(observe []func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	if len(observe) == 0 {
+		return nil
+	}
+	return observe[0]
+}
+
 // newAuthedMux creates a mux and seeds an admin user; returns the mux and a valid session cookie.
-func newAuthedMux(t *testing.T) (*http.ServeMux, *http.Cookie) {
+func newAuthedMux(t *testing.T, observe ...func(http.Handler) http.Handler) (*http.ServeMux, *http.Cookie) {
 	t.Helper()
 	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
 	if err != nil {
@@ -102,6 +112,7 @@ func newAuthedMux(t *testing.T) (*http.ServeMux, *http.Cookie) {
 		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
 		permissiveLoginLimiter(),
 		permissiveBearerLimiter(),
+		observeOrNil(observe),
 	)
 
 	// Perform a login to obtain a session cookie.
@@ -311,6 +322,7 @@ func TestLogin_RateLimited(t *testing.T) {
 		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
 		tightLimiter,
 		permissiveBearerLimiter(),
+		nil,
 	)
 
 	send := func() int {
@@ -362,6 +374,7 @@ func TestLogin_RateLimited_SpoofedForwardedForDoesNotBypass(t *testing.T) {
 		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
 		tightLimiter,
 		permissiveBearerLimiter(),
+		nil,
 	)
 
 	send := func(spoofedIP string) int {

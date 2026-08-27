@@ -109,6 +109,7 @@ var commands = map[string]func(*env, []string) int{
 	"trash":   cmdTrash,
 	"export":  cmdExport,
 	"tokens":  cmdTokens,
+	"whoami":  cmdWhoami,
 	"version": cmdVersion,
 }
 

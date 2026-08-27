@@ -23,6 +23,8 @@ This project uses strict TDD. Follow the global `tdd` skill for process (red-gre
 ├── backend/              # Go 1.24
 │   ├── cmd/server/       # main entrypoint, HTTP mux, embedded SPA serving
 │   ├── internal/
+│   │   ├── apispec/      # API operation registry — single source of truth for all /api routes
+│   │   ├── mcp/          # built-in MCP server (/mcp) — tools generated from apispec
 │   │   ├── auth/         # users, sessions, login/logout, admin middleware
 │   │   ├── db/           # database connection, migration runner, go:embed migrations
 │   │   │   └── migrations/  # versioned .up.sql / .down.sql files
@@ -189,7 +191,15 @@ func TestHandler_MyEndpoint(t *testing.T) {
 
 ### 5. Register the Route
 
-Add the route in `backend/cmd/server/server.go`. The mux pattern uses Go 1.22+ syntax: `"GET /api/notes/{id}"`.
+New endpoints are declared in the apispec registry (`backend/internal/apispec/spec.go`) — method, path, scope (`read`/`write`), admin/cookie-only flags, and params — then bound to their handler in the `bindings` map in `backend/cmd/server/server.go`. `newMux` builds every route from the registry and panics if an op has no binding (or vice versa), so tests catch a missed step immediately. Mux patterns use Go 1.22+ syntax: `"GET /api/notes/{id}"`.
+
+After changing the registry, regenerate the contract file and satisfy the parity checks:
+
+- `make apispec` (in `backend/`) refreshes `docs/api-contract.json`; a backend test fails while it is stale.
+- The MCP server exposes every bearer-reachable op as a tool automatically; waive one only with an explicit `MCPWaived` reason.
+- The CLI parity test (`cli/cmd/crapnote/parity_test.go`) fails until the new op is mapped to a CLI command or waived with a reason.
+
+See `docs/mcp.md` for the full alignment mechanism.
 
 ### 6. Frontend API Client
 

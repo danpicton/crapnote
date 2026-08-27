@@ -203,10 +203,15 @@ func main() {
 	bearerLimiter := ratelimit.New(bearerRate, bearerBurst)
 
 	port := envOrDefault("PORT", "8080")
-	mux := newMux(authHandler, adminHandler, setupHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, tokensHandler, settingsHandler, loginLimiter, bearerLimiter)
+	// Observability middleware (metrics outermost, then logging, then security
+	// headers). newMux applies the same chain to MCP-dispatched tool calls, so
+	// they are recorded under the API route they actually exercise.
+	observe := func(h http.Handler) http.Handler {
+		return middleware.Metrics()(middleware.Logging(logger)(middleware.SecurityHeaders()(h)))
+	}
+	mux := newMux(authHandler, adminHandler, setupHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, tokensHandler, settingsHandler, loginLimiter, bearerLimiter, observe)
 
-	// Wrap with observability middleware (metrics outermost, then logging, then security headers).
-	handler := middleware.Metrics()(middleware.Logging(logger)(middleware.SecurityHeaders()(mux)))
+	handler := observe(mux)
 
 	// TRUST_PROXY: opt-in trust of reverse-proxy headers, default off. When
 	// off, the client IP used for the login/bearer rate limiters and audit

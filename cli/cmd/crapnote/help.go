@@ -21,6 +21,7 @@ Commands:
   trash    list, restore, or permanently delete trashed notes
   export   download all notes and images as a ZIP
   tokens   list and revoke API tokens
+  whoami   show the user the token authenticates as
   version  print the CLI version
   help     show this summary, or details for one command
 
@@ -55,8 +56,9 @@ Subcommands:
       Change title and/or body. Omitted fields are left unchanged.
   delete ID
       Move a note to trash (restorable via 'crapnote trash restore ID').
-  star ID | pin ID
-      Toggle the starred/pinned flag; prints the new state.
+  star ID | pin ID | lock ID
+      Toggle the starred/pinned/locked flag; prints the new state.
+      Locked notes refuse edits and deletion until unlocked.
   archive ID | unarchive ID
       Move a note out of / back into the active list.
   tags ID
@@ -146,6 +148,14 @@ Subcommands:
 Tokens cannot be created from the CLI by design: the API only mints tokens
 over a browser session. Create one in the web UI under Settings → Developer
 (scope "read" or "read_write"), then pass it via CNP_TOKEN or --token.
+`,
+	"whoami": `Show the user the configured token authenticates as.
+
+Usage:
+  crapnote whoami [--json]
+
+Prints username, user ID, and role (admin or user). Useful to check which
+account a CNP_TOKEN belongs to.
 `,
 	// version needs no detail beyond its summary line, so its "topic" is
 	// exactly that line.
