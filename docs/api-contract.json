@@ -206,7 +206,8 @@
         }
       ],
       "request": "json",
-      "response": "none"
+      "response": "none",
+      "destructive": true
     },
     {
       "name": "tokens_revoke_all",
@@ -217,7 +218,8 @@
       "cookie_only": false,
       "description": "Revoke all of your API tokens. Irreversible; this also revokes the token making the call.",
       "request": "json",
-      "response": "none"
+      "response": "none",
+      "destructive": true
     },
     {
       "name": "notes_list",
@@ -233,7 +235,7 @@
           "in": "query",
           "type": "boolean",
           "required": false,
-          "description": "Only starred notes when true."
+          "description": "Filter by starred flag: true returns only starred notes, false only unstarred. Omit for all notes."
         },
         {
           "name": "tag",
@@ -254,7 +256,7 @@
           "in": "query",
           "type": "integer",
           "required": false,
-          "description": "Max results per page (default 50, max 200)."
+          "description": "Max results per page (default 50, max 100)."
         },
         {
           "name": "offset",
@@ -502,7 +504,7 @@
           "in": "query",
           "type": "integer",
           "required": false,
-          "description": "Max results per page (default 50, max 200)."
+          "description": "Max results per page (default 50, max 100)."
         },
         {
           "name": "offset",
@@ -603,7 +605,7 @@
           "in": "query",
           "type": "integer",
           "required": false,
-          "description": "Max results per page (default 50, max 200)."
+          "description": "Max results per page (default 50, max 100)."
         },
         {
           "name": "offset",
@@ -681,7 +683,8 @@
         }
       ],
       "request": "json",
-      "response": "none"
+      "response": "none",
+      "destructive": true
     },
     {
       "name": "export",
@@ -757,7 +760,7 @@
           "in": "query",
           "type": "integer",
           "required": false,
-          "description": "Max results per page (default 50, max 200)."
+          "description": "Max results per page (default 50, max 100)."
         },
         {
           "name": "offset",
@@ -808,7 +811,8 @@
         }
       ],
       "request": "json",
-      "response": "none"
+      "response": "none",
+      "destructive": true
     },
     {
       "name": "trash_empty",
@@ -819,7 +823,8 @@
       "cookie_only": false,
       "description": "Permanently delete everything in the trash. Irreversible.",
       "request": "json",
-      "response": "none"
+      "response": "none",
+      "destructive": true
     },
     {
       "name": "admin_users_list",

@@ -8,7 +8,12 @@
 // with no handler binding fails mux construction.
 package apispec
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+
+	"github.com/danpicton/crapnote/internal/httpx"
+)
 
 // Scope classifies who may call an operation.
 type Scope string
@@ -98,6 +103,10 @@ type Operation struct {
 	// MCPWaived, when non-empty, explains why no MCP tool is generated for
 	// an otherwise bearer-reachable operation.
 	MCPWaived string `json:"mcp_waived,omitempty"`
+	// Destructive marks operations that irreversibly destroy data. The MCP
+	// server surfaces this as the tool's destructiveHint annotation so
+	// agent clients can require user confirmation before calling.
+	Destructive bool `json:"destructive,omitempty"`
 }
 
 // BearerReachable reports whether the operation can be called with an API
@@ -108,7 +117,7 @@ func (o Operation) BearerReachable() bool {
 
 func pageParams() []Param {
 	return []Param{
-		{Name: "limit", In: InQuery, Type: TypeInteger, Description: "Max results per page (default 50, max 200)."},
+		{Name: "limit", In: InQuery, Type: TypeInteger, Description: fmt.Sprintf("Max results per page (default %d, max %d).", httpx.DefaultPageSize, httpx.MaxPageSize)},
 		{Name: "offset", In: InQuery, Type: TypeInteger, Description: "Number of results to skip."},
 	}
 }
@@ -194,6 +203,7 @@ func Registry() []Operation {
 		},
 		{
 			Name: "tokens_revoke", Method: "DELETE", Path: "/api/tokens/{id}", Scope: ScopeWrite,
+			Destructive: true,
 			Description: "Revoke one of your API tokens.",
 			Response:    ResponseNone,
 			Params: []Param{
@@ -202,6 +212,7 @@ func Registry() []Operation {
 		},
 		{
 			Name: "tokens_revoke_all", Method: "POST", Path: "/api/tokens/revoke-all", Scope: ScopeWrite,
+			Destructive: true,
 			Description: "Revoke all of your API tokens. Irreversible; this also revokes the token making the call.",
 			Response:    ResponseNone,
 		},
@@ -211,7 +222,7 @@ func Registry() []Operation {
 			Name: "notes_list", Method: "GET", Path: "/api/notes", Scope: ScopeRead,
 			Description: "List your notes, optionally filtered. Use the search param for full-text (FTS5) search.",
 			Params: append([]Param{
-				{Name: "starred", In: InQuery, Type: TypeBoolean, Description: "Only starred notes when true."},
+				{Name: "starred", In: InQuery, Type: TypeBoolean, Description: "Filter by starred flag: true returns only starred notes, false only unstarred. Omit for all notes."},
 				{Name: "tag", In: InQuery, Type: TypeInteger, Description: "Only notes carrying this tag ID."},
 				{Name: "search", In: InQuery, Type: TypeString, Description: "Full-text search query."},
 			}, pageParams()...),
@@ -333,6 +344,7 @@ func Registry() []Operation {
 		},
 		{
 			Name: "tags_delete", Method: "DELETE", Path: "/api/tags/{id}", Scope: ScopeWrite,
+			Destructive: true,
 			Description: "Delete a tag (notes keep their other tags).",
 			Response:    ResponseNone,
 			Params: []Param{
@@ -382,12 +394,14 @@ func Registry() []Operation {
 		},
 		{
 			Name: "trash_delete", Method: "DELETE", Path: "/api/trash/{id}", Scope: ScopeWrite,
+			Destructive: true,
 			Description: "Permanently delete one trashed note. Irreversible.",
 			Response:    ResponseNone,
 			Params:      []Param{noteID()},
 		},
 		{
 			Name: "trash_empty", Method: "DELETE", Path: "/api/trash", Scope: ScopeWrite,
+			Destructive: true,
 			Description: "Permanently delete everything in the trash. Irreversible.",
 			Response:    ResponseNone,
 		},

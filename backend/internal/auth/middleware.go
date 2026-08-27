@@ -84,6 +84,15 @@ func (h *Handler) SetBearerAuthenticator(b BearerAuthenticator) {
 // Returns 401 if both are missing or invalid.
 func (h *Handler) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A user already on the context means an upstream RequireAuth ran —
+		// the MCP dispatcher replays tool calls through the mux with the
+		// /mcp request's context. Re-verifying would double-charge the
+		// bearer rate limiter and double-count token usage.
+		if UserFromContext(r.Context()) != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		if raw, ok := bearerFromRequest(r); ok {
 			if h.bearer == nil {
 				writeError(w, http.StatusUnauthorized, "bearer authentication disabled")

@@ -11,11 +11,22 @@
 package mcp
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/danpicton/crapnote/internal/apispec"
 )
+
+// maxBodyBytes caps the /mcp request body before any decoding. The largest
+// legitimate call is an images_upload: a 10 MB image (the API's own upload
+// cap) is ~13.4 MB in base64, so 16 MB leaves headroom for the JSON
+// envelope while preventing the unbounded buffering the REST endpoints
+// never allow.
+const maxBodyBytes = 16 << 20
 
 // protocolVersion is the newest MCP protocol revision this server knows.
 const protocolVersion = "2025-06-18"
@@ -73,20 +84,69 @@ const (
 )
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	var req rpcRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeRPC(w, rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: codeParseError, Message: "parse error"}})
-		return
-	}
-	if req.JSONRPC != "2.0" || req.Method == "" {
-		writeRPC(w, rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: codeInvalidRequest, Message: "invalid request"}})
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBodyBytes))
+	if err != nil {
+		msg := "read error"
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			msg = fmt.Sprintf("request body exceeds %d bytes", tooLarge.Limit)
+		}
+		writeJSON(w, rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: codeInvalidRequest, Message: msg}})
 		return
 	}
 
+	// The 2025-03-26 and 2024-11-05 protocol revisions require accepting
+	// JSON-RPC batches (arrays); 2025-06-18 dropped them.
+	if bytes.HasPrefix(bytes.TrimLeft(body, " \t\r\n"), []byte("[")) {
+		h.serveBatch(w, r, body)
+		return
+	}
+
+	var req rpcRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeJSON(w, rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: codeParseError, Message: "parse error"}})
+		return
+	}
+	if resp := h.handle(r, req); resp != nil {
+		writeJSON(w, *resp)
+		return
+	}
 	// Notifications get no response body.
-	if len(req.ID) == 0 || string(req.ID) == "null" {
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (h *Handler) serveBatch(w http.ResponseWriter, r *http.Request, body []byte) {
+	var reqs []rpcRequest
+	if err := json.Unmarshal(body, &reqs); err != nil {
+		writeJSON(w, rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: codeParseError, Message: "parse error"}})
+		return
+	}
+	if len(reqs) == 0 {
+		writeJSON(w, rpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: codeInvalidRequest, Message: "empty batch"}})
+		return
+	}
+	resps := make([]rpcResponse, 0, len(reqs))
+	for _, req := range reqs {
+		if resp := h.handle(r, req); resp != nil {
+			resps = append(resps, *resp)
+		}
+	}
+	if len(resps) == 0 {
+		// All notifications: no response body.
 		w.WriteHeader(http.StatusAccepted)
 		return
+	}
+	writeJSON(w, resps)
+}
+
+// handle processes one JSON-RPC request; a nil return means it was a
+// notification and gets no response.
+func (h *Handler) handle(r *http.Request, req rpcRequest) *rpcResponse {
+	if req.JSONRPC != "2.0" || req.Method == "" {
+		return &rpcResponse{JSONRPC: "2.0", ID: req.ID, Error: &rpcError{Code: codeInvalidRequest, Message: "invalid request"}}
+	}
+	if len(req.ID) == 0 || string(req.ID) == "null" {
+		return nil
 	}
 
 	resp := rpcResponse{JSONRPC: "2.0", ID: req.ID}
@@ -107,7 +167,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		resp.Error = &rpcError{Code: codeMethodNotFound, Message: "method not found: " + req.Method}
 	}
-	writeRPC(w, resp)
+	return &resp
 }
 
 func (h *Handler) initialize(params json.RawMessage) map[string]any {
@@ -149,7 +209,7 @@ func (h *Handler) toolsCall(r *http.Request, params json.RawMessage) (*callResul
 	return h.dispatch(r, op, p.Arguments), nil
 }
 
-func writeRPC(w http.ResponseWriter, resp rpcResponse) {
+func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(v)
 }

@@ -185,7 +185,7 @@ func TestToolsCall_DispatchesThroughAPI(t *testing.T) {
 	api := &captureAPI{status: 200, respCT: "application/json", resp: []byte(`[{"id":1}]`)}
 	h := newTestHandler(api)
 
-	hdr := http.Header{"Authorization": {"Bearer cnp_test"}}
+	hdr := http.Header{"Authorization": {"Bearer cnp_test"}, "Cookie": {"session=abc"}}
 	resp := callTool(t, h, "notes_list", `{"search":"tea & biscuits","starred":true,"limit":10}`, hdr)
 	cr := resultOf(t, resp)
 
@@ -196,11 +196,61 @@ func TestToolsCall_DispatchesThroughAPI(t *testing.T) {
 	if q.Get("search") != "tea & biscuits" || q.Get("starred") != "true" || q.Get("limit") != "10" {
 		t.Errorf("query = %v", api.req.URL.RawQuery)
 	}
-	if api.req.Header.Get("Authorization") != "Bearer cnp_test" {
-		t.Error("authorization header not replayed")
+	// Auth rides the request context (RequireAuth ran before the MCP
+	// handler); no credentials must be copied onto the replayed request.
+	if api.req.Header.Get("Authorization") != "" {
+		t.Error("authorization header must not be replayed")
+	}
+	if len(api.req.Cookies()) != 0 {
+		t.Error("cookies must not be forwarded to the replayed request")
 	}
 	if cr.IsError || cr.Content[0].Text != `[{"id":1}]` {
 		t.Errorf("result = %+v", cr)
+	}
+}
+
+func TestToolsCall_PathParamsAreEscaped(t *testing.T) {
+	cases := []struct {
+		id          string
+		wantEscaped string
+	}{
+		{"foo bar", "/api/images/foo%20bar"},
+		{"../trash", "/api/images/..%2Ftrash"},
+		{"x?starred=true", "/api/images/x%3Fstarred=true"},
+		{"x#frag", "/api/images/x%23frag"},
+		{"%zz", "/api/images/%25zz"},
+	}
+	for _, tc := range cases {
+		api := &captureAPI{status: 200, respCT: "image/png", resp: []byte("png")}
+		h := newTestHandler(api)
+		resp := callTool(t, h, "images_get", fmt.Sprintf(`{"id":%q}`, tc.id), nil)
+		cr := resultOf(t, resp)
+		if cr.IsError {
+			t.Fatalf("id %q: unexpected tool error: %+v", tc.id, cr)
+		}
+		if got := api.req.URL.EscapedPath(); got != tc.wantEscaped {
+			t.Errorf("id %q dispatched to %q, want %q", tc.id, got, tc.wantEscaped)
+		}
+		if api.req.URL.RawQuery != "" || api.req.URL.Fragment != "" {
+			t.Errorf("id %q leaked into query/fragment: %q", tc.id, api.req.URL.String())
+		}
+	}
+}
+
+func TestToolsCall_EmptyPathParamRejected(t *testing.T) {
+	h := newTestHandler(&captureAPI{})
+	cr := resultOf(t, callTool(t, h, "images_get", `{"id":""}`, nil))
+	if !cr.IsError || !strings.Contains(cr.Content[0].Text, "empty") {
+		t.Errorf("result = %+v, want empty-argument error", cr)
+	}
+}
+
+func TestToolsCall_RedirectIsError(t *testing.T) {
+	api := &captureAPI{status: 301, respCT: "text/html", resp: []byte(`<a href="/api/trash">Moved</a>`)}
+	h := newTestHandler(api)
+	cr := resultOf(t, callTool(t, h, "images_get", `{"id":"abc"}`, nil))
+	if !cr.IsError || !strings.Contains(cr.Content[0].Text, "301") {
+		t.Errorf("result = %+v, want 301 error", cr)
 	}
 }
 
@@ -299,6 +349,83 @@ func TestToolsCall_MultipartImageUpload(t *testing.T) {
 	}
 	if !strings.Contains(string(api.body), `name="image"`) {
 		t.Error("multipart body missing image field")
+	}
+}
+
+func TestBodySizeLimit(t *testing.T) {
+	h := newTestHandler(&captureAPI{})
+	resp, _ := rpc(t, h, `{"jsonrpc":"2.0","id":1,"method":"ping","params":{"pad":"`+strings.Repeat("a", maxBodyBytes)+`"}}`)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "exceeds") {
+		t.Fatalf("error = %+v, want body-too-large error", resp.Error)
+	}
+}
+
+func TestBatchRequests(t *testing.T) {
+	h := newTestHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/mcp",
+		strings.NewReader(`[{"jsonrpc":"2.0","id":1,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"},{"jsonrpc":"2.0","id":2,"method":"nope"}]`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	var resps []rpcResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resps); err != nil {
+		t.Fatalf("batch response not an array: %q", rec.Body.String())
+	}
+	if len(resps) != 2 {
+		t.Fatalf("got %d responses, want 2 (notification excluded)", len(resps))
+	}
+	if resps[0].Error != nil {
+		t.Errorf("ping in batch failed: %+v", resps[0].Error)
+	}
+	if resps[1].Error == nil || resps[1].Error.Code != codeMethodNotFound {
+		t.Errorf("unknown method in batch = %+v, want method-not-found", resps[1].Error)
+	}
+}
+
+func TestBatchOfNotificationsGets202(t *testing.T) {
+	h := newTestHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/mcp",
+		strings.NewReader(`[{"jsonrpc":"2.0","method":"notifications/initialized"}]`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusAccepted || rec.Body.Len() != 0 {
+		t.Fatalf("status=%d body=%q, want 202 with empty body", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEmptyBatchIsInvalid(t *testing.T) {
+	h := newTestHandler(nil)
+	resp, _ := rpc(t, h, `[]`)
+	if resp.Error == nil || resp.Error.Code != codeInvalidRequest {
+		t.Fatalf("error = %+v, want invalid request", resp.Error)
+	}
+}
+
+func TestToolsList_Annotations(t *testing.T) {
+	h := newTestHandler(nil)
+	resp, _ := rpc(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	byName := map[string]map[string]any{}
+	for _, raw := range resp.Result.(map[string]any)["tools"].([]any) {
+		tl := raw.(map[string]any)
+		ann, ok := tl["annotations"].(map[string]any)
+		if !ok {
+			t.Fatalf("tool %v has no annotations", tl["name"])
+		}
+		byName[tl["name"].(string)] = ann
+	}
+	// Irreversible ops must carry the destructive hint so clients confirm
+	// with the user before wiping notes.
+	for _, name := range []string{"trash_empty", "trash_delete", "tags_delete"} {
+		if byName[name]["destructiveHint"] != true || byName[name]["readOnlyHint"] != false {
+			t.Errorf("%s annotations = %v, want destructive, not read-only", name, byName[name])
+		}
+	}
+	if byName["notes_list"]["readOnlyHint"] != true || byName["notes_list"]["destructiveHint"] != false {
+		t.Errorf("notes_list annotations = %v, want read-only, not destructive", byName["notes_list"])
+	}
+	// Trashing a note is recoverable for 7 days — not destructive.
+	if byName["notes_delete"]["destructiveHint"] != false {
+		t.Errorf("notes_delete annotations = %v, want non-destructive (goes to trash)", byName["notes_delete"])
 	}
 }
 

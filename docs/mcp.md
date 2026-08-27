@@ -11,11 +11,15 @@ work with your notes directly.
   (e.g. `https://notes.example.com/mcp`).
 - **Transport**: Streamable HTTP, stateless (single JSON responses; no
   sessions, no server-initiated SSE stream).
-- **Auth**: the same bearer API tokens as the REST API. Create one in the
-  web UI under Settings → Developer, then send it as
+- **Auth**: the same bearer API tokens as the REST API — and *only* those:
+  session cookies are rejected on `/mcp`, so a browser can never be tricked
+  into driving the MCP surface (no CSRF/DNS-rebinding exposure). Create a
+  token in the web UI under Settings → Developer, then send it as
   `Authorization: Bearer cnp_…`. A `read`-scoped token gets a read-only MCP
   surface; `read_write` unlocks the mutating tools. Unauthenticated
   requests get 401.
+- **Limits**: request bodies are capped at 16 MB (sized to fit a 10 MB
+  image upload as base64 plus the JSON envelope).
 
 Claude Code setup:
 
@@ -32,6 +36,12 @@ pin reordering, archive, tags, note–tag associations, trash, export
 names are the operation names from the API contract (`notes_list`,
 `tags_create`, `trash_empty`, …).
 
+Every tool carries MCP behaviour annotations derived from the registry:
+GETs are `readOnlyHint`, and irreversible operations (`trash_delete`,
+`trash_empty`, `tags_delete`, token revocation) are `destructiveHint`, so
+well-behaved clients ask the user for confirmation before permanently
+deleting anything.
+
 Deliberately absent, mirroring the API's own security posture:
 
 - **Token creation and password change** — cookie-session-only endpoints
@@ -46,10 +56,11 @@ Deliberately absent, mirroring the API's own security posture:
 The MCP server (`backend/internal/mcp`) does not reimplement any API
 behaviour. Its tool list is generated from the apispec registry
 (`backend/internal/apispec`), and each tool call is replayed as a real HTTP
-request through the server's own mux, carrying the caller's credentials.
-Auth, token scopes, cookie-only gates, rate limits, and validation are all
-applied by the same middleware and handlers the REST API uses — the MCP
-surface *cannot* permit anything the API does not.
+request through the server's own mux, carrying the caller's already-verified
+identity on the request context (the token itself is verified once, at
+`/mcp`). Token scopes, cookie-only gates, and validation are all applied by
+the same middleware and handlers the REST API uses — the MCP surface
+*cannot* permit anything the API does not.
 
 ## Keeping API, CLI, and MCP aligned
 

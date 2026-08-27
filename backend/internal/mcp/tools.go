@@ -6,9 +6,19 @@ import (
 
 // tool is the MCP tools/list wire representation.
 type tool struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	InputSchema map[string]any `json:"inputSchema"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema map[string]any  `json:"inputSchema"`
+	Annotations toolAnnotations `json:"annotations"`
+}
+
+// toolAnnotations are the MCP behaviour hints clients use to decide when to
+// ask the user for confirmation. destructiveHint defaults to true in the
+// spec, so every hint is emitted explicitly.
+type toolAnnotations struct {
+	ReadOnlyHint    bool `json:"readOnlyHint"`
+	DestructiveHint bool `json:"destructiveHint"`
+	IdempotentHint  bool `json:"idempotentHint"`
 }
 
 // buildTools renders one MCP tool per registry operation.
@@ -19,9 +29,21 @@ func buildTools(ops []apispec.Operation) []tool {
 			Name:        op.Name,
 			Description: op.Description,
 			InputSchema: inputSchema(op),
+			Annotations: annotations(op),
 		})
 	}
 	return out
+}
+
+// annotations derives the MCP hints from registry metadata: GETs are
+// read-only, irreversible ops (trash purge, tag/token deletion) carry the
+// destructive hint, and idempotency follows the HTTP method semantics.
+func annotations(op apispec.Operation) toolAnnotations {
+	return toolAnnotations{
+		ReadOnlyHint:    op.Method == "GET",
+		DestructiveHint: op.Destructive,
+		IdempotentHint:  op.Method == "GET" || op.Method == "PUT" || op.Method == "DELETE",
+	}
 }
 
 func inputSchema(op apispec.Operation) map[string]any {

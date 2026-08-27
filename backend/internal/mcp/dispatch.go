@@ -69,7 +69,13 @@ func (h *Handler) dispatch(orig *http.Request, op apispec.Operation, args map[st
 			if err != nil {
 				return errorResult("argument %q: %v", p.Name, err)
 			}
-			path = strings.ReplaceAll(path, "{"+p.Name+"}", s)
+			if s == "" {
+				return errorResult("argument %q must not be empty", p.Name)
+			}
+			// Escape before splicing: a raw value could otherwise smuggle
+			// query/fragment/extra segments into the replayed request, and
+			// characters like spaces would make request construction panic.
+			path = strings.ReplaceAll(path, "{"+p.Name+"}", url.PathEscape(s))
 		case apispec.InQuery:
 			s, err := scalarString(p, val)
 			if err != nil {
@@ -110,17 +116,16 @@ func (h *Handler) dispatch(orig *http.Request, op apispec.Operation, args map[st
 		target += "?" + q.Encode()
 	}
 
+	// The MCP request's context already carries the authenticated user and
+	// auth flags (RequireAuth ran before this handler), so no credentials
+	// are copied onto the replayed request: RequireAuth passes context-
+	// authenticated requests through, and the scope middleware reads the
+	// same context. This keeps the caller's token out of a second
+	// verification (and rate-limit charge) and forwards nothing else from
+	// the MCP request.
 	req := httptest.NewRequestWithContext(orig.Context(), op.Method, target, reqBody)
 	if op.Method != http.MethodGet {
 		req.Header.Set("Content-Type", contentType)
-	}
-	// Replay only the caller's credentials; nothing else from the MCP
-	// request leaks into the API request.
-	if v := orig.Header.Get("Authorization"); v != "" {
-		req.Header.Set("Authorization", v)
-	}
-	for _, c := range orig.Cookies() {
-		req.AddCookie(c)
 	}
 
 	rec := httptest.NewRecorder()
@@ -130,7 +135,10 @@ func (h *Handler) dispatch(orig *http.Request, op apispec.Operation, args map[st
 
 func wrapResponse(op apispec.Operation, rec *httptest.ResponseRecorder) *callResult {
 	status := rec.Code
-	if status >= 400 {
+	// Only 2xx is success: a 3xx here means the mux redirected (e.g. path
+	// cleaning) instead of running a handler, and returning its body as a
+	// tool result would hand the agent garbage that looks valid.
+	if status < 200 || status >= 300 {
 		msg := strings.TrimSpace(rec.Body.String())
 		if msg == "" {
 			msg = http.StatusText(status)

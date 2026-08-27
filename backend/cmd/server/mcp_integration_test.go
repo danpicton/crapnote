@@ -78,6 +78,28 @@ func TestMCP_RequiresAuth(t *testing.T) {
 	}
 }
 
+func TestMCP_CookieSessionRejected(t *testing.T) {
+	mux, cookie := newAuthedMux(t)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(cookie)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("cookie-authenticated /mcp = %d, want 401 (bearer only)", w.Code)
+	}
+}
+
+func TestMCP_PathTraversalStaysAnError(t *testing.T) {
+	mux, cookie := newAuthedMux(t)
+	token := createToken(t, mux, cookie, "read_write")
+	_, resp := mcpCall(t, mux, token, toolCallBody("images_get", `{"id":"../trash"}`))
+	text, isErr := toolText(t, resp)
+	if !isErr {
+		t.Fatalf("traversal id returned success: %q — must be an API error, not a redirect body", text)
+	}
+}
+
 func TestMCP_GetNotSupported(t *testing.T) {
 	mux := newTestMux(t)
 	req := httptest.NewRequest(http.MethodGet, "/mcp", nil)
