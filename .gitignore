@@ -55,3 +55,6 @@ backend/cmd/server/ui/build/*
 # migrations/*.sql kept in VCS intentionally
 node_modules/
 cli/crapnote
+
+# Agent worktrees created by Claude Code (ephemeral checkouts, never tracked)
+.claude/worktrees/
