@@ -1,0 +1,132 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+// @ts-expect-error vite ?raw import
+import html from './popup.html?raw';
+import { initPopup, type PopupDeps } from './controller';
+import { DEFAULT_SETTINGS } from '../core/settings';
+import type { CrapNoteClient, Tag } from '../core/crapnote';
+import { readeckDestination } from '../core/destinations';
+
+function clientStub(tags: Tag[] = [{ id: 1, name: 'Links' }]) {
+	return {
+		createNote: vi.fn(async (title: string, body: string) => ({ id: 42, title, body })),
+		listTags: vi.fn(async () => tags),
+		createTag: vi.fn(async (name: string) => ({ id: 100, name })),
+		attachTag: vi.fn(async () => {}),
+	} as unknown as CrapNoteClient;
+}
+
+function deps(overrides: Partial<PopupDeps> = {}): PopupDeps {
+	return {
+		settings: { ...DEFAULT_SETTINGS, serverUrl: 'https://n.example.com', apiToken: 'tok' },
+		client: clientStub(),
+		context: { mode: 'link', url: 'https://example.com/a', title: 'Example Page' },
+		destinations: [],
+		close: vi.fn(),
+		openOptions: vi.fn(),
+		...overrides,
+	};
+}
+
+beforeEach(() => {
+	document.documentElement.innerHTML = (html as string)
+		.replace(/<link[^>]*>/, '')
+		.replace(/<script[^>]*><\/script>/, '');
+});
+
+const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+
+describe('popup in link mode', () => {
+	it('shows the page URL, prefills title and default link tag, and offers existing tags', async () => {
+		const d = deps();
+		await initPopup(document, d);
+
+		expect(el<HTMLOutputElement>('url').textContent).toBe('https://example.com/a');
+		expect(el<HTMLInputElement>('title').value).toBe('Example Page');
+		expect(el<HTMLInputElement>('tags').value).toBe('Links');
+		const options = Array.from(document.querySelectorAll('#tag-options option'));
+		expect(options.map((o) => o.getAttribute('value'))).toEqual(['Links']);
+	});
+
+	it('saves a note built from the form and closes the popup', async () => {
+		const d = deps();
+		await initPopup(document, d);
+
+		el<HTMLTextAreaElement>('content').value = 'A description';
+		el<HTMLInputElement>('tags').value = 'Links, extra';
+		el<HTMLFormElement>('save-form').dispatchEvent(new Event('submit'));
+		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
+
+		expect(d.client.createNote).toHaveBeenCalledWith(
+			'Example Page',
+			'[Example Page](https://example.com/a)\n\nA description',
+		);
+		expect(d.client.attachTag).toHaveBeenCalledWith(42, 1);
+		expect(d.client.attachTag).toHaveBeenCalledWith(42, 100);
+	});
+
+	it('offers configured destinations and saves the page to those checked', async () => {
+		const save = vi.spyOn(readeckDestination, 'save').mockResolvedValue();
+		const d = deps({ destinations: [readeckDestination] });
+		await initPopup(document, d);
+
+		const checkbox = document.querySelector<HTMLInputElement>(
+			'#destination-rows input[type=checkbox]',
+		);
+		expect(checkbox).not.toBeNull();
+		expect(document.getElementById('destination-rows')?.textContent).toContain('Readeck');
+
+		checkbox!.checked = true;
+		el<HTMLFormElement>('save-form').dispatchEvent(new Event('submit'));
+		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
+
+		expect(save).toHaveBeenCalledWith(
+			{ url: 'https://example.com/a', title: 'Example Page', labels: ['Links'] },
+			d.settings,
+		);
+		save.mockRestore();
+	});
+
+	it('disables saving and points at options when unconfigured', async () => {
+		const d = deps({ settings: { ...DEFAULT_SETTINGS } });
+		await initPopup(document, d);
+
+		expect(el('unconfigured').hidden).toBe(false);
+		expect(el<HTMLButtonElement>('save').disabled).toBe(true);
+	});
+});
+
+describe('popup in clip mode', () => {
+	it('prefills clipped content and the default clip tag, and offers no destinations', async () => {
+		const d = deps({
+			context: {
+				mode: 'clip',
+				url: 'https://example.com/a',
+				title: 'Example Page',
+				content: 'Clipped words <image content>',
+			},
+			destinations: [readeckDestination],
+		});
+		await initPopup(document, d);
+
+		expect(el<HTMLTextAreaElement>('content').value).toBe('Clipped words <image content>');
+		expect(el<HTMLInputElement>('tags').value).toBe('Webclip');
+		expect(el('content-label').textContent).toBe('Content');
+		expect(el('heading').textContent).toBe('Save web clip');
+		expect(document.querySelector('#destination-rows input')).toBeNull();
+	});
+
+	it('saves the clip note with the source line above the content', async () => {
+		const d = deps({
+			context: { mode: 'clip', url: 'https://example.com/a', title: 'Example Page', content: 'Words' },
+		});
+		await initPopup(document, d);
+
+		el<HTMLFormElement>('save-form').dispatchEvent(new Event('submit'));
+		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
+
+		expect(d.client.createNote).toHaveBeenCalledWith(
+			'Example Page',
+			'Clipped from [Example Page](https://example.com/a)\n\nWords',
+		);
+	});
+});

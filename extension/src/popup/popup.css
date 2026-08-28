@@ -1,0 +1,77 @@
+:root {
+	color-scheme: light dark;
+	font-family: system-ui, sans-serif;
+	font-size: 14px;
+}
+
+body {
+	margin: 0;
+	min-width: 380px;
+}
+
+#app {
+	padding: 12px 16px 16px;
+}
+
+h1 {
+	font-size: 16px;
+	margin: 0 0 10px;
+}
+
+label {
+	display: block;
+	font-weight: 600;
+	margin: 10px 0 4px;
+}
+
+input[type='text'],
+textarea {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 6px 8px;
+	border: 1px solid color-mix(in srgb, currentColor 30%, transparent);
+	border-radius: 6px;
+	font: inherit;
+	background: transparent;
+	color: inherit;
+}
+
+output#url {
+	display: block;
+	font-size: 12px;
+	word-break: break-all;
+	opacity: 0.8;
+}
+
+label.destination {
+	font-weight: 400;
+	margin-top: 12px;
+}
+
+button {
+	margin-top: 14px;
+	padding: 7px 18px;
+	border: none;
+	border-radius: 6px;
+	background: #d97706;
+	color: #fff;
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+#status {
+	margin: 8px 0 0;
+	font-size: 12px;
+}
+
+#unconfigured {
+	background: color-mix(in srgb, #d97706 15%, transparent);
+	border-radius: 6px;
+	padding: 8px 10px;
+}

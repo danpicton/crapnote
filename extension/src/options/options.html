@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>CrapNote extension options</title>
+		<link rel="stylesheet" href="options.css" />
+	</head>
+	<body>
+		<main id="app">
+			<h1>CrapNote extension options</h1>
+			<form id="options-form">
+				<fieldset>
+					<legend>CrapNote server</legend>
+					<label for="server-url">Server URL</label>
+					<input id="server-url" type="url" placeholder="https://notes.example.com" />
+					<label for="api-token">API token (read/write)</label>
+					<input id="api-token" type="password" autocomplete="off" />
+				</fieldset>
+				<fieldset>
+					<legend>Defaults</legend>
+					<label for="default-link-tag">Default tag for links</label>
+					<input id="default-link-tag" type="text" />
+					<label for="default-clip-tag">Default tag for web clips</label>
+					<input id="default-clip-tag" type="text" />
+				</fieldset>
+				<fieldset>
+					<legend>Readeck (optional)</legend>
+					<label for="readeck-url">Readeck URL</label>
+					<input id="readeck-url" type="url" placeholder="https://readeck.example.com" />
+					<label for="readeck-token">Readeck API token</label>
+					<input id="readeck-token" type="password" autocomplete="off" />
+				</fieldset>
+				<button id="save" type="submit">Save</button>
+				<p id="status" role="status"></p>
+			</form>
+		</main>
+		<script type="module" src="options.js"></script>
+	</body>
+</html>

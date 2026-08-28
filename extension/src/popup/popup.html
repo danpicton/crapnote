@@ -1,0 +1,37 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8" />
+		<title>Save to CrapNote</title>
+		<link rel="stylesheet" href="popup.css" />
+	</head>
+	<body>
+		<main id="app">
+			<h1 id="heading">Save link</h1>
+			<p id="unconfigured" hidden>
+				Set your server URL and API token in the
+				<a href="#" id="open-options">extension options</a> first.
+			</p>
+			<form id="save-form">
+				<label for="title">Title</label>
+				<input id="title" type="text" autocomplete="off" />
+
+				<label for="url">URL</label>
+				<output id="url"></output>
+
+				<label for="content" id="content-label">Description</label>
+				<textarea id="content" rows="6"></textarea>
+
+				<label for="tags">Tags (comma-separated)</label>
+				<input id="tags" type="text" list="tag-options" autocomplete="off" />
+				<datalist id="tag-options"></datalist>
+
+				<div id="destination-rows"></div>
+
+				<button id="save" type="submit">Save</button>
+				<p id="status" role="status"></p>
+			</form>
+		</main>
+		<script type="module" src="popup.js"></script>
+	</body>
+</html>
