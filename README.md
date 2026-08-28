@@ -30,6 +30,9 @@ A full-stack progressive web app (PWA) notes application.
 │   ├── go.mod
 │   └── Makefile
 ├── frontend/                # SvelteKit app
+├── cli/                     # crapnote CLI (Go) — mirrors the API surface
+├── e2e/                     # Playwright end-to-end tests
+├── extension/               # browser extension (Chrome/Brave + Firefox) — see extension/README.md
 ├── deploy/
 │   ├── docker-compose.yml
 │   └── k8s/                 # Kubernetes manifests (Traefik IngressRoute)
