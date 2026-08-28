@@ -12,9 +12,11 @@ Both builds share the same TypeScript source; only the manifest differs
   URL, description, and tags. The tags box starts with your default link tag
   (`Links`) and autocompletes from your existing CrapNote tags; new tags are
   created automatically.
-- **Clip selection** — select text/images, right-click → *Clip selection to
-  CrapNote*. Text is kept; images are masked with `<image content>`. Default
-  tag `Webclip`.
+- **Clip selection** — select text/images, right-click → *Clip selection
+  with images to CrapNote* or *Clip selection without images to CrapNote*.
+  In the popup, images show as a `<image content>` placeholder; on save
+  each placeholder becomes the real image, uploaded to CrapNote's image
+  store. Default tag `Webclip`.
 - **Clip image** — right-click a single image → *Clip image to CrapNote*.
 - **Readeck** — when a Readeck URL + token are configured in options, the
   link popup offers "Also save to Readeck" (full pages only, so not in the

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clipTextFromHTML, imageSourcesFromHTML } from './clip';
+import { clipTextFromHTML, imageSourcesFromHTML, stripImagesFromHTML } from './clip';
 
 describe('clipTextFromHTML', () => {
 	it('returns plain text unchanged for a text-only selection', () => {
@@ -31,5 +31,26 @@ describe('imageSourcesFromHTML', () => {
 			imageSourcesFromHTML('<p><img src="a.png"> mid <span><img src="b.jpg"></span></p>'),
 		).toEqual(['a.png', 'b.jpg']);
 		expect(imageSourcesFromHTML('<p>no images</p>')).toEqual([]);
+	});
+
+	it('resolves relative srcs against the page URL', () => {
+		expect(
+			imageSourcesFromHTML(
+				'<img src="/media/pic.jpg"><img src="rel.png"><img src="https://cdn.example.com/abs.png">',
+				'https://example.com/articles/post',
+			),
+		).toEqual([
+			'https://example.com/media/pic.jpg',
+			'https://example.com/articles/rel.png',
+			'https://cdn.example.com/abs.png',
+		]);
+	});
+});
+
+describe('stripImagesFromHTML', () => {
+	it('removes images entirely, leaving the text', () => {
+		const html = '<p>Before <img src="x.png"> after</p>';
+		expect(clipTextFromHTML(stripImagesFromHTML(html))).toBe('Before after');
+		expect(imageSourcesFromHTML(stripImagesFromHTML(html))).toEqual([]);
 	});
 });
