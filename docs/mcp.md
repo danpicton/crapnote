@@ -15,9 +15,10 @@ work with your notes directly.
   session cookies are rejected on `/mcp`, so a browser can never be tricked
   into driving the MCP surface (no CSRF/DNS-rebinding exposure). Create a
   token in the web UI under Settings → Developer, then send it as
-  `Authorization: Bearer cnp_…`. A `read`-scoped token gets a read-only MCP
-  surface; `read_write` unlocks the mutating tools. Unauthenticated
-  requests get 401.
+  `Authorization: Bearer cnp_…` — the `Bearer ` prefix is matched
+  case-sensitively, so a lowercase `bearer` is refused. A `read`-scoped
+  token gets a read-only MCP surface; `read_write` unlocks the mutating
+  tools. Unauthenticated requests get 401.
 - **Limits**: request bodies are capped at 16 MB (sized to fit a 10 MB
   image upload as base64 plus the JSON envelope), and a tool result is
   capped at 32 MB — a larger export is refused with an error pointing at the

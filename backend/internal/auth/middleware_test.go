@@ -237,3 +237,28 @@ func TestUserFromContext_Nil(t *testing.T) {
 		t.Fatalf("expected nil, got %v", got)
 	}
 }
+
+func TestHasBearerToken(t *testing.T) {
+	for _, tc := range []struct {
+		header string
+		want   bool
+	}{
+		{"", false},
+		{"Bearer cnp_token", true},
+		{"Bearer ", false},
+		{"Bearer    ", false},
+		{"Basic YWRtaW46YWRtaW4=", false},
+		{"bearer cnp_token", false},
+		{"BEARER cnp_token", false},
+		{"Bearercnp_token", false},
+		{"cnp_token", false},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/notes", nil)
+		if tc.header != "" {
+			req.Header.Set("Authorization", tc.header)
+		}
+		if got := auth.HasBearerToken(req); got != tc.want {
+			t.Errorf("HasBearerToken(Authorization: %q) = %v, want %v", tc.header, got, tc.want)
+		}
+	}
+}
