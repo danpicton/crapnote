@@ -1435,6 +1435,7 @@
 			ontouchend={onListTouchEnd}
 		>
 			{#each notes as note (note.id)}
+				{@const preview = notePreviewSegments(note.body)}
 				<li
 					class="note-item"
 					class:selected={note.id === selectedId}
@@ -1543,8 +1544,8 @@
 								</span>
 							</div>
 							<!-- Desktop: just date. Mobile: preview + date -->
-							{#if notePreviewSegments(note.body).length}
-								<span class="note-preview">{#each notePreviewSegments(note.body) as seg}{#if seg.link}<span class="preview-link">{seg.text}</span>{:else}{seg.text}{/if}{/each}</span>
+							{#if preview.length}
+								<span class="note-preview">{#each preview as seg}{#if seg.link}<span class="preview-link">{seg.text}</span>{:else}{seg.text}{/if}{/each}</span>
 							{/if}
 							<span class="note-date">
 								{new Date(note.created_at ?? note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(note.created_at ?? note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}

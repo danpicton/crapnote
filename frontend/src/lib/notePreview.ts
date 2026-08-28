@@ -26,8 +26,13 @@ const PLACEHOLDER = /\uE000(\d+)\uE000/;
 const MARKDOWN_LINK = /\[([^\]]+)\]\([^)]+\)/g;
 const AUTOLINK = /<(https?:\/\/[^>\s]+)>/g;
 const BARE_URL = /https?:\/\/[^\s<>()[\]]+/g;
-/** Punctuation that ends a sentence rather than the url it trails. */
-const TRAILING_PUNCTUATION = /[.,;:!?]+$/;
+/**
+ * Trailing characters that belong to the sentence rather than to the url:
+ * punctuation, and the closing half of `**bold**` / `_italic_` wrapping. Bare
+ * urls are parked before emphasis is stripped, so without this the url would
+ * swallow its own closing marker and orphan the opening one.
+ */
+const TRAILING_NON_URL = /[.,;:!?*_]+$/;
 
 function stripInline(text: string): string {
 	return text
@@ -49,6 +54,9 @@ export function notePreviewSegments(body: string): PreviewSegment[] {
 	const park = (text: string) => `\uE000${links.push(text) - 1}\uE000`;
 
 	const stripped = body
+		// Drop any placeholder character the note itself contains, so a parked
+		// link can never be confused with the note's own text.
+		.replace(/\uE000/g, '')
 		// HTML line breaks → newline
 		.replace(/<br\s*\/?>/gi, '\n')
 		// Images → placeholder
@@ -58,7 +66,7 @@ export function notePreviewSegments(body: string): PreviewSegment[] {
 		.replace(MARKDOWN_LINK, (_match, label: string) => park(stripInline(label)))
 		.replace(AUTOLINK, (_match, url: string) => park(url))
 		.replace(BARE_URL, (match) => {
-			const url = match.replace(TRAILING_PUNCTUATION, '');
+			const url = match.replace(TRAILING_NON_URL, '');
 			return park(url) + match.slice(url.length);
 		})
 		// Bold & italic → plain text
@@ -81,7 +89,7 @@ export function notePreviewSegments(body: string): PreviewSegment[] {
 	stripped.split(PLACEHOLDER).forEach((part, index) => {
 		if (used >= MAX_LENGTH) return;
 		const isLink = index % 2 === 1;
-		const text = (isLink ? links[Number(part)] : part).slice(0, MAX_LENGTH - used);
+		const text = (isLink ? (links[Number(part)] ?? '') : part).slice(0, MAX_LENGTH - used);
 		if (!text) return;
 		used += text.length;
 		segments.push(isLink ? { text, link: true } : { text });

@@ -66,6 +66,23 @@ describe('notePreviewSegments', () => {
 		expect(notePreviewSegments('a <thing> here')).toEqual([{ text: 'a <thing> here' }]);
 	});
 
+	it('keeps emphasis markers out of the link when a bare url is wrapped in them', () => {
+		expect(notePreviewSegments('**https://example.com/a_b**')).toEqual([
+			{ text: 'https://example.com/a_b', link: true },
+		]);
+		expect(notePreviewSegments('_https://example.com/a_b_')).toEqual([
+			{ text: 'https://example.com/a_b', link: true },
+		]);
+	});
+
+	it('survives a body containing the private-use placeholder character', () => {
+		expect(notePreviewSegments('a \uE0000\uE000 b')).toEqual([{ text: 'a 0 b' }]);
+		expect(notePreviewSegments('\uE00099\uE000 https://example.com')).toEqual([
+			{ text: '99 ' },
+			{ text: 'https://example.com', link: true },
+		]);
+	});
+
 	it('replaces images with a placeholder', () => {
 		expect(notePreviewSegments('![alt](/api/images/1)text')).toEqual([
 			{ text: '<image content>\ntext' },
