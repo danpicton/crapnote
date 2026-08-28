@@ -66,6 +66,18 @@ test.describe('Content-Security-Policy', () => {
     expect(ran).toBe(false);
   });
 
+  test('the webfont loader still injects its stylesheet from static/fonts.js', async ({
+    page,
+  }) => {
+    // The loader moved out of app.html so it would not be an inline script; this
+    // asserts the move kept working — the <link> is appended whether or not the
+    // fonts CDN is reachable, so the check does not depend on the network.
+    await page.goto('/login');
+    await expect(
+      page.locator('link[rel="stylesheet"][href*="fonts.googleapis.com"]'),
+    ).toHaveCount(1);
+  });
+
   test('booting the SPA and editing a note raises no violations', async ({ page }) => {
     // If the build's own bootstrap, chunks, webfonts or the editor's inline
     // styles fell foul of the policy, they would show up here — this is the
