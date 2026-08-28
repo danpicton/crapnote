@@ -19,7 +19,9 @@
 //     into an OfflineError.
 
 /** Marker header the API client uses to distinguish "you are offline" from a
- * genuine server-side 503. Keep in sync with frontend/src/lib/api.ts. */
+ * genuine server-side 503. frontend/src/lib/api.ts declares its own
+ * independent `OFFLINE_HEADER` with the same literal; the two must stay
+ * identical, so the tests pin the literal string rather than this constant. */
 export const OFFLINE_HEADER = 'X-Crapnote-Offline';
 
 /**

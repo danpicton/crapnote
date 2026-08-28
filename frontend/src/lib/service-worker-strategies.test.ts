@@ -137,6 +137,21 @@ describe('networkOnly', () => {
 		expect(res.headers.get('Content-Type')).toBe('application/json');
 	});
 
+	it('marks the synthetic 503 with the exact literal api.ts looks for', async () => {
+		mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+		const res = await networkOnly(req('/api/notes'));
+
+		// Pinned as a literal, deliberately not via OFFLINE_HEADER: api.ts
+		// declares its own independent copy of this string, so the two halves
+		// can only be held together by asserting the wire value. Renaming the
+		// header would otherwise leave this suite green while every offline
+		// call surfaced as a generic 503 — no OfflineError, so the IndexedDB
+		// fallback and dirty-note replay would never engage.
+		expect(res.headers.get('X-Crapnote-Offline')).toBe('1');
+		expect(OFFLINE_HEADER).toBe('X-Crapnote-Offline');
+	});
+
 	it('never consults the cache on success', async () => {
 		const matchSpy = vi.spyOn(cacheStorage, 'match');
 		await seed(req('/api/notes'), new Response('stale', { status: 200 }));
@@ -299,7 +314,11 @@ describe('selectStrategy', () => {
 		['DELETE /api/notes/1', 'network-only', req('/api/notes/1', { method: 'DELETE' })],
 		['GET /api/auth/me', 'network-only', req('/api/auth/me')],
 		// Non-GET on the images route is an upload, not a read — network only.
+		// The collection path is caught by the path check alone; the /<id> case
+		// below is the one that actually exercises the GET guard.
 		['POST /api/images', 'network-only', req('/api/images', { method: 'POST' })],
+		['DELETE /api/images/7', 'network-only', req('/api/images/7', { method: 'DELETE' })],
+		['POST /api/images/7', 'network-only', req('/api/images/7', { method: 'POST' })],
 
 		// Top-level HTML loads.
 		['navigation to /', 'navigation-cache-first', req('/', { mode: 'navigate' })],

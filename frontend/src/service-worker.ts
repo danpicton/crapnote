@@ -77,8 +77,9 @@ sw.addEventListener('activate', (event) => {
 // ─── Fetch routing ───────────────────────────────────────────────────────────
 sw.addEventListener('fetch', (event) => {
 	const { request } = event;
+	const strategy = selectStrategy(request, sw.location.origin);
 
-	switch (selectStrategy(request, sw.location.origin)) {
+	switch (strategy) {
 		case 'passthrough':
 			return;
 		case 'network-only':
@@ -90,5 +91,14 @@ sw.addEventListener('fetch', (event) => {
 		case 'cache-first':
 			event.respondWith(cacheFirst(request, CACHE_NAME));
 			return;
+		default: {
+			// Exhaustiveness guard. The listener callback returns void, so
+			// without this a new FetchStrategy member type-checks cleanly and
+			// silently falls through as a passthrough — breaking offline with
+			// no error at build or run time. Adding a member now fails
+			// `svelte-check` on this assignment.
+			const unhandled: never = strategy;
+			throw new Error(`unhandled fetch strategy: ${String(unhandled)}`);
+		}
 	}
 });
