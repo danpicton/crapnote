@@ -79,11 +79,8 @@ func TestMCP_RequiresAuth(t *testing.T) {
 }
 
 // A valid session cookie must never reach the MCP surface, whatever the
-// Authorization header says. An absent header is the obvious case; a header
-// carrying some other scheme is the subtle one, because bearerFromRequest
-// deliberately reports "no bearer" for a wrong scheme so /api/* can fall
-// through to cookie auth. Behind bearerOnly that fall-through would hand a
-// browser session the full MCP surface with write access.
+// Authorization header says — a wrong scheme included, since that is what
+// makes RequireAuth fall through to the cookie.
 func TestMCP_CookieSessionRejected(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -109,8 +106,7 @@ func TestMCP_CookieSessionRejected(t *testing.T) {
 			if w.Code != http.StatusUnauthorized {
 				t.Fatalf("cookie-authenticated /mcp with Authorization %q = %d, want 401 (bearer only)", tc.authHeader, w.Code)
 			}
-			// The MCP handler must not have run: a tools/list that reached it
-			// would answer with a JSON-RPC result listing every tool.
+			// A tools/list that reached the handler answers with a result.
 			if strings.Contains(w.Body.String(), `"result"`) {
 				t.Fatalf("request reached the MCP handler: %s", w.Body.String())
 			}

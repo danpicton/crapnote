@@ -227,14 +227,8 @@ func cookieOnly(next http.Handler) http.Handler {
 // MCP clients authenticate with API tokens, and refusing cookies means a
 // browser session can never be tricked into driving the MCP surface.
 //
-// Testing the scheme rather than merely a non-empty header is the whole
-// point: bearerFromRequest deliberately reports "no bearer" for a wrong
-// scheme so /api/* can fall through to cookie auth, so any other scheme
-// here would sail past the guard and be served the MCP surface on the
-// session cookie, with write access. The check delegates to
-// auth.HasBearerToken so the two stay in step — including its
-// case-sensitive "Bearer " prefix, which means a lowercase scheme gets 401
-// instead of quietly reopening that fall-through.
+// It must test the scheme, not just a non-empty header: RequireAuth treats a
+// wrong scheme as "no bearer" and falls through to the session cookie.
 func bearerOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !auth.HasBearerToken(r) {

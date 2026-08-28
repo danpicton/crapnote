@@ -238,10 +238,6 @@ func TestUserFromContext_Nil(t *testing.T) {
 	}
 }
 
-// HasBearerToken is the condition RequireAuth uses to decide whether to
-// attempt bearer auth at all, exposed so bearerOnly can refuse the cookie
-// fall-back on exactly the same terms. Callers rely on it being false for
-// every header that is not a well-formed "Bearer <token>".
 func TestHasBearerToken(t *testing.T) {
 	for _, tc := range []struct {
 		header string
