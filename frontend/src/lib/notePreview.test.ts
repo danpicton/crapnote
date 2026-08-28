@@ -83,6 +83,17 @@ describe('notePreviewSegments', () => {
 		]);
 	});
 
+	it('keeps adjacent links separate when nothing separates them', () => {
+		expect(notePreviewSegments('https://a.com<https://b.com>')).toEqual([
+			{ text: 'https://a.com', link: true },
+			{ text: 'https://b.com', link: true },
+		]);
+		expect(notePreviewSegments('https://a.com[label](https://b.com)')).toEqual([
+			{ text: 'https://a.com', link: true },
+			{ text: 'label', link: true },
+		]);
+	});
+
 	it('replaces images with a placeholder', () => {
 		expect(notePreviewSegments('![alt](/api/images/1)text')).toEqual([
 			{ text: '<image content>\ntext' },

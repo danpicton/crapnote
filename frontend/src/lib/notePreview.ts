@@ -24,8 +24,10 @@ const MAX_LENGTH = 300;
 const PLACEHOLDER = /\uE000(\d+)\uE000/;
 
 const MARKDOWN_LINK = /\[([^\]]+)\]\([^)]+\)/g;
-const AUTOLINK = /<(https?:\/\/[^>\s]+)>/g;
-const BARE_URL = /https?:\/\/[^\s<>()[\]]+/g;
+// The placeholder character is excluded so a url can never swallow a link
+// parked earlier in the pass — two links with nothing between them are common.
+const AUTOLINK = /<(https?:\/\/[^>\s\uE000]+)>/g;
+const BARE_URL = /https?:\/\/[^\s<>()[\]\uE000]+/g;
 /**
  * Trailing characters that belong to the sentence rather than to the url:
  * punctuation, and the closing half of `**bold**` / `_italic_` wrapping. Bare
@@ -53,7 +55,7 @@ export function notePreviewSegments(body: string): PreviewSegment[] {
 	const links: string[] = [];
 	const park = (text: string) => `\uE000${links.push(text) - 1}\uE000`;
 
-	const stripped = body
+	const parked = body
 		// Drop any placeholder character the note itself contains, so a parked
 		// link can never be confused with the note's own text.
 		.replace(/\uE000/g, '')
@@ -68,13 +70,10 @@ export function notePreviewSegments(body: string): PreviewSegment[] {
 		.replace(BARE_URL, (match) => {
 			const url = match.replace(TRAILING_NON_URL, '');
 			return park(url) + match.slice(url.length);
-		})
-		// Bold & italic → plain text
-		.replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
-		.replace(/\*\*([^*]+)\*\*/g, '$1')
-		.replace(/__([^_]+)__/g, '$1')
-		.replace(/\*([^*\n]+)\*/g, '$1')
-		.replace(/_([^_\n]+)_/g, '$1')
+		});
+
+	// Bold & italic → plain text
+	const stripped = stripInline(parked)
 		// Blockquotes → strip marker
 		.replace(/^>\s?/gm, '')
 		// Horizontal rules → remove line
