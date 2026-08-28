@@ -50,6 +50,23 @@ export class CrapNoteClient {
 		await this.request('POST', `/api/notes/${noteID}/tags`, { tag_id: tagID });
 	}
 
+	// Uploads an image blob; returns the note-embeddable URL
+	// (e.g. /api/images/{id}).
+	async uploadImage(blob: Blob): Promise<string> {
+		const form = new FormData();
+		form.append('image', blob);
+		const res = await this.fetch(`${this.config.serverUrl}/api/images`, {
+			method: 'POST',
+			headers: { Authorization: `Bearer ${this.config.apiToken}` },
+			body: form,
+		});
+		if (!res.ok) {
+			throw new Error(`CrapNote API POST /api/images failed: ${res.status}`);
+		}
+		const { url } = (await res.json()) as { url: string };
+		return url;
+	}
+
 	private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
 		const res = await this.fetch(`${this.config.serverUrl}${path}`, {
 			method,

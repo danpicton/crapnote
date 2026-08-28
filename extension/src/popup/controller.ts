@@ -4,12 +4,15 @@ import type { Destination } from '../core/destinations';
 import { buildLinkNote, buildClipNote } from '../core/note';
 import { parseTagInput } from '../core/tags';
 import { saveNote } from '../core/save';
+import { inlineClipImages } from '../core/images';
 
 export interface PopupContext {
 	mode: 'link' | 'clip';
 	url: string;
 	title: string;
 	content?: string;
+	// Original srcs of the clipped images, in mask order.
+	images?: string[];
 }
 
 export interface PopupDeps {
@@ -19,6 +22,7 @@ export interface PopupDeps {
 	destinations: Destination[];
 	close(): void;
 	openOptions(): void;
+	fetchBlob(url: string): Promise<Blob>;
 }
 
 export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
@@ -120,7 +124,15 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 		status.textContent = 'Saving…';
 		try {
 			const title = el<HTMLInputElement>('title').value;
-			const content = el<HTMLTextAreaElement>('content').value;
+			let content = el<HTMLTextAreaElement>('content').value;
+			if (context.mode === 'clip') {
+				// The <image content> masks are display-only; the saved note
+				// gets the real images.
+				content = await inlineClipImages(content, context.images ?? [], {
+					fetchBlob: deps.fetchBlob,
+					upload: (blob) => client.uploadImage(blob),
+				});
+			}
 			const draft =
 				context.mode === 'clip'
 					? buildClipNote({ title, url: context.url, content })
@@ -129,12 +141,14 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 			createdNote = await saveNote(client, draft, tagNames, createdNote, (note) => {
 				createdNote = note;
 			});
+			// The default link tag only marks the note as a link inside
+			// CrapNote — at a destination everything is a link, so drop it.
+			const labels = tagNames.filter(
+				(t) => t.toLowerCase() !== settings.defaultLinkTag.toLowerCase(),
+			);
 			for (const dest of destinations) {
 				if (destinationChecks.get(dest.id)?.checked && !savedDestinations.has(dest.id)) {
-					await dest.save(
-						{ url: context.url, title: draft.title, labels: tagNames },
-						settings,
-					);
+					await dest.save({ url: context.url, title: draft.title, labels }, settings);
 					savedDestinations.add(dest.id);
 				}
 			}

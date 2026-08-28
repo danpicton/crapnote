@@ -9,7 +9,7 @@ describe('buildLinkNote', () => {
 			description: 'Worth a read',
 		});
 		expect(note.title).toBe('Example Page');
-		expect(note.body).toBe('[Example Page](https://example.com/a)\n\nWorth a read');
+		expect(note.body).toBe('[Example Page](https://example.com/a)\n\n&nbsp;\n\nWorth a read');
 	});
 
 	it('omits the description block when empty and falls back to the URL as title', () => {
@@ -28,7 +28,7 @@ describe('buildClipNote', () => {
 		});
 		expect(note.title).toBe('Example Page');
 		expect(note.body).toBe(
-			'Clipped from [Example Page](https://example.com/a)\n\nSome clipped text',
+			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nSome clipped text',
 		);
 	});
 });

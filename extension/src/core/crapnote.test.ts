@@ -68,6 +68,21 @@ describe('CrapNoteClient', () => {
 		expect(JSON.parse(attachInit.body as string)).toEqual({ tag_id: 7 });
 	});
 
+	it('uploads an image as multipart form data and returns its URL', async () => {
+		const fetch = fetchStub(201, { url: '/api/images/abc-123' });
+		const client = new CrapNoteClient(config, fetch);
+
+		const url = await client.uploadImage(new Blob(['png-bytes'], { type: 'image/png' }));
+
+		expect(url).toBe('/api/images/abc-123');
+		const [reqUrl, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		expect(reqUrl).toBe('https://notes.example.com/api/images');
+		expect(init.method).toBe('POST');
+		expect(new Headers(init.headers).get('Authorization')).toBe('Bearer tok123');
+		expect(init.body).toBeInstanceOf(FormData);
+		expect((init.body as FormData).get('image')).toBeInstanceOf(Blob);
+	});
+
 	it('throws a descriptive error on a non-2xx response', async () => {
 		const fetch = fetchStub(401, { error: 'not authenticated' });
 		const client = new CrapNoteClient(config, fetch);

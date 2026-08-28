@@ -2,7 +2,7 @@ import { ext, syncStore, localStore } from '../browser';
 import { loadSettings } from '../core/settings';
 import { CrapNoteClient } from '../core/crapnote';
 import { availableDestinations } from '../core/destinations';
-import { clipTextFromHTML } from '../core/clip';
+import { clipTextFromHTML, imageSourcesFromHTML } from '../core/clip';
 import type { ClipPayload } from '../core/clipPayload';
 import { initPopup, type PopupContext } from './controller';
 
@@ -16,6 +16,7 @@ async function popupContext(): Promise<PopupContext> {
 			url: clip.url,
 			title: clip.title,
 			content: clipTextFromHTML(clip.html),
+			images: imageSourcesFromHTML(clip.html),
 		};
 	}
 	const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
@@ -31,5 +32,10 @@ void (async () => {
 		destinations: availableDestinations(settings),
 		close: () => window.close(),
 		openOptions: () => void ext.runtime.openOptionsPage(),
+		fetchBlob: async (url) => {
+			const res = await fetch(url);
+			if (!res.ok) throw new Error(`fetch image failed: ${res.status}`);
+			return res.blob();
+		},
 	});
 })();

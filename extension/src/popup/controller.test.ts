@@ -12,6 +12,7 @@ function clientStub(tags: Tag[] = [{ id: 1, name: 'Links' }]) {
 		listTags: vi.fn(async () => tags),
 		createTag: vi.fn(async (name: string) => ({ id: 100, name })),
 		attachTag: vi.fn(async () => {}),
+		uploadImage: vi.fn(async () => '/api/images/up-1'),
 	} as unknown as CrapNoteClient;
 }
 
@@ -23,6 +24,7 @@ function deps(overrides: Partial<PopupDeps> = {}): PopupDeps {
 		destinations: [],
 		close: vi.fn(),
 		openOptions: vi.fn(),
+		fetchBlob: vi.fn(async () => new Blob(['img'], { type: 'image/png' })),
 		...overrides,
 	};
 }
@@ -58,13 +60,13 @@ describe('popup in link mode', () => {
 
 		expect(d.client.createNote).toHaveBeenCalledWith(
 			'Example Page',
-			'[Example Page](https://example.com/a)\n\nA description',
+			'[Example Page](https://example.com/a)\n\n&nbsp;\n\nA description',
 		);
 		expect(d.client.attachTag).toHaveBeenCalledWith(42, 1);
 		expect(d.client.attachTag).toHaveBeenCalledWith(42, 100);
 	});
 
-	it('offers configured destinations and saves the page to those checked', async () => {
+	it('offers configured destinations and saves the page to those checked, without the default link tag', async () => {
 		const save = vi.spyOn(readeckDestination, 'save').mockResolvedValue();
 		const d = deps({ destinations: [readeckDestination] });
 		await initPopup(document, d);
@@ -75,12 +77,13 @@ describe('popup in link mode', () => {
 		expect(checkbox).not.toBeNull();
 		expect(document.getElementById('destination-rows')?.textContent).toContain('Readeck');
 
+		el<HTMLInputElement>('tags').value = 'links, research';
 		checkbox!.checked = true;
 		el<HTMLFormElement>('save-form').dispatchEvent(new Event('submit'));
 		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
 
 		expect(save).toHaveBeenCalledWith(
-			{ url: 'https://example.com/a', title: 'Example Page', labels: ['Links'] },
+			{ url: 'https://example.com/a', title: 'Example Page', labels: ['research'] },
 			d.settings,
 		);
 		save.mockRestore();
@@ -151,6 +154,29 @@ describe('popup in clip mode', () => {
 		expect(document.querySelector('#destination-rows input')).toBeNull();
 	});
 
+	it('substitutes masks with uploaded images on save', async () => {
+		const d = deps({
+			context: {
+				mode: 'clip',
+				url: 'https://example.com/a',
+				title: 'Example Page',
+				content: 'Look: <image content>',
+				images: ['https://example.com/pic.jpg'],
+			},
+		});
+		(d.client.uploadImage as ReturnType<typeof vi.fn>).mockResolvedValue('/api/images/up-9');
+		await initPopup(document, d);
+
+		el<HTMLFormElement>('save-form').dispatchEvent(new Event('submit'));
+		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
+
+		expect(d.fetchBlob).toHaveBeenCalledWith('https://example.com/pic.jpg');
+		expect(d.client.createNote).toHaveBeenCalledWith(
+			'Example Page',
+			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nLook: ![](/api/images/up-9)',
+		);
+	});
+
 	it('saves the clip note with the source line above the content', async () => {
 		const d = deps({
 			context: { mode: 'clip', url: 'https://example.com/a', title: 'Example Page', content: 'Words' },
@@ -162,7 +188,7 @@ describe('popup in clip mode', () => {
 
 		expect(d.client.createNote).toHaveBeenCalledWith(
 			'Example Page',
-			'Clipped from [Example Page](https://example.com/a)\n\nWords',
+			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nWords',
 		);
 	});
 });

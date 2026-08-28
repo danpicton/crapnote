@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clipTextFromHTML } from './clip';
+import { clipTextFromHTML, imageSourcesFromHTML } from './clip';
 
 describe('clipTextFromHTML', () => {
 	it('returns plain text unchanged for a text-only selection', () => {
@@ -22,5 +22,14 @@ describe('clipTextFromHTML', () => {
 
 	it('keeps paragraphs on separate lines', () => {
 		expect(clipTextFromHTML('<p>One</p><p>Two</p>')).toBe('One\n\nTwo');
+	});
+});
+
+describe('imageSourcesFromHTML', () => {
+	it('returns image srcs in document order, matching mask order', () => {
+		expect(
+			imageSourcesFromHTML('<p><img src="a.png"> mid <span><img src="b.jpg"></span></p>'),
+		).toEqual(['a.png', 'b.jpg']);
+		expect(imageSourcesFromHTML('<p>no images</p>')).toEqual([]);
 	});
 });
