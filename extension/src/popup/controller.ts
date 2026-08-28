@@ -116,6 +116,7 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 	// that already accepted the page aren't sent it again.
 	let createdNote: Note | undefined;
 	const savedDestinations = new Set<string>();
+	const uploadedImages = new Map<string, string>();
 
 	async function save(): Promise<void> {
 		const status = el('status');
@@ -128,10 +129,12 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 			if (context.mode === 'clip') {
 				// The <image content> masks are display-only; the saved note
 				// gets the real images.
-				content = await inlineClipImages(content, context.images ?? [], {
-					fetchBlob: deps.fetchBlob,
-					upload: (blob) => client.uploadImage(blob),
-				});
+				content = await inlineClipImages(
+					content,
+					context.images ?? [],
+					{ fetchBlob: deps.fetchBlob, upload: (blob) => client.uploadImage(blob) },
+					uploadedImages,
+				);
 			}
 			const draft =
 				context.mode === 'clip'

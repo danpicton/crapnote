@@ -29,6 +29,10 @@ export class CrapNoteClient {
 	}
 
 	// The server caps list pages at 100 items, so page until a short page.
+	async updateNote(id: number, title: string, body: string): Promise<Note> {
+		return this.request('PUT', `/api/notes/${id}`, { title, body });
+	}
+
 	async listTags(): Promise<Tag[]> {
 		const pageSize = 100;
 		const all: Tag[] = [];

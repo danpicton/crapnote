@@ -68,6 +68,19 @@ describe('CrapNoteClient', () => {
 		expect(JSON.parse(attachInit.body as string)).toEqual({ tag_id: 7 });
 	});
 
+	it('updates a note via PUT /api/notes/{id}', async () => {
+		const fetch = fetchStub(200, { id: 42, title: 'New', body: 'B2' });
+		const client = new CrapNoteClient(config, fetch);
+
+		const note = await client.updateNote(42, 'New', 'B2');
+
+		expect(note.title).toBe('New');
+		const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+		expect(url).toBe('https://notes.example.com/api/notes/42');
+		expect(init.method).toBe('PUT');
+		expect(JSON.parse(init.body as string)).toEqual({ title: 'New', body: 'B2' });
+	});
+
 	it('uploads an image as multipart form data and returns its URL', async () => {
 		const fetch = fetchStub(201, { url: '/api/images/abc-123' });
 		const client = new CrapNoteClient(config, fetch);

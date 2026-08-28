@@ -31,6 +31,26 @@ describe('inlineClipImages', () => {
 		expect(body).toBe('See ![](https://x/pic.jpg)');
 	});
 
+	it('leaves the mask in place for an empty source and never fetches it', async () => {
+		const d = deps();
+		const body = await inlineClipImages('<image content> then <image content>', ['', 'https://x/b.png'], d);
+		expect(body).toBe('<image content> then ![](/api/images/up-1)');
+		expect(d.fetchBlob).toHaveBeenCalledTimes(1);
+		expect(d.fetchBlob).toHaveBeenCalledWith('https://x/b.png');
+	});
+
+	it('reuses cached uploads on retry instead of re-uploading', async () => {
+		const d = deps();
+		const cache = new Map<string, string>();
+
+		await inlineClipImages('<image content>', ['https://x/a.png'], d, cache);
+		const body = await inlineClipImages('<image content>', ['https://x/a.png'], d, cache);
+
+		expect(body).toBe('![](/api/images/up-1)');
+		expect(d.upload).toHaveBeenCalledTimes(1);
+		expect(d.fetchBlob).toHaveBeenCalledTimes(1);
+	});
+
 	it('leaves surplus masks untouched and ignores surplus sources', async () => {
 		const d = deps();
 		const body = await inlineClipImages('<image content> and <image content>', ['https://x/only.png'], d);

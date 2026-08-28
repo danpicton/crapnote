@@ -13,6 +13,7 @@ function clientStub(tags: Tag[] = [{ id: 1, name: 'Links' }]) {
 		createTag: vi.fn(async (name: string) => ({ id: 100, name })),
 		attachTag: vi.fn(async () => {}),
 		uploadImage: vi.fn(async () => '/api/images/up-1'),
+		updateNote: vi.fn(async (id: number, title: string, body: string) => ({ id, title, body })),
 	} as unknown as CrapNoteClient;
 }
 
@@ -191,6 +192,31 @@ describe('popup in clip mode', () => {
 			'My own title',
 			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nWords',
 		);
+	});
+
+	it('does not re-upload images when retrying after a failure', async () => {
+		const d = deps({
+			context: {
+				mode: 'clip',
+				url: 'https://example.com/a',
+				title: 'Example Page',
+				content: 'Look: <image content>',
+				images: ['https://example.com/pic.jpg'],
+			},
+		});
+		(d.client.attachTag as ReturnType<typeof vi.fn>)
+			.mockRejectedValueOnce(new Error('attach failed'))
+			.mockResolvedValue(undefined);
+		await initPopup(document, d);
+
+		const form = el<HTMLFormElement>('save-form');
+		el<HTMLInputElement>('tags').value = 'Links';
+		form.dispatchEvent(new Event('submit'));
+		await vi.waitFor(() => expect(el('status').textContent).toContain('attach failed'));
+		form.dispatchEvent(new Event('submit'));
+		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
+
+		expect(d.client.uploadImage).toHaveBeenCalledTimes(1);
 	});
 
 	it('saves the clip note with the source line above the content', async () => {

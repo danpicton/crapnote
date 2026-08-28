@@ -33,6 +33,10 @@ describe('imageSourcesFromHTML', () => {
 		expect(imageSourcesFromHTML('<p>no images</p>')).toEqual([]);
 	});
 
+	it('keeps an empty src empty instead of resolving it to the page URL', () => {
+		expect(imageSourcesFromHTML('<img src="">', 'https://example.com/a')).toEqual(['']);
+	});
+
 	it('resolves relative srcs against the page URL', () => {
 		expect(
 			imageSourcesFromHTML(

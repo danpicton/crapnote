@@ -20,6 +20,10 @@ export async function saveNote(
 		// Report immediately so a caller retrying after a later failure
 		// (e.g. tag attach) can pass the note back as `existing`.
 		onCreated?.(note);
+	} else if (existing && (existing.title !== draft.title || existing.body !== draft.body)) {
+		// The user may have edited the form between attempts — a retry
+		// must not silently keep the stale content.
+		note = await client.updateNote(existing.id, draft.title, draft.body);
 	}
 	for (const id of tagIDs) {
 		await client.attachTag(note.id, id);

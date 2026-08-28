@@ -8,6 +8,7 @@ function clientStub(existing: Tag[]) {
 		listTags: vi.fn(async () => existing),
 		createTag: vi.fn(async (name: string) => ({ id: 100, name })),
 		attachTag: vi.fn(async () => {}),
+		updateNote: vi.fn(async (id: number, title: string, body: string) => ({ id, title, body })),
 	} as unknown as CrapNoteClient;
 }
 
@@ -42,6 +43,21 @@ describe('saveNote', () => {
 
 		expect(note.id).toBe(7);
 		expect(client.createNote).not.toHaveBeenCalled();
+		expect(client.updateNote).not.toHaveBeenCalled();
 		expect(client.attachTag).toHaveBeenCalledWith(7, 1);
+	});
+
+	it('updates the existing note when the draft was edited between attempts', async () => {
+		const client = clientStub([{ id: 1, name: 'Links' }]);
+
+		const note = await saveNote(client, { title: 'Fixed title', body: 'B' }, ['Links'], {
+			id: 7,
+			title: 'Typo title',
+			body: 'B',
+		});
+
+		expect(client.createNote).not.toHaveBeenCalled();
+		expect(client.updateNote).toHaveBeenCalledWith(7, 'Fixed title', 'B');
+		expect(note.title).toBe('Fixed title');
 	});
 });
