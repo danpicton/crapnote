@@ -35,10 +35,10 @@ const config = {
 				// No 'unsafe-inline': SvelteKit appends the bootstrap's hash here.
 				'script-src': ['self'],
 				// 'unsafe-inline' stays. ProseMirror writes style attributes at
-				// runtime and app.html's shell uses one, and style attributes
-				// cannot be hash-allowlisted without 'unsafe-hashes'. Keeping it
-				// also stops SvelteKit hashing the inline <style> block, which
-				// would otherwise make browsers ignore 'unsafe-inline'.
+				// runtime and the shell's body wrapper carries one, and style
+				// attributes cannot be hash-allowlisted without 'unsafe-hashes'.
+				// SvelteKit hashes only the component styles it inlines itself,
+				// so there is nothing here that could cover them.
 				'style-src': ['self', 'unsafe-inline', 'https://fonts.googleapis.com'],
 				'font-src': ['self', 'https://fonts.gstatic.com'],
 				// https: is deliberate: notes hold remote image URLs (pasted

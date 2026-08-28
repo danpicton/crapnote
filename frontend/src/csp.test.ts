@@ -32,10 +32,10 @@ describe('CSP build-time policy (svelte.config.js)', () => {
 	});
 
 	it('keeps style-src unsafe-inline', () => {
-		// ProseMirror sets style attributes at runtime and the app.html shell uses
-		// one; style attributes cannot be hash-allowlisted without 'unsafe-hashes'.
-		// Dropping 'unsafe-inline' here would also make SvelteKit hash the inline
-		// <style> block, at which point browsers ignore 'unsafe-inline' entirely.
+		// ProseMirror sets style attributes at runtime and the shell's body
+		// wrapper carries one; style attributes cannot be hash-allowlisted without
+		// 'unsafe-hashes', and SvelteKit hashes only the component styles it
+		// inlines itself, so nothing here could cover them.
 		expect(directives['style-src']).toContain('unsafe-inline');
 	});
 
@@ -98,9 +98,10 @@ describe('CSP build-time policy (svelte.config.js)', () => {
 describe('CSP-sensitive shell markup (app.html)', () => {
 	it('has no inline script for the policy to block', () => {
 		// SvelteKit hashes only the bootstrap it generates itself; an inline
-		// <script> in the shell is emitted verbatim, unhashed, and script-src
-		// carries no 'unsafe-inline' to fall back on. The webfont loader lives in
-		// static/fonts.js for exactly this reason.
+		// <script> in the shell is emitted verbatim and unhashed. Worse, the
+		// shell's head is parsed before %sveltekit.head% emits the meta tag, so
+		// such a script runs outside the policy rather than visibly breaking. The
+		// webfont loader lives in static/fonts.js for exactly this reason.
 		const scriptTags = shell.match(/<script[^>]*>/g) ?? [];
 		for (const tag of scriptTags) {
 			expect(tag, `inline <script> in app.html would be blocked: ${tag}`).toContain('src=');

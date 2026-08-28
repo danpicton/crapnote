@@ -59,11 +59,10 @@ directive.
 ## Deliberate exceptions inside the build-time policy
 
 - **`style-src 'unsafe-inline'` stays.** ProseMirror writes `style` attributes
-  at runtime and the `app.html` shell uses one; style attributes cannot be
-  hash-allowlisted without `'unsafe-hashes'`. Keeping `'unsafe-inline'` also
-  stops SvelteKit hashing the inline `<style>` block of theme tokens — once a
-  hash is present browsers ignore `'unsafe-inline'` entirely, which would break
-  every runtime style attribute.
+  at runtime and the shell's body wrapper carries one; style attributes cannot
+  be hash-allowlisted without `'unsafe-hashes'`. SvelteKit hashes only the
+  component styles it inlines itself (`csp.add_style` is fed nothing else), so
+  no hash it could emit would cover them.
 - **`img-src https:` stays.** The Milkdown NodeView renders whatever `src` a
   note holds as a plain `<img>` (`frontend/src/lib/milkdown/image.ts`), and
   remote srcs legitimately occur: pasted markdown keeps its original URLs, and
@@ -76,11 +75,23 @@ directive.
 
 ## No inline scripts in the shell
 
-SvelteKit hashes only the bootstrap it generates itself. Any `<script>` written
-inline in `frontend/src/app.html` is copied to the output unhashed and, with no
-`'unsafe-inline'`, blocked. The webfont loader therefore lives in
-`frontend/static/fonts.js` and is loaded with `<script src>`, covered by
-`script-src 'self'`. `src/csp.test.ts` fails if an inline script reappears.
+SvelteKit hashes only the bootstrap it generates itself, so any `<script>`
+written inline in `frontend/src/app.html` reaches the output unhashed. It would
+not simply be blocked, either: a meta policy is enforced only from the point the
+browser parses it, and `%sveltekit.head%` — where the meta tag lands — sits at
+the *end* of the shell's `<head>`, some 25 kB into the built `index.html`. An
+inline script above it would run outside the policy entirely, which is the worse
+failure of the two because nothing visibly breaks.
+
+The webfont loader therefore lives in `frontend/static/fonts.js` and is loaded
+with `<script src>`, covered by `script-src 'self'`. `src/csp.test.ts` fails if
+an inline script reappears in the shell.
+
+The same parse-order rule is why the policy still does its job: everything the
+SPA renders — every note body, every pasted fragment, the whole attack surface
+CSP is here for — is parsed long after the meta tag. Only the static shell head
+above it is outside the policy, and that is build-controlled markup, not user
+content.
 
 ## What the policy still does not do
 
