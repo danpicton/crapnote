@@ -73,7 +73,7 @@ export class ApiError extends Error {
  * Thrown when a request failed because the network is unreachable — either
  * fetch itself rejected (no service worker / hard network failure) or the
  * service worker answered with its synthetic offline 503, which it marks with
- * the `X-Crapnote-Offline: 1` header (see service-worker.ts). Callers use
+ * the `X-Crapnote-Offline: 1` header (see service-worker-strategies.ts). Callers use
  * this to distinguish "you are offline, fall back to the local cache" from a
  * genuine server error.
  */
