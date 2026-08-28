@@ -59,6 +59,13 @@ This project uses strict TDD. Follow the global `tdd` skill for process (red-gre
 │   ├── tests/            # auth, notes, tags spec files
 │   ├── global-setup.ts   # builds backend, starts server, seeds DB
 │   └── playwright.config.ts  # single worker (SQLite constraint)
+├── extension/            # browser extension (Chrome/Brave + Firefox, shared TS source)
+│   ├── src/core/         # tested browser-agnostic logic: bearer-auth API client,
+│   │                     #   tag resolution, note building, clip masking, destinations
+│   ├── src/popup/        # save popup (link + clip modes) — testable controller + main.ts bootstrap
+│   ├── src/options/      # options page (server URL, API token, default tags, Readeck)
+│   ├── src/background.ts # context menus + selection capture (MV3 service worker / event page)
+│   └── build.mjs         # esbuild → dist/chrome + dist/firefox (per-browser manifest, icons, zips)
 ├── deploy/               # see crapnote-deploy skill
 └── Dockerfile            # see crapnote-deploy skill
 ```
@@ -121,6 +128,21 @@ cd e2e && npx playwright test
 ```
 
 E2E tests build the full stack (backend + frontend), start the server, and run Playwright with a single worker (SQLite single-writer constraint).
+
+### Extension
+
+```bash
+# From extension/ directory:
+npm test           # vitest (happy-dom; controllers tested against real page markup)
+npm run check      # tsc --noEmit
+npm run build      # dist/chrome + dist/firefox (+ zips when `zip` exists)
+```
+
+The extension consumes only existing `/api/*` endpoints via bearer tokens — no
+backend changes needed for extension work. Core logic lives in `extension/src/core/`
+with injected fetch/storage fakes; `main.ts` files are thin browser-API bootstraps.
+CI runs the extension suite in the `Extension (Node)` job. See `extension/README.md`
+for features and load-unpacked instructions.
 
 ## Feature Build Order
 

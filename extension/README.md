@@ -14,9 +14,12 @@ Both builds share the same TypeScript source; only the manifest differs
   created automatically.
 - **Clip selection** — select text/images, right-click → *Clip selection
   with images to CrapNote* or *Clip selection without images to CrapNote*.
-  In the popup, images show as a `<image content>` placeholder; on save
-  each placeholder becomes the real image, uploaded to CrapNote's image
-  store. Default tag `Webclip`.
+  In the popup, images show as a `<image content>` placeholder (numbered —
+  `<image content 2>` — when the clip has more than one, so deleting a
+  placeholder drops exactly that image); on save each placeholder becomes
+  the real image, uploaded to CrapNote's image store. Default tag `Webclip`.
+  Clips open in the ordinary toolbar popup (`action.openPopup()`), falling
+  back to a detached window only where that API is unavailable.
 - **Clip image** — right-click a single image → *Clip image to CrapNote*.
 - **Readeck** — when a Readeck URL + token are configured in options, the
   link popup offers "Also save to Readeck" (full pages only, so not in the
