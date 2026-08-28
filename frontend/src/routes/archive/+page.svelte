@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { ArchiveRestore, Trash2, ChevronLeft, Archive as ArchiveIcon } from 'lucide-svelte';
 	import { api, OfflineError, type Note } from '$lib/api';
+	import { notePreviewSegments } from '$lib/notePreview';
 	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
 
 	let notes = $state<Note[]>([]);
@@ -106,23 +107,6 @@
 		swipeX = { ...swipeX, [id]: 0 };
 	}
 
-	function notePreview(body: string): string {
-		if (!body?.trim()) return '';
-		return body
-			.replace(/<br\s*\/?>/gi, '\n')
-			.replace(/!\[[^\]]*\]\([^)]*\)/g, '<image content>\n')
-			.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-			.replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
-			.replace(/\*\*([^*]+)\*\*/g, '$1')
-			.replace(/__([^_]+)__/g, '$1')
-			.replace(/\*([^*\n]+)\*/g, '$1')
-			.replace(/_([^_\n]+)_/g, '$1')
-			.replace(/^>\s?/gm, '')
-			.replace(/^[-*_]{3,}\s*$/gm, '')
-			.replace(/\n{2,}/g, '\n')
-			.trim()
-			.slice(0, 300);
-	}
 </script>
 
 <svelte:head>
@@ -188,8 +172,8 @@
 									<div class="note-row-top">
 										<span class="note-title">{note.title || 'Untitled'}</span>
 									</div>
-									{#if notePreview(note.body)}
-										<span class="note-preview">{notePreview(note.body)}</span>
+									{#if notePreviewSegments(note.body).length}
+										<span class="note-preview">{#each notePreviewSegments(note.body) as seg}{#if seg.link}<span class="preview-link">{seg.text}</span>{:else}{seg.text}{/if}{/each}</span>
 									{/if}
 									<span class="note-date">
 										{new Date(note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
@@ -541,6 +525,13 @@
 			position: absolute;
 			top: 1.4em; bottom: 0; left: 0; right: 0;
 			background: linear-gradient(to bottom, transparent, var(--bg));
+			pointer-events: none;
+		}
+		.preview-link {
+			text-decoration: underline;
+			text-decoration-thickness: 1px;
+			text-underline-offset: 2px;
+			/* Preview links are indicators only — the row opens the note. */
 			pointer-events: none;
 		}
 

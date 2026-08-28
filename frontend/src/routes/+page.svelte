@@ -19,6 +19,7 @@
 	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, OfflineError, type Note, type Tag } from '$lib/api';
+	import { notePreviewSegments } from '$lib/notePreview';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { shortcuts, matchShortcut, type ShortcutId } from '$lib/stores/shortcuts.svelte';
 	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
@@ -280,31 +281,6 @@
 		} else {
 			pullY = 0;
 		}
-	}
-
-	// Strip markdown for note preview text
-	function notePreview(body: string): string {
-		if (!body?.trim()) return '';
-		return body
-			// HTML line breaks → newline
-			.replace(/<br\s*\/?>/gi, '\n')
-			// Images → placeholder
-			.replace(/!\[[^\]]*\]\([^)]*\)/g, '<image content>\n')
-			// Links → text only
-			.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-			// Bold & italic → plain text
-			.replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
-			.replace(/\*\*([^*]+)\*\*/g, '$1')
-			.replace(/__([^_]+)__/g, '$1')
-			.replace(/\*([^*\n]+)\*/g, '$1')
-			.replace(/_([^_\n]+)_/g, '$1')
-			// Blockquotes → strip marker
-			.replace(/^>\s?/gm, '')
-			// Horizontal rules → remove line
-			.replace(/^[-*_]{3,}\s*$/gm, '')
-			.replace(/\n{2,}/g, '\n')
-			.trim()
-			.slice(0, 300);
 	}
 
 	// Derived sync status for the mobile sync status row
@@ -1567,8 +1543,8 @@
 								</span>
 							</div>
 							<!-- Desktop: just date. Mobile: preview + date -->
-							{#if notePreview(note.body)}
-								<span class="note-preview">{notePreview(note.body)}</span>
+							{#if notePreviewSegments(note.body).length}
+								<span class="note-preview">{#each notePreviewSegments(note.body) as seg}{#if seg.link}<span class="preview-link">{seg.text}</span>{:else}{seg.text}{/if}{/each}</span>
 							{/if}
 							<span class="note-date">
 								{new Date(note.created_at ?? note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(note.created_at ?? note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
@@ -2929,6 +2905,13 @@
 			left: 0;
 			right: 0;
 			background: linear-gradient(to bottom, transparent, var(--bg));
+			pointer-events: none;
+		}
+		.preview-link {
+			text-decoration: underline;
+			text-decoration-thickness: 1px;
+			text-underline-offset: 2px;
+			/* Preview links are indicators only — the row opens the note. */
 			pointer-events: none;
 		}
 		.note-date { font-size: 12px; margin-top: 0; letter-spacing: 0.1px; }
