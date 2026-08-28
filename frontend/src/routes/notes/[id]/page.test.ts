@@ -33,12 +33,16 @@ vi.mock('$lib/components/Editor.svelte', async () => ({
 	},
 }));
 
-// Override the page store to supply a real note id in params
+// Override the page store to supply a real note id in params. `routeState`
+// is mutated in place (never reassigned) so a test can pick a different note
+// id before render while the store keeps handing out the same object.
+const routeState = vi.hoisted(() => ({ params: { id: '42' } }));
+
 vi.mock('$app/stores', async () => {
 	const { readable } = await import('svelte/store');
 	return {
 		page: readable({
-			params: { id: '42' },
+			params: routeState.params,
 			url: new URL('http://localhost/notes/42'),
 			route: { id: '/notes/[id]' },
 			status: 200,
@@ -99,8 +103,25 @@ const mockNote = (overrides = {}) => ({
 	...overrides,
 });
 
+/** Fixed instant the fake clock starts from, so `local_updated_at` can be pinned. */
+const FAKE_NOW = '2024-06-01T12:00:00.000Z';
+/** Auto-save debounce in the page under test. */
+const DEBOUNCE_MS = 800;
+/**
+ * The instant a debounced save actually runs: the fake clock is advanced by
+ * the debounce to trigger it, and vi.setSystemTime-based fake timers move
+ * Date along with the timers. Anything written with `new Date()` inside the
+ * save must carry exactly this value — a frozen or stale timestamp will not.
+ */
+const SAVED_AT = new Date(Date.parse(FAKE_NOW) + DEBOUNCE_MS).toISOString();
+
 beforeEach(() => {
+	routeState.params.id = '42';
 	vi.clearAllMocks();
+	// clearAllMocks() clears calls but KEEPS implementations, and the Vitest
+	// config sets no mockReset. Without this an api.notes.update rejection
+	// configured by one test leaks into every later test in the file.
+	vi.mocked(api.notes.update).mockReset();
 	vi.mocked(api.notes.get).mockResolvedValue(mockNote());
 	vi.mocked(api.tags.listForNote).mockResolvedValue([]);
 	vi.mocked(api.tags.list).mockResolvedValue([]);
@@ -141,11 +162,11 @@ describe('/notes/[id] page', () => {
 			target: { value: 'New Title' },
 		});
 
-		// Auto-save fires after 800 ms debounce
-		vi.advanceTimersByTime(800);
-		await waitFor(() =>
-			expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'New Title' })
-		);
+		// Auto-save fires after 800 ms debounce. waitFor is inert under fake
+		// timers (@testing-library/dom only takes its fake-timer path when a
+		// global `jest` exists), so drive the clock and assert directly.
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'New Title' });
 		vi.useRealTimers();
 	});
 
@@ -261,12 +282,10 @@ describe('/notes/[id] offline mode', () => {
 			target: { value: 'Edited Offline' },
 		});
 
-		vi.advanceTimersByTime(800);
-		await waitFor(() =>
-			expect(offlineDB.upsertNote).toHaveBeenCalledWith(
-				expect.anything(),
-				expect.objectContaining({ title: 'Edited Offline', is_dirty: true })
-			)
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		expect(offlineDB.upsertNote).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ title: 'Edited Offline', is_dirty: true })
 		);
 		expect(api.notes.update).not.toHaveBeenCalled();
 		vi.useRealTimers();
@@ -277,9 +296,17 @@ describe('/notes/[id] offline mode', () => {
 		// the connection then drops before the user edits. saveOfflineEdit has
 		// to construct a CachedNote from in-memory state (the `existing ?? {…}`
 		// branch) — the old code silently dropped the edit here.
+		//
+		// The in-memory state is deliberately NON-default (starred, pinned, a
+		// tag, a distinct updated_at) so these assertions distinguish real
+		// state from the `?? false` / `[]` fallbacks in the code under test.
 		vi.stubGlobal('navigator', { ...navigator, onLine: true });
 		vi.useFakeTimers();
-		vi.mocked(api.notes.get).mockResolvedValue(mockNote());
+		vi.setSystemTime(new Date(FAKE_NOW));
+		vi.mocked(api.notes.get).mockResolvedValue(
+			mockNote({ starred: true, pinned: true, updated_at: '2024-05-01T00:00:00Z' })
+		);
+		vi.mocked(api.tags.listForNote).mockResolvedValue([{ id: 7, name: 'Work', note_count: 3 }]);
 		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
 
 		render(NotePage);
@@ -292,23 +319,110 @@ describe('/notes/[id] offline mode', () => {
 			target: { value: 'Edited Offline' },
 		});
 
-		vi.advanceTimersByTime(800);
-		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalled());
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		expect(offlineDB.upsertNote).toHaveBeenCalled();
 
 		const written = vi.mocked(offlineDB.upsertNote).mock.calls[0][1];
 		expect(written).toMatchObject({
 			id: 42,
 			title: 'Edited Offline',
 			body: '# Hello',            // untouched field taken from in-memory state
-			starred: false,
-			pinned: false,
-			tags: [],
-			server_updated_at: '2024-01-01T00:00:00Z',
+			starred: true,              // carried from the note, not the `?? false` fallback
+			pinned: true,
+			server_updated_at: '2024-05-01T00:00:00Z',
 			is_dirty: true,
 			is_new: false,              // id 42 is a real server note, not offline-created
 		});
-		// local_updated_at must be a real ISO timestamp — the "Invalid Date" bug.
-		expect(new Date(written.local_updated_at).toISOString()).toBe(written.local_updated_at);
+		// toMatchObject matches array members partially, so pin the tags exactly.
+		expect(written.tags).toEqual([{ id: 7, name: 'Work' }]);
+		// local_updated_at must be NOW, not merely a well-formed ISO string: a
+		// frozen or stale value makes the `localWins` comparison in
+		// offlineSync.ts fail, silently discarding the offline edit.
+		expect(written.local_updated_at).toBe(SAVED_AT);
+		expect(new Date(written.local_updated_at).getTime()).toBeGreaterThan(
+			new Date(written.server_updated_at).getTime()
+		);
+		expect(api.notes.update).not.toHaveBeenCalled();
+		vi.useRealTimers();
+	});
+
+	it('marks the cached record is_new for an offline-created (negative id) note', async () => {
+		// Notes created offline carry a negative temp id. saveOfflineEdit must
+		// flag them is_new so sync POSTs them instead of PATCHing a server id
+		// that does not exist. With the usual id 42 that assertion is vacuous.
+		routeState.params.id = '-1';
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(FAKE_NOW));
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ id: -1 }));
+		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
+
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.input(screen.getByDisplayValue('My Note'), {
+			target: { value: 'Edited Offline' },
+		});
+
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		expect(offlineDB.upsertNote).toHaveBeenCalled();
+
+		const written = vi.mocked(offlineDB.upsertNote).mock.calls[0][1];
+		expect(written).toMatchObject({
+			id: -1,
+			title: 'Edited Offline',
+			is_new: true,
+			is_dirty: true,
+		});
+		// A negative id never goes to the server, even while navigator is online.
+		expect(api.notes.update).not.toHaveBeenCalled();
+		vi.useRealTimers();
+	});
+
+	it('preserves every untouched field of an already-cached note', async () => {
+		// The COMMON path: the note is already in IndexedDB, so saveOfflineEdit
+		// takes the `{ ...existing }` branch. Editing the title must change the
+		// title, the timestamp and the dirty flag — and nothing else. Wiping
+		// body/starred/tags/server_updated_at here is the worst data-loss case
+		// in the function, and no test caught it before this one.
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(FAKE_NOW));
+		vi.mocked(api.notes.get).mockRejectedValue(new Error('offline'));
+		const cached = {
+			id: 42,
+			title: 'My Note',
+			body: 'Cached body worth keeping',
+			starred: true,
+			pinned: true,
+			locked: false,
+			pin_order: 3,
+			tags: [{ id: 7, name: 'Work' }],
+			server_updated_at: '2024-05-01T00:00:00Z',
+			local_updated_at: '2024-05-02T00:00:00Z',
+			is_dirty: false,
+			is_new: false,
+		};
+		vi.mocked(offlineDB.getNote).mockResolvedValue({ ...cached });
+
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.input(screen.getByDisplayValue('My Note'), {
+			target: { value: 'Edited Offline' },
+		});
+
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		expect(offlineDB.upsertNote).toHaveBeenCalled();
+
+		// toEqual, not toMatchObject: a dropped or clobbered field must fail.
+		const written = vi.mocked(offlineDB.upsertNote).mock.calls[0][1];
+		expect(written).toEqual({
+			...cached,
+			title: 'Edited Offline',
+			local_updated_at: SAVED_AT,
+			is_dirty: true,
+		});
 		expect(api.notes.update).not.toHaveBeenCalled();
 		vi.useRealTimers();
 	});
@@ -319,8 +433,11 @@ describe('/notes/[id] offline mode', () => {
 		// rather than being lost.
 		vi.stubGlobal('navigator', { ...navigator, onLine: true });
 		vi.useFakeTimers();
-		vi.mocked(api.notes.get).mockResolvedValue(mockNote());
+		vi.setSystemTime(new Date(FAKE_NOW));
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ updated_at: '2024-05-01T00:00:00Z' }));
 		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
+		// The top-level beforeEach mockReset()s this again, so the rejection
+		// cannot leak into later tests.
 		vi.mocked(api.notes.update).mockRejectedValue(new Error('network error'));
 
 		render(NotePage);
@@ -330,21 +447,25 @@ describe('/notes/[id] offline mode', () => {
 			target: { value: 'Edited While Unreachable' },
 		});
 
-		vi.advanceTimersByTime(800);
-		await waitFor(() =>
-			expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Edited While Unreachable' })
-		);
-		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalled());
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Edited While Unreachable' });
+		expect(offlineDB.upsertNote).toHaveBeenCalled();
 
 		const written = vi.mocked(offlineDB.upsertNote).mock.calls[0][1];
 		expect(written).toMatchObject({
 			id: 42,
 			title: 'Edited While Unreachable',
 			body: '# Hello',
+			server_updated_at: '2024-05-01T00:00:00Z',
 			is_dirty: true,
 			is_new: false,
 		});
-		expect(new Date(written.local_updated_at).toISOString()).toBe(written.local_updated_at);
+		// Freshness, not just ISO formatting: sync compares this against the
+		// server's edit time to decide whether the local edit wins.
+		expect(written.local_updated_at).toBe(SAVED_AT);
+		expect(new Date(written.local_updated_at).getTime()).toBeGreaterThan(
+			new Date(written.server_updated_at).getTime()
+		);
 		vi.useRealTimers();
 	});
 });
