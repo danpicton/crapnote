@@ -170,6 +170,27 @@ describe('Notes page', () => {
 		await waitFor(() => expect(screen.getByText('Test Note')).toBeInTheDocument());
 	});
 
+	it('renders preview links underlined and unbracketed', async () => {
+		vi.mocked(api.notes.list).mockResolvedValue([
+			mockNote({
+				id: 9,
+				title: 'Exam guide',
+				body: '<https://example.com/guide.pdf>\n',
+			}),
+		]);
+
+		const { container } = render(Page);
+		await waitFor(() => screen.getByText('Exam guide'));
+
+		const preview = container.querySelector('li.note-item .note-preview');
+		expect(preview?.textContent).toBe('https://example.com/guide.pdf');
+		expect(preview?.querySelector('.preview-link')?.textContent).toBe(
+			'https://example.com/guide.pdf',
+		);
+		// Preview links are indicators, not navigation.
+		expect(preview?.querySelector('a')).toBeNull();
+	});
+
 	it('shows new note button', async () => {
 		render(Page);
 		await waitFor(() => expect(screen.getAllByRole('button', { name: /new note/i }).length).toBeGreaterThan(0));
