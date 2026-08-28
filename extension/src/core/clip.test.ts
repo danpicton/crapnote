@@ -16,6 +16,12 @@ describe('clipTextFromHTML', () => {
 		expect(clipTextFromHTML('<img src="solo.jpg">')).toBe('<image content>');
 	});
 
+	it('numbers the masks when the selection has more than one image', () => {
+		expect(clipTextFromHTML('<p><img src="a.png"> and <img src="b.png"></p>')).toBe(
+			'<image content 1> and <image content 2>',
+		);
+	});
+
 	it('preserves line breaks and indentation inside <pre>', () => {
 		expect(clipTextFromHTML('<pre>if x:\n    y()\n</pre>')).toBe('if x:\n    y()');
 	});

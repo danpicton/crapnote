@@ -144,15 +144,17 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 			createdNote = await saveNote(client, draft, tagNames, createdNote, (note) => {
 				createdNote = note;
 			});
-			// The default link tag only marks the note as a link inside
-			// CrapNote — at a destination everything is a link, so drop it.
-			const labels = tagNames.filter(
-				(t) => t.toLowerCase() !== settings.defaultLinkTag.toLowerCase(),
-			);
-			for (const dest of destinations) {
-				if (destinationChecks.get(dest.id)?.checked && !savedDestinations.has(dest.id)) {
-					await dest.save({ url: context.url, title: draft.title, labels }, settings);
-					savedDestinations.add(dest.id);
+			if (destinations.length > 0) {
+				// The default link tag only marks the note as a link inside
+				// CrapNote — at a destination everything is a link, so drop it.
+				const labels = tagNames.filter(
+					(t) => t.toLowerCase() !== settings.defaultLinkTag.toLowerCase(),
+				);
+				for (const dest of destinations) {
+					if (destinationChecks.get(dest.id)?.checked && !savedDestinations.has(dest.id)) {
+						await dest.save({ url: context.url, title: draft.title, labels }, settings);
+						savedDestinations.add(dest.id);
+					}
 				}
 			}
 			deps.close();

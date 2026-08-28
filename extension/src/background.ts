@@ -8,21 +8,26 @@ import {
 } from './core/clipPayload';
 
 ext.runtime.onInstalled.addListener(() => {
-	ext.contextMenus.create({
-		id: MENU_CLIP_SELECTION,
-		title: 'Clip selection with images to CrapNote',
-		contexts: ['selection'],
-	});
-	ext.contextMenus.create({
-		id: MENU_CLIP_SELECTION_NO_IMAGES,
-		title: 'Clip selection without images to CrapNote',
-		contexts: ['selection'],
-	});
-	// Image context only, for right-clicking an image outside a selection.
-	ext.contextMenus.create({
-		id: MENU_CLIP_IMAGE,
-		title: 'Clip image to CrapNote',
-		contexts: ['image'],
+	// onInstalled also fires on extension updates, where the ids already
+	// exist — creating over an existing id errors instead of replacing it,
+	// so clear the slate first.
+	ext.contextMenus.removeAll(() => {
+		ext.contextMenus.create({
+			id: MENU_CLIP_SELECTION,
+			title: 'Clip selection with images to CrapNote',
+			contexts: ['selection'],
+		});
+		ext.contextMenus.create({
+			id: MENU_CLIP_SELECTION_NO_IMAGES,
+			title: 'Clip selection without images to CrapNote',
+			contexts: ['selection'],
+		});
+		// Image context only, for right-clicking an image outside a selection.
+		ext.contextMenus.create({
+			id: MENU_CLIP_IMAGE,
+			title: 'Clip image to CrapNote',
+			contexts: ['image'],
+		});
 	});
 });
 

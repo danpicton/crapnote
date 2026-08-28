@@ -51,6 +51,22 @@ describe('inlineClipImages', () => {
 		expect(d.fetchBlob).toHaveBeenCalledTimes(1);
 	});
 
+	it('pairs numbered masks with their source by index, surviving deletion of another mask', async () => {
+		const d = deps();
+		d.upload.mockResolvedValue('/api/images/up-b');
+
+		// The clip had two images; the user deleted mask 1 from the textarea.
+		const body = await inlineClipImages(
+			'Only: <image content 2>',
+			['https://x/a.png', 'https://x/b.png'],
+			d,
+		);
+
+		expect(body).toBe('Only: ![](/api/images/up-b)');
+		expect(d.fetchBlob).toHaveBeenCalledTimes(1);
+		expect(d.fetchBlob).toHaveBeenCalledWith('https://x/b.png');
+	});
+
 	it('leaves surplus masks untouched and ignores surplus sources', async () => {
 		const d = deps();
 		const body = await inlineClipImages('<image content> and <image content>', ['https://x/only.png'], d);

@@ -106,6 +106,35 @@ jobs:
       - name: Build
         run: npm run build
 
+  # ── Extension (Chrome/Brave + Firefox browser extension) ────────────────────
+  extension:
+    name: Extension (Node)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extension
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check (tsc)
+        run: npm run check
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+      - name: Build (chrome + firefox)
+        run: npm run build
+
   # ── E2E (Playwright) ────────────────────────────────────────────────────────
   # Runs after both backend and frontend jobs pass.
   # Builds the full stack, seeds a test DB, and runs browser tests.

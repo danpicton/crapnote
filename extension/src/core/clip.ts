@@ -1,5 +1,12 @@
 export const IMAGE_MASK = '<image content>';
 
+// A multi-image clip numbers its masks (`<image content 2>`) so each mask
+// stays paired with its own image even when the user deletes or reorders
+// masks in the content box; a single image keeps the plain mask.
+export function imageMask(index: number, total: number): string {
+	return total > 1 ? `<image content ${index + 1}>` : IMAGE_MASK;
+}
+
 // Sentinel wrapped around preformatted runs so whitespace normalisation
 // skips them. Kept as an escape — a literal NUL would make this file
 // binary to git and grep.
@@ -17,7 +24,8 @@ const BLOCK_TAGS = new Set([
 export function clipTextFromHTML(html: string): string {
 	const doc = new DOMParser().parseFromString(html, 'text/html');
 	const parts: string[] = [];
-	walk(doc.body, parts, false);
+	const counter = { next: 0, total: doc.querySelectorAll('img').length };
+	walk(doc.body, parts, false, counter);
 	// Preformatted runs are wrapped in PRE_MARK so the whitespace
 	// normalisation below leaves them untouched.
 	return parts
@@ -60,7 +68,12 @@ export function stripImagesFromHTML(html: string): string {
 	return doc.body.innerHTML;
 }
 
-function walk(node: Node, parts: string[], preformatted: boolean): void {
+function walk(
+	node: Node,
+	parts: string[],
+	preformatted: boolean,
+	counter: { next: number; total: number },
+): void {
 	for (const child of Array.from(node.childNodes)) {
 		if (child.nodeType === Node.TEXT_NODE) {
 			const text = child.textContent ?? '';
@@ -70,7 +83,7 @@ function walk(node: Node, parts: string[], preformatted: boolean): void {
 		if (child.nodeType !== Node.ELEMENT_NODE) continue;
 		const el = child as Element;
 		if (el.tagName === 'IMG') {
-			parts.push(IMAGE_MASK);
+			parts.push(imageMask(counter.next++, counter.total));
 			continue;
 		}
 		if (el.tagName === 'BR') {
@@ -79,13 +92,13 @@ function walk(node: Node, parts: string[], preformatted: boolean): void {
 		}
 		if (el.tagName === 'PRE') {
 			parts.push(`\n\n${PRE_MARK}`);
-			walk(el, parts, true);
+			walk(el, parts, true, counter);
 			parts.push(`${PRE_MARK}\n\n`);
 			continue;
 		}
 		const isBlock = BLOCK_TAGS.has(el.tagName);
 		if (isBlock) parts.push('\n\n');
-		walk(el, parts, preformatted);
+		walk(el, parts, preformatted, counter);
 		if (isBlock) parts.push('\n\n');
 	}
 }
