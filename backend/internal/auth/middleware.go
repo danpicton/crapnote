@@ -180,6 +180,16 @@ func (h *Handler) RequireWrite(next http.Handler) http.Handler {
 	})
 }
 
+// HasBearerToken reports whether r carries an Authorization header that
+// RequireAuth will actually treat as bearer credentials. Exposed so a caller
+// that must refuse the cookie fall-back — bearerOnly on /mcp — can gate on
+// exactly the same condition rather than on a second definition of "looks
+// like a bearer header" that could drift away from this one.
+func HasBearerToken(r *http.Request) bool {
+	_, ok := bearerFromRequest(r)
+	return ok
+}
+
 // bearerFromRequest extracts the raw token from an Authorization: Bearer
 // header. Returns ok=false if the header is missing or malformed.
 func bearerFromRequest(r *http.Request) (string, bool) {

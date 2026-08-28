@@ -78,15 +78,43 @@ func TestMCP_RequiresAuth(t *testing.T) {
 	}
 }
 
+// A valid session cookie must never reach the MCP surface, whatever the
+// Authorization header says. An absent header is the obvious case; a header
+// carrying some other scheme is the subtle one, because bearerFromRequest
+// deliberately reports "no bearer" for a wrong scheme so /api/* can fall
+// through to cookie auth. Behind bearerOnly that fall-through would hand a
+// browser session the full MCP surface with write access.
 func TestMCP_CookieSessionRejected(t *testing.T) {
-	mux, cookie := newAuthedMux(t)
-	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(cookie)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("cookie-authenticated /mcp = %d, want 401 (bearer only)", w.Code)
+	for _, tc := range []struct {
+		name       string
+		authHeader string
+	}{
+		{"no authorization header", ""},
+		{"basic scheme", "Basic YWRtaW46YWRtaW4="},
+		{"lowercase bearer scheme", "bearer cnp_whatever"},
+		{"bearer scheme with empty token", "Bearer "},
+		{"scheme-less credentials", "cnp_whatever"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux, cookie := newAuthedMux(t)
+			req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+			req.Header.Set("Content-Type", "application/json")
+			if tc.authHeader != "" {
+				req.Header.Set("Authorization", tc.authHeader)
+			}
+			req.AddCookie(cookie)
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+
+			if w.Code != http.StatusUnauthorized {
+				t.Fatalf("cookie-authenticated /mcp with Authorization %q = %d, want 401 (bearer only)", tc.authHeader, w.Code)
+			}
+			// The MCP handler must not have run: a tools/list that reached it
+			// would answer with a JSON-RPC result listing every tool.
+			if strings.Contains(w.Body.String(), `"result"`) {
+				t.Fatalf("request reached the MCP handler: %s", w.Body.String())
+			}
+		})
 	}
 }
 
