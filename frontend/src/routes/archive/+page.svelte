@@ -174,7 +174,7 @@
 										<span class="note-title">{note.title || 'Untitled'}</span>
 									</div>
 									{#if preview.length}
-										<span class="note-preview">{#each preview as seg}{#if seg.link}<span class="preview-link">{seg.text}</span>{:else}{seg.text}{/if}{/each}</span>
+										<span class="note-preview">{#each preview as seg}{#if seg.link}<span class="preview-link" class:preview-bold={seg.bold}>{seg.text}</span>{:else if seg.bold}<span class="preview-bold">{seg.text}</span>{:else}{seg.text}{/if}{/each}</span>
 									{/if}
 									<span class="note-date">
 										{new Date(note.updated_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} · {new Date(note.updated_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
@@ -535,6 +535,8 @@
 			/* Preview links are indicators only — the row opens the note. */
 			pointer-events: none;
 		}
+		/* Headings keep the preview's size and only gain weight. */
+		.preview-bold { font-weight: 700; }
 
 		.note-date { font-size: 12px; letter-spacing: 0.1px; color: var(--text-4); }
 

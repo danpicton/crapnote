@@ -96,8 +96,91 @@ describe('notePreviewSegments', () => {
 
 	it('replaces images with a placeholder', () => {
 		expect(notePreviewSegments('![alt](/api/images/1)text')).toEqual([
-			{ text: '<image content>\ntext' },
+			{ text: '<image content>' },
+			{ text: '\n' },
+			{ text: 'text' },
 		]);
+	});
+
+	it('shows a bullet list with bullets', () => {
+		expect(notePreview('- milk\n* eggs\n+ bread')).toBe('\u2022 milk\n\u2022 eggs\n\u2022 bread');
+	});
+
+	it('keeps the authored numbers of an ordered list', () => {
+		expect(notePreview('1. first\n2. second\n3) third')).toBe('1. first\n2. second\n3. third');
+	});
+
+	it('shows task items as empty and ticked boxes', () => {
+		expect(notePreview('- [ ] milk\n- [x] eggs\n* [X] bread')).toBe(
+			'\u2610 milk\n\u2611 eggs\n\u2611 bread',
+		);
+	});
+
+	it('marks a heading bold without a marker', () => {
+		expect(notePreviewSegments('## Shopping\nmilk')).toEqual([
+			{ text: 'Shopping', bold: true },
+			{ text: '\n' },
+			{ text: 'milk' },
+		]);
+	});
+
+	it('carries heading emphasis onto a link inside the heading', () => {
+		expect(notePreviewSegments('# see https://example.com')).toEqual([
+			{ text: 'see ', bold: true },
+			{ text: 'https://example.com', link: true, bold: true },
+		]);
+	});
+
+	it('does not treat a bare hash or an unspaced hash as a heading', () => {
+		expect(notePreview('#tag not a heading')).toBe('#tag not a heading');
+	});
+
+	it('replaces a whole table with a placeholder', () => {
+		const body = 'before\n| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\nafter';
+		expect(notePreview(body)).toBe('before\n<table content>\nafter');
+	});
+
+	it('handles a table written without outer pipes or padding', () => {
+		expect(notePreview('a | b\n:--- | ---:\n1 | 2')).toBe('<table content>');
+	});
+
+	it('leaves a sentence containing a pipe alone', () => {
+		expect(notePreview('run a | b to pipe it')).toBe('run a | b to pipe it');
+	});
+
+	it('ends a table at a sentence that merely contains a pipe', () => {
+		const body = '| a | b |\n|---|---|\n| 1 | 2 |\nCost is $5 | $10, thanks\nSee you later';
+		expect(notePreview(body)).toBe('<table content>\nCost is $5 | $10, thanks\nSee you later');
+	});
+
+	it('keeps consuming rows of a table written without outer pipes', () => {
+		expect(notePreview('a | b\n--- | ---\n1 | 2\n3 | 4\nafter')).toBe(
+			'<table content>\nafter',
+		);
+	});
+
+	it('keeps an image inside a list item on the item line', () => {
+		expect(notePreview('- ![](/img.png) caption\n- second item')).toBe(
+			'\u2022 <image content> caption\n\u2022 second item',
+		);
+	});
+
+	it('keeps an image inside a heading on the heading line', () => {
+		expect(notePreviewSegments('# ![](/img.png) title')).toEqual([
+			{ text: '<image content> title', bold: true },
+		]);
+	});
+
+	it('strips markdown inside a list item', () => {
+		expect(notePreviewSegments('- see [the docs](https://example.com) **now**')).toEqual([
+			{ text: '\u2022 see ' },
+			{ text: 'the docs', link: true },
+			{ text: ' now' },
+		]);
+	});
+
+	it('drops blank lines between blocks', () => {
+		expect(notePreview('# Title\n\n- one\n\n- two')).toBe('Title\n\u2022 one\n\u2022 two');
 	});
 
 	it('truncates to 300 characters across segments', () => {
