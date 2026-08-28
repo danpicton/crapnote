@@ -271,6 +271,82 @@ describe('/notes/[id] offline mode', () => {
 		expect(api.notes.update).not.toHaveBeenCalled();
 		vi.useRealTimers();
 	});
+
+	it('builds a fresh dirty CachedNote when IndexedDB has no entry for the note', async () => {
+		// The note loaded from the server but was never cached in IndexedDB;
+		// the connection then drops before the user edits. saveOfflineEdit has
+		// to construct a CachedNote from in-memory state (the `existing ?? {…}`
+		// branch) — the old code silently dropped the edit here.
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.useFakeTimers();
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote());
+		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
+
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		// Connection drops after the note is on screen.
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+
+		await fireEvent.input(screen.getByDisplayValue('My Note'), {
+			target: { value: 'Edited Offline' },
+		});
+
+		vi.advanceTimersByTime(800);
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalled());
+
+		const written = vi.mocked(offlineDB.upsertNote).mock.calls[0][1];
+		expect(written).toMatchObject({
+			id: 42,
+			title: 'Edited Offline',
+			body: '# Hello',            // untouched field taken from in-memory state
+			starred: false,
+			pinned: false,
+			tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z',
+			is_dirty: true,
+			is_new: false,              // id 42 is a real server note, not offline-created
+		});
+		// local_updated_at must be a real ISO timestamp — the "Invalid Date" bug.
+		expect(new Date(written.local_updated_at).toISOString()).toBe(written.local_updated_at);
+		expect(api.notes.update).not.toHaveBeenCalled();
+		vi.useRealTimers();
+	});
+
+	it('saves to IndexedDB when the server is unreachable mid-online-edit', async () => {
+		// navigator says we are online, but the request fails (network error or
+		// a 503 from the service worker). The edit must land in IndexedDB
+		// rather than being lost.
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.useFakeTimers();
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote());
+		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
+		vi.mocked(api.notes.update).mockRejectedValue(new Error('network error'));
+
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.input(screen.getByDisplayValue('My Note'), {
+			target: { value: 'Edited While Unreachable' },
+		});
+
+		vi.advanceTimersByTime(800);
+		await waitFor(() =>
+			expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Edited While Unreachable' })
+		);
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalled());
+
+		const written = vi.mocked(offlineDB.upsertNote).mock.calls[0][1];
+		expect(written).toMatchObject({
+			id: 42,
+			title: 'Edited While Unreachable',
+			body: '# Hello',
+			is_dirty: true,
+			is_new: false,
+		});
+		expect(new Date(written.local_updated_at).toISOString()).toBe(written.local_updated_at);
+		vi.useRealTimers();
+	});
 });
 
 describe('Mobile format bar active state', () => {
