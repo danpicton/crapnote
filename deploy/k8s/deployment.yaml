@@ -19,10 +19,31 @@ spec:
         - name: crapnote
           image: ghcr.io/danpicton/crapnote:latest
           ports:
-            - containerPort: 8080
+            - name: http
+              containerPort: 8080
+            # Prometheus metrics. Deliberately absent from the Service (and so
+            # from the ingress) — scrape it in-cluster by pod IP or via a
+            # separate headless/metrics Service.
+            - name: metrics
+              containerPort: 9090
           env:
             - name: PORT
               value: "8080"
+            # Serve /metrics on its own listener; the public port answers 404
+            # for it. Unset this to disable metrics entirely.
+            #
+            # Availability coupling — read before adding a sidecar. The app
+            # fails fast if METRICS_ADDR cannot be bound: an operator who asks
+            # for metrics must not be left believing they are exported. That is
+            # deliberate, but it makes this observability-only listener a
+            # startup dependency. Every container in a pod shares one network
+            # namespace, so a sidecar or service-mesh proxy that also claims
+            # 9090 will make the app crash-loop and serve no notes at all. If
+            # you add one, give it a different port, move this listener to a
+            # free one (update the metrics containerPort above to match), or
+            # remove this env var to turn metrics off.
+            - name: METRICS_ADDR
+              value: ":9090"
             - name: DATABASE_PATH
               value: /data/notes.db
             - name: SESSION_TTL_DAYS

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"strconv"
@@ -202,6 +204,26 @@ func main() {
 	}
 	bearerLimiter := ratelimit.New(bearerRate, bearerBurst)
 
+	// METRICS_ADDR: opt-in Prometheus endpoint, default off. Unset (the
+	// default) means /metrics is not served anywhere — the exposition
+	// enumerates every route the instance has exercised, reveals traffic and
+	// error patterns, and fingerprints the Go runtime, none of which belongs
+	// on an internet-facing port. Set it to an address (e.g. ":9090", or
+	// "127.0.0.1:9090" to bind loopback only) to serve /metrics on a separate
+	// listener reachable from the private network the scraper lives on. The
+	// public listener always answers 404 for /metrics.
+	metricsSrv, err := serveMetrics(os.Getenv("METRICS_ADDR"), logger)
+	if err != nil {
+		// A METRICS_ADDR that cannot be bound is a misconfiguration: fail
+		// fast rather than run on with the operator believing metrics are
+		// being exported.
+		logger.Error("start metrics listener", "error", err, "addr", os.Getenv("METRICS_ADDR"))
+		os.Exit(1)
+	}
+	if metricsSrv != nil {
+		logger.Info("metrics listener started", "addr", metricsSrv.Addr)
+	}
+
 	port := envOrDefault("PORT", "8080")
 	// Observability middleware (metrics outermost, then logging, then security
 	// headers). newMux applies the same chain to MCP-dispatched tool calls, so
@@ -232,6 +254,39 @@ func main() {
 		logger.Error("server error", "error", err)
 		os.Exit(1)
 	}
+}
+
+// serveMetrics starts a dedicated listener serving only GET /metrics, so
+// Prometheus can scrape the app over a private network without the endpoint
+// riding on the public port. An empty addr disables it entirely and returns
+// (nil, nil) — the safe default. A non-empty addr that cannot be bound
+// returns an error; the returned server carries the resolved address (useful
+// when addr requests port 0) and is closed by process exit.
+func serveMetrics(addr string, logger *slog.Logger) (*http.Server, error) {
+	if addr == "" {
+		return nil, nil
+	}
+
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", middleware.MetricsHandler())
+	srv := &http.Server{
+		Addr:              ln.Addr().String(),
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("metrics server error", "error", err)
+		}
+	}()
+
+	return srv, nil
 }
 
 // newLogger creates a slog.Logger.  Set LOG_FORMAT=json for JSON output (e.g.

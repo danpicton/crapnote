@@ -3,7 +3,11 @@ global:
   evaluation_interval: 15s
 
 scrape_configs:
+  # The app serves /metrics on its METRICS_ADDR listener (see the app service
+  # in docker-compose.yml), never on the public port 8080. That port is
+  # reachable inside the compose network only — it is deliberately not
+  # published to the host.
   - job_name: crapnote
     static_configs:
-      - targets: ["app:8080"]
+      - targets: ["app:9090"]
     metrics_path: /metrics

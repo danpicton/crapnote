@@ -100,6 +100,7 @@ npm run lint      # eslint
 | `ADMIN_USERNAME` | — | Seeded on first run if no users exist |
 | `ADMIN_PASSWORD` | — | Seeded on first run if no users exist. **Set a strong value before first run** — the seeded credential persists in the database, and the deploy tooling (`deploy/docker-compose.yml`, `make run`) refuses to start without it |
 | `SESSION_TTL_DAYS` | `7` | Session lifetime in days; refreshed on activity |
+| `METRICS_ADDR` | — | Address for the Prometheus `/metrics` listener, e.g. `:9090` or `127.0.0.1:9090`. Unset (the default) means metrics are not exposed at all; `/metrics` on the main port always returns 404. Bind it to a private interface — the exposition enumerates exercised routes, traffic and error rates, and Go runtime details. A value that cannot be bound aborts startup |
 | `MAX_FAILED_LOGIN_ATTEMPTS` | `5` | Consecutive failed passwords before a non-admin account is auto-locked |
 | `LOCKOUT_COOLDOWN_MINUTES` | `15` | How long an automatic lockout lasts before clearing itself; manual admin locks never expire |
 | `LOGIN_RATE_PER_MINUTE` | `5` | Per-IP rate limit on `POST /api/auth/login` |

@@ -10,7 +10,6 @@ import (
 	"github.com/danpicton/crapnote/internal/export"
 	"github.com/danpicton/crapnote/internal/images"
 	"github.com/danpicton/crapnote/internal/mcp"
-	"github.com/danpicton/crapnote/internal/middleware"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/ratelimit"
 	"github.com/danpicton/crapnote/internal/settings"
@@ -36,8 +35,25 @@ func newMux(
 ) *http.ServeMux {
 	mux := http.NewServeMux()
 
-	// Observability (public — Prometheus scrapes this).
-	mux.Handle("GET /metrics", middleware.MetricsHandler())
+	// Prometheus metrics are never served on the public listener: the
+	// exposition enumerates every route the instance has exercised (admin
+	// endpoints included), exposes traffic and error patterns, and
+	// fingerprints the Go runtime. Scraping is opt-in through METRICS_ADDR,
+	// which binds /metrics to a separate listener (see serveMetrics in
+	// main.go).
+	//
+	// Registered explicitly as a 404 rather than left to the SPA catch-all
+	// below, which answers 200 text/html for any extensionless path — a
+	// scraper pointed at the wrong port would otherwise appear to succeed.
+	//
+	// "/metrics" matches that path exactly, so the trailing-slash form needs
+	// its own pattern (it is a subtree pattern, not a synonym) or it falls
+	// through to the catch-all and answers 200. Case variants (/Metrics,
+	// /METRICS) still fall through: ServeMux matching is case-sensitive and
+	// registering every permutation is not worth it. Anyone curling the two
+	// spellings an operator or scraper actually uses gets a clear 404.
+	mux.Handle("/metrics", http.NotFoundHandler())
+	mux.Handle("/metrics/", http.NotFoundHandler())
 
 	// Every /api route is declared in the apispec registry and bound to its
 	// handler here. newMux panics (at startup, and in every test that builds
