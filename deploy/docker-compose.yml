@@ -5,6 +5,10 @@ services:
     build: .
     ports:
       - "8080:8080"
+    # Metrics port: reachable from other compose services, never published to
+    # the host.
+    expose:
+      - "9090"
     environment:
       - PORT=8080
       - DATABASE_PATH=/data/notes.db
@@ -14,6 +18,11 @@ services:
       # later sets a real password. Compose fails fast when it is unset.
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:?set a strong admin password (seeded into the app on first run)}
       - SESSION_TTL_DAYS=${SESSION_TTL_DAYS:-7}
+      # Prometheus metrics listener. Off unless set; here it binds a second
+      # port that is NOT published to the host, so /metrics is reachable from
+      # prometheus inside the compose network and nowhere else. The public
+      # port 8080 always answers 404 for /metrics.
+      - METRICS_ADDR=${METRICS_ADDR:-:9090}
       # Set TRUST_PROXY=1 only when a trusted reverse proxy (e.g. nginx,
       # Traefik) sits directly in front of the app; forwarded headers
       # (X-Forwarded-For/-Proto) are ignored otherwise because clients can
@@ -44,7 +53,7 @@ services:
       - loki
 
   # ── Prometheus ─────────────────────────────────────────────────────────────
-  # Scrapes /metrics from the app every 15 s.
+  # Scrapes /metrics from the app's metrics listener (app:9090) every 15 s.
   prometheus:
     image: prom/prometheus:v3.3.1
     volumes:
