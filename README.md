@@ -178,6 +178,17 @@ Packages on non-GitHub hosts (e.g. `go.uber.org`, `golang.org/x/...`) must eithe
 - Logout deletes the session row immediately (reliable revocation)
 - Admin users are seeded from `ADMIN_USERNAME`/`ADMIN_PASSWORD` env vars on first run
 
+### Security headers
+
+- Every response carries `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`
+  and a `Content-Security-Policy`
+- The CSP is assembled from two halves: the frontend build emits the resource
+  directives (including a per-build hash for SvelteKit's inline bootstrap, so
+  `script-src` needs no `'unsafe-inline'`) into `index.html` as a `<meta>` tag, and the
+  Go middleware sends `frame-ancestors 'none'`, which browsers ignore in meta
+- See [docs/csp.md](docs/csp.md) before changing either half — both policies are
+  enforced at once, so the split is deliberate and nothing is duplicated
+
 ### Auth endpoints
 
 ```
