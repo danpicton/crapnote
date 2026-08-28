@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { clipPayloadFromClick } from './clipPayload';
+import { clipPayloadFromClick, escapeHTML } from './clipPayload';
 
 const tab = { url: 'https://example.com/a', title: 'Example Page' };
 
@@ -24,5 +24,13 @@ describe('clipPayloadFromClick', () => {
 		);
 		expect(payload.html).toBe('<img src="https://example.com/pic.jpg">');
 		expect(payload.url).toBe('https://example.com/a');
+	});
+});
+
+describe('escapeHTML', () => {
+	it('escapes markup-significant characters so plain text survives HTML parsing', () => {
+		expect(escapeHTML('for i<10 && j>2 do "x"')).toBe(
+			'for i&lt;10 &amp;&amp; j&gt;2 do &quot;x&quot;',
+		);
 	});
 });

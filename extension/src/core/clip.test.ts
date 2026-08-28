@@ -16,6 +16,10 @@ describe('clipTextFromHTML', () => {
 		expect(clipTextFromHTML('<img src="solo.jpg">')).toBe('<image content>');
 	});
 
+	it('preserves line breaks and indentation inside <pre>', () => {
+		expect(clipTextFromHTML('<pre>if x:\n    y()\n</pre>')).toBe('if x:\n    y()');
+	});
+
 	it('keeps paragraphs on separate lines', () => {
 		expect(clipTextFromHTML('<p>One</p><p>Two</p>')).toBe('One\n\nTwo');
 	});

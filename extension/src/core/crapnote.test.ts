@@ -30,8 +30,26 @@ describe('CrapNoteClient', () => {
 
 		expect(tags.map((t) => t.name)).toEqual(['Links', 'go']);
 		const [url, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
-		expect(url).toBe('https://notes.example.com/api/tags');
+		expect(url).toBe('https://notes.example.com/api/tags?limit=100&offset=0');
 		expect(init.method).toBe('GET');
+	});
+
+	it('pages through tags beyond the server page cap of 100', async () => {
+		const first = Array.from({ length: 100 }, (_, i) => ({ id: i, name: `t${i}` }));
+		const second = [{ id: 200, name: 'last' }];
+		let call = 0;
+		const fetch = vi.fn(
+			async () => new Response(JSON.stringify(call++ === 0 ? first : second), { status: 200 }),
+		);
+		const client = new CrapNoteClient(config, fetch);
+
+		const tags = await client.listTags();
+
+		expect(tags).toHaveLength(101);
+		expect(tags[100]?.name).toBe('last');
+		expect((fetch.mock.calls[1] as unknown as [string])[0]).toBe(
+			'https://notes.example.com/api/tags?limit=100&offset=100',
+		);
 	});
 
 	it('creates a tag and attaches a tag to a note', async () => {

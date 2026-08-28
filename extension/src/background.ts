@@ -3,6 +3,7 @@ import {
 	MENU_CLIP_SELECTION,
 	MENU_CLIP_IMAGE,
 	clipPayloadFromClick,
+	escapeHTML,
 } from './core/clipPayload';
 
 ext.runtime.onInstalled.addListener(() => {
@@ -42,7 +43,7 @@ ext.contextMenus.onClicked.addListener((info, tab) => {
 				});
 				selectionHTML = (results[0]?.result as string) ?? '';
 			} catch {
-				selectionHTML = info.selectionText ?? '';
+				selectionHTML = escapeHTML(info.selectionText ?? '');
 			}
 		} else if (info.menuItemId !== MENU_CLIP_IMAGE) {
 			return;

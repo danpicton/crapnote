@@ -86,6 +86,42 @@ describe('popup in link mode', () => {
 		save.mockRestore();
 	});
 
+	it('suggests completions that keep the tags already entered', async () => {
+		const d = deps({
+			client: clientStub([
+				{ id: 1, name: 'Links' },
+				{ id: 3, name: 'Webclip' },
+			]),
+		});
+		await initPopup(document, d);
+
+		const tags = el<HTMLInputElement>('tags');
+		tags.value = 'Links, We';
+		tags.dispatchEvent(new Event('input'));
+
+		const options = Array.from(document.querySelectorAll('#tag-options option')).map((o) =>
+			o.getAttribute('value'),
+		);
+		expect(options).toEqual(['Links, Webclip']);
+	});
+
+	it('retries without creating a duplicate note when a step after creation fails', async () => {
+		const d = deps();
+		(d.client.attachTag as ReturnType<typeof vi.fn>)
+			.mockRejectedValueOnce(new Error('attach failed'))
+			.mockResolvedValue(undefined);
+		await initPopup(document, d);
+
+		const form = el<HTMLFormElement>('save-form');
+		form.dispatchEvent(new Event('submit'));
+		await vi.waitFor(() => expect(el('status').textContent).toContain('attach failed'));
+
+		form.dispatchEvent(new Event('submit'));
+		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
+
+		expect(d.client.createNote).toHaveBeenCalledTimes(1);
+	});
+
 	it('disables saving and points at options when unconfigured', async () => {
 		const d = deps({ settings: { ...DEFAULT_SETTINGS } });
 		await initPopup(document, d);

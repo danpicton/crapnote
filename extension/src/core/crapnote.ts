@@ -28,8 +28,18 @@ export class CrapNoteClient {
 		return this.request('POST', '/api/notes', { title, body });
 	}
 
+	// The server caps list pages at 100 items, so page until a short page.
 	async listTags(): Promise<Tag[]> {
-		return this.request('GET', '/api/tags');
+		const pageSize = 100;
+		const all: Tag[] = [];
+		for (let offset = 0; ; offset += pageSize) {
+			const page: Tag[] = await this.request(
+				'GET',
+				`/api/tags?limit=${pageSize}&offset=${offset}`,
+			);
+			all.push(...page);
+			if (page.length < pageSize) return all;
+		}
 	}
 
 	async createTag(name: string): Promise<Tag> {

@@ -1,6 +1,16 @@
 export const MENU_CLIP_SELECTION = 'crapnote-clip-selection';
 export const MENU_CLIP_IMAGE = 'crapnote-clip-image';
 
+// For plain text that will travel through the HTML clip pipeline (e.g. the
+// selectionText fallback when script injection fails).
+export function escapeHTML(text: string): string {
+	return text
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;');
+}
+
 export interface ClipPayload {
 	url: string;
 	title: string;

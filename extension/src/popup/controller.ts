@@ -1,4 +1,4 @@
-import type { CrapNoteClient } from '../core/crapnote';
+import type { CrapNoteClient, Note } from '../core/crapnote';
 import type { Settings } from '../core/settings';
 import type { Destination } from '../core/destinations';
 import { buildLinkNote, buildClipNote } from '../core/note';
@@ -64,15 +64,39 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 		return;
 	}
 
+	// Datalist suggestions replace the whole input value when picked, so
+	// each option carries the already-entered tags as a prefix — picking a
+	// suggestion completes the current fragment instead of wiping the rest.
 	const datalist = el<HTMLDataListElement>('tag-options');
+	const tagsInput = el<HTMLInputElement>('tags');
+	let knownTags: string[] = [];
+
+	function refreshTagOptions(): void {
+		const value = tagsInput.value;
+		const lastComma = value.lastIndexOf(',');
+		const prefix = lastComma === -1 ? '' : value.slice(0, lastComma + 1).replace(/\s*$/, ' ');
+		const fragment = value.slice(lastComma + 1).trim().toLowerCase();
+		const chosen = new Set(
+			parseTagInput(lastComma === -1 ? '' : value.slice(0, lastComma)).map((t) =>
+				t.toLowerCase(),
+			),
+		);
+		datalist.replaceChildren();
+		for (const name of knownTags) {
+			const lower = name.toLowerCase();
+			if (chosen.has(lower) || !lower.startsWith(fragment)) continue;
+			const option = doc.createElement('option');
+			option.setAttribute('value', `${prefix}${name}`);
+			datalist.appendChild(option);
+		}
+	}
+
+	tagsInput.addEventListener('input', refreshTagOptions);
 	client
 		.listTags()
 		.then((tags) => {
-			for (const tag of tags) {
-				const option = doc.createElement('option');
-				option.setAttribute('value', tag.name);
-				datalist.appendChild(option);
-			}
+			knownTags = tags.map((t) => t.name);
+			refreshTagOptions();
 		})
 		.catch(() => {
 			/* autocomplete is best-effort; saving still works without it */
@@ -82,6 +106,12 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 		e.preventDefault();
 		void save();
 	});
+
+	// Carried across failed attempts so a retry never duplicates work: the
+	// note from a partially-successful save is reused, and destinations
+	// that already accepted the page aren't sent it again.
+	let createdNote: Note | undefined;
+	const savedDestinations = new Set<string>();
 
 	async function save(): Promise<void> {
 		const status = el('status');
@@ -96,13 +126,16 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 					? buildClipNote({ title, url: context.url, content })
 					: buildLinkNote({ title, url: context.url, description: content });
 			const tagNames = parseTagInput(el<HTMLInputElement>('tags').value);
-			await saveNote(client, draft, tagNames);
+			createdNote = await saveNote(client, draft, tagNames, createdNote, (note) => {
+				createdNote = note;
+			});
 			for (const dest of destinations) {
-				if (destinationChecks.get(dest.id)?.checked) {
+				if (destinationChecks.get(dest.id)?.checked && !savedDestinations.has(dest.id)) {
 					await dest.save(
 						{ url: context.url, title: draft.title, labels: tagNames },
 						settings,
 					);
+					savedDestinations.add(dest.id);
 				}
 			}
 			deps.close();
