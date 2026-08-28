@@ -1,0 +1,22 @@
+{
+	"name": "crapnote-extension",
+	"private": true,
+	"version": "0.1.0",
+	"description": "CrapNote browser extension (Chrome/Brave + Firefox)",
+	"type": "module",
+	"scripts": {
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"check": "tsc --noEmit",
+		"build": "node build.mjs",
+		"build:chrome": "node build.mjs chrome",
+		"build:firefox": "node build.mjs firefox"
+	},
+	"devDependencies": {
+		"@types/chrome": "^0.0.280",
+		"esbuild": "^0.24.0",
+		"happy-dom": "^15.11.0",
+		"typescript": "^5.6.0",
+		"vitest": "^2.1.0"
+	}
+}
