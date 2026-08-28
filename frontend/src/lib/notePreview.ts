@@ -78,6 +78,35 @@ function isTableDelimiter(line: string | undefined): boolean {
 	return trimmed.includes('|') && trimmed.includes('-') && /^[\s|:-]+$/.test(trimmed);
 }
 
+function countPipes(line: string): number {
+	return (line.match(/\|/g) ?? []).length;
+}
+
+/**
+ * A body row of a table already under way. Rows written with outer pipes are
+ * unmistakable; without them, only a line carrying the same number of cell
+ * separators as the separator row counts. So a sentence that merely happens
+ * to contain a pipe ends the table instead of disappearing into it.
+ */
+function isTableRow(line: string | undefined, cells: number): boolean {
+	if (line === undefined) return false;
+	const trimmed = line.trim();
+	if (!trimmed.includes('|')) return false;
+	return trimmed.startsWith('|') || countPipes(trimmed) === cells;
+}
+
+/**
+ * An image in a paragraph gets a line of its own so the placeholder does not
+ * run into the prose that follows it. Inside a list item or a heading it stays
+ * put — one item is one preview line.
+ */
+function paragraphLines(text: string): string[] {
+	const parts = text.split(IMAGE_PLACEHOLDER);
+	const lines = parts.slice(0, -1).map((part) => `${part}${IMAGE_PLACEHOLDER}`.trim());
+	lines.push(parts[parts.length - 1].trim());
+	return lines.filter(Boolean);
+}
+
 /** Renders a list item, which may in turn be a task item. */
 function listItem(marker: string, content: string): string {
 	const task = TASK.exec(content);
@@ -101,8 +130,9 @@ function toPreviewLines(source: string): PreviewLine[] {
 
 		// Header row, separator, and every body row collapse to one placeholder.
 		if (line.includes('|') && isTableDelimiter(raw[index + 1])) {
+			const cells = countPipes(raw[index + 1].trim());
 			index++;
-			while (raw[index + 1]?.includes('|')) index++;
+			while (isTableRow(raw[index + 1], cells)) index++;
 			lines.push({ text: TABLE_PLACEHOLDER });
 			continue;
 		}
@@ -126,7 +156,7 @@ function toPreviewLines(source: string): PreviewLine[] {
 			continue;
 		}
 
-		lines.push({ text: line });
+		for (const text of paragraphLines(line)) lines.push({ text });
 	}
 
 	return lines;
@@ -148,8 +178,10 @@ export function notePreviewSegments(body: string): PreviewSegment[] {
 		.replace(/\uE000/g, '')
 		// HTML line breaks → newline
 		.replace(/<br\s*\/?>/gi, '\n')
-		// Images → placeholder
-		.replace(/!\[[^\]]*\]\([^)]*\)/g, `${IMAGE_PLACEHOLDER}\n`)
+		// Images → placeholder. The line break an image earns in a paragraph is
+		// added later, once the block it sits in is known — inside a list item
+		// it must not split the item away from its own bullet.
+		.replace(/!\[[^\]]*\]\([^)]*\)/g, IMAGE_PLACEHOLDER)
 		// Links of every flavour → parked, so markdown stripping can't mangle
 		// urls that contain `_`, `*` or other markup characters.
 		.replace(MARKDOWN_LINK, (_match, label: string) => park(stripInline(label)))

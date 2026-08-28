@@ -148,6 +148,29 @@ describe('notePreviewSegments', () => {
 		expect(notePreview('run a | b to pipe it')).toBe('run a | b to pipe it');
 	});
 
+	it('ends a table at a sentence that merely contains a pipe', () => {
+		const body = '| a | b |\n|---|---|\n| 1 | 2 |\nCost is $5 | $10, thanks\nSee you later';
+		expect(notePreview(body)).toBe('<table content>\nCost is $5 | $10, thanks\nSee you later');
+	});
+
+	it('keeps consuming rows of a table written without outer pipes', () => {
+		expect(notePreview('a | b\n--- | ---\n1 | 2\n3 | 4\nafter')).toBe(
+			'<table content>\nafter',
+		);
+	});
+
+	it('keeps an image inside a list item on the item line', () => {
+		expect(notePreview('- ![](/img.png) caption\n- second item')).toBe(
+			'\u2022 <image content> caption\n\u2022 second item',
+		);
+	});
+
+	it('keeps an image inside a heading on the heading line', () => {
+		expect(notePreviewSegments('# ![](/img.png) title')).toEqual([
+			{ text: '<image content> title', bold: true },
+		]);
+	});
+
 	it('strips markdown inside a list item', () => {
 		expect(notePreviewSegments('- see [the docs](https://example.com) **now**')).toEqual([
 			{ text: '\u2022 see ' },
