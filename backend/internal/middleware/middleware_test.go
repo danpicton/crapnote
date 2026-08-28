@@ -3,9 +3,10 @@ package middleware_test
 import (
 	"bytes"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -179,23 +180,75 @@ func csp(t *testing.T, path string) string {
 	return w.Header().Get("Content-Security-Policy")
 }
 
-func TestSecurityHeaders_SetsContentSecurityPolicy(t *testing.T) {
-	policy := csp(t, "/")
+// parseCSP splits a Content-Security-Policy header into directive → sources.
+// Assertions built on the parsed form see a directive's entire source list, so a
+// loosening such as "connect-src 'self' https://evil.example" cannot slip past
+// the way it slips past a strings.Contains check for "connect-src 'self'".
+func parseCSP(t *testing.T, policy string) map[string][]string {
+	t.Helper()
 	if policy == "" {
 		t.Fatal("Content-Security-Policy header is not set")
 	}
+	parsed := make(map[string][]string)
+	for _, part := range strings.Split(policy, ";") {
+		fields := strings.Fields(part)
+		if len(fields) == 0 {
+			continue
+		}
+		name := strings.ToLower(fields[0])
+		if _, dup := parsed[name]; dup {
+			t.Errorf("directive %q is listed twice; browsers honour only the first\npolicy: %s", name, policy)
+		}
+		parsed[name] = fields[1:]
+	}
+	return parsed
+}
 
-	// The baseline from issue #45. Every one of these must survive any future
-	// loosening of the policy for the SvelteKit build.
-	for _, directive := range []string{
-		"default-src 'self'",
-		"img-src 'self' data: blob:",
-		"object-src 'none'",
-		"base-uri 'none'",
-		"frame-ancestors 'none'",
-	} {
-		if !strings.Contains(policy, directive) {
-			t.Errorf("policy missing %q\ngot: %s", directive, policy)
+func sortedSources(in []string) []string {
+	out := slices.Clone(in)
+	slices.Sort(out)
+	return out
+}
+
+// wantCSPDirectives is the policy the server is expected to send, directive by
+// directive and source by source. It covers the issue #45 baseline
+// (default-src 'self', object-src/base-uri/frame-ancestors 'none') plus the
+// additions this service needs. img-src widens the baseline with https:
+// deliberately — see the reasoning on contentSecurityPolicy.
+//
+// The comparison is exact, not substring: adding any source to any directive
+// fails here and has to be argued for in review.
+var wantCSPDirectives = map[string][]string{
+	"default-src":     {"'self'"},
+	"script-src":      {"'self'", "'unsafe-inline'"},
+	"style-src":       {"'self'", "'unsafe-inline'", "https://fonts.googleapis.com"},
+	"font-src":        {"'self'", "https://fonts.gstatic.com"},
+	"img-src":         {"'self'", "data:", "blob:", "https:"},
+	"connect-src":     {"'self'"},
+	"object-src":      {"'none'"},
+	"base-uri":        {"'none'"},
+	"frame-ancestors": {"'none'"},
+	"form-action":     {"'self'"},
+}
+
+func TestSecurityHeaders_SetsContentSecurityPolicy(t *testing.T) {
+	policy := csp(t, "/")
+	got := parseCSP(t, policy)
+
+	for _, name := range slices.Sorted(maps.Keys(wantCSPDirectives)) {
+		sources, ok := got[name]
+		if !ok {
+			t.Errorf("policy is missing directive %q\ngot: %s", name, policy)
+			continue
+		}
+		if !slices.Equal(sortedSources(sources), sortedSources(wantCSPDirectives[name])) {
+			t.Errorf("directive %s: want sources %v, got %v\npolicy: %s",
+				name, wantCSPDirectives[name], sources, policy)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(got)) {
+		if _, expected := wantCSPDirectives[name]; !expected {
+			t.Errorf("unexpected directive %q in policy\ngot: %s", name, policy)
 		}
 	}
 }
@@ -210,66 +263,83 @@ func TestSecurityHeaders_CSPFrameAncestorsAgreesWithXFrameOptions(t *testing.T) 
 	if got := w.Header().Get("X-Frame-Options"); got != "DENY" {
 		t.Fatalf("X-Frame-Options: want DENY, got %q", got)
 	}
-	if policy := w.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "frame-ancestors 'none'") {
-		t.Errorf("X-Frame-Options is DENY but CSP lacks frame-ancestors 'none'\ngot: %s", policy)
+	policy := parseCSP(t, w.Header().Get("Content-Security-Policy"))
+	if sources := policy["frame-ancestors"]; !slices.Equal(sources, []string{"'none'"}) {
+		t.Errorf("X-Frame-Options is DENY but frame-ancestors is %v, not exactly 'none'", sources)
 	}
 }
 
 func TestSecurityHeaders_CSPNeverAllowsUnsafeEval(t *testing.T) {
 	// No part of the SvelteKit or Milkdown bundle needs eval(). If this ever
 	// starts failing, find out what pulled eval in rather than relaxing it.
-	if policy := csp(t, "/"); strings.Contains(policy, "unsafe-eval") {
-		t.Errorf("policy must never permit 'unsafe-eval'\ngot: %s", policy)
+	got := parseCSP(t, csp(t, "/"))
+	for _, directive := range slices.Sorted(maps.Keys(got)) {
+		for _, src := range got[directive] {
+			if strings.Contains(src, "unsafe-eval") {
+				t.Errorf("directive %s must never permit %s", directive, src)
+			}
+		}
 	}
 }
 
-func TestSecurityHeaders_CSPPinsExfiltrationChannelsToSelf(t *testing.T) {
-	policy := csp(t, "/")
+func TestSecurityHeaders_CSPPinsRequestChannelsToSelf(t *testing.T) {
+	got := parseCSP(t, csp(t, "/"))
 
 	// script-src carries 'unsafe-inline' (SvelteKit emits an inline bootstrap
-	// whose hash changes every build), so these directives are what actually
-	// stops injected script phoning data home. They must stay first-party.
-	for _, directive := range []string{
-		"connect-src 'self'",
-		"form-action 'self'",
-	} {
-		if !strings.Contains(policy, directive) {
-			t.Errorf("policy missing %q\ngot: %s", directive, policy)
+	// whose hash changes every build), so these two directives are what closes
+	// the scripted-request and form-submission channels. They must be exactly
+	// 'self' — one appended origin reopens the channel, which is why this is an
+	// equality check and not a substring one. This is not a complete
+	// exfiltration barrier: CSP cannot restrain top-level navigation. See the
+	// reasoning on contentSecurityPolicy.
+	for _, directive := range []string{"connect-src", "form-action"} {
+		if sources := got[directive]; !slices.Equal(sources, []string{"'self'"}) {
+			t.Errorf("%s must be exactly ['self'], got %v", directive, sources)
 		}
 	}
 }
 
 func TestSecurityHeaders_CSPConfinesUnsafeInlineToScriptAndStyle(t *testing.T) {
-	policy := csp(t, "/")
+	got := parseCSP(t, csp(t, "/"))
 
 	// 'unsafe-inline' is granted only where the SvelteKit build forces it (see
-	// the reasoning on contentSecurityPolicy). Count the grants so a future
-	// edit cannot quietly spread it to another directive.
-	if got := strings.Count(policy, "'unsafe-inline'"); got != 2 {
-		t.Errorf("expected exactly 2 'unsafe-inline' grants (script-src, style-src), got %d\npolicy: %s", got, policy)
-	}
-	for _, directive := range []string{
-		"script-src 'self' 'unsafe-inline'",
-		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-	} {
-		if !strings.Contains(policy, directive) {
-			t.Errorf("policy missing %q\ngot: %s", directive, policy)
+	// the reasoning on contentSecurityPolicy); a future edit must not quietly
+	// spread it to another directive.
+	forced := map[string]bool{"script-src": true, "style-src": true}
+	for _, directive := range slices.Sorted(maps.Keys(got)) {
+		if slices.Contains(got[directive], "'unsafe-inline'") && !forced[directive] {
+			t.Errorf("'unsafe-inline' granted to %s; only script-src and style-src may carry it", directive)
 		}
 	}
 }
 
-func TestSecurityHeaders_CSPAllowsOnlyGoogleFontsOffSite(t *testing.T) {
-	policy := csp(t, "/")
+func TestSecurityHeaders_CSPAllowsOnlyDeclaredOffSiteSources(t *testing.T) {
+	got := parseCSP(t, csp(t, "/"))
 
-	// app.html pulls its webfonts from Google at runtime; nothing else may be
-	// loaded off-origin. Any other https: origin appearing here is a mistake.
-	allowed := map[string]bool{
-		"https://fonts.googleapis.com": true,
-		"https://fonts.gstatic.com":    true,
+	// Sources that cannot reach another origin at all.
+	firstParty := map[string]bool{
+		"'self'": true, "'none'": true, "'unsafe-inline'": true,
+		"data:": true, "blob:": true,
 	}
-	for _, origin := range regexp.MustCompile(`https?://[^\s;]+`).FindAllString(policy, -1) {
-		if !allowed[origin] {
-			t.Errorf("unexpected off-site origin %q in policy\ngot: %s", origin, policy)
+	// Every deliberate off-site grant, named per directive. Anything else — a
+	// new host, a wildcard, or a bare scheme in a directive that should not
+	// have one — fails. This replaces a regexp scan for `https?://…`, which
+	// matched none of the loosenings actually worth catching: a bare "https:",
+	// a "*", and a schemeless "*.cdn.example" all passed it silently.
+	offSite := map[string]map[string]bool{
+		"style-src": {"https://fonts.googleapis.com": true}, // webfont stylesheets
+		"font-src":  {"https://fonts.gstatic.com": true},    // webfont files
+		"img-src":   {"https:": true},                       // remote images in notes; images cannot execute script
+	}
+	for _, directive := range slices.Sorted(maps.Keys(got)) {
+		for _, src := range got[directive] {
+			switch {
+			case firstParty[src]:
+			case strings.Contains(src, "*"):
+				t.Errorf("wildcard source %q in %s: the policy must name every off-site origin", src, directive)
+			case !offSite[directive][src]:
+				t.Errorf("undeclared off-site source %q in %s\npolicy: %s", src, directive, csp(t, "/"))
+			}
 		}
 	}
 }

