@@ -31,4 +31,17 @@ describe('buildClipNote', () => {
 			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nSome clipped text',
 		);
 	});
+
+	it('keeps the page title in the source link when the note title differs', () => {
+		const note = buildClipNote({
+			title: 'My renamed note',
+			url: 'https://example.com/a',
+			content: 'Text',
+			sourceTitle: 'Example Page',
+		});
+		expect(note.title).toBe('My renamed note');
+		expect(note.body).toBe(
+			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nText',
+		);
+	});
 });

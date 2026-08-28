@@ -177,6 +177,22 @@ describe('popup in clip mode', () => {
 		);
 	});
 
+	it('keeps the page title in the source link when the note title is edited', async () => {
+		const d = deps({
+			context: { mode: 'clip', url: 'https://example.com/a', title: 'Example Page', content: 'Words' },
+		});
+		await initPopup(document, d);
+
+		el<HTMLInputElement>('title').value = 'My own title';
+		el<HTMLFormElement>('save-form').dispatchEvent(new Event('submit'));
+		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
+
+		expect(d.client.createNote).toHaveBeenCalledWith(
+			'My own title',
+			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nWords',
+		);
+	});
+
 	it('saves the clip note with the source line above the content', async () => {
 		const d = deps({
 			context: { mode: 'clip', url: 'https://example.com/a', title: 'Example Page', content: 'Words' },

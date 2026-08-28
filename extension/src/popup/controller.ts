@@ -135,7 +135,7 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 			}
 			const draft =
 				context.mode === 'clip'
-					? buildClipNote({ title, url: context.url, content })
+					? buildClipNote({ title, url: context.url, content, sourceTitle: context.title })
 					: buildLinkNote({ title, url: context.url, description: content });
 			const tagNames = parseTagInput(el<HTMLInputElement>('tags').value);
 			createdNote = await saveNote(client, draft, tagNames, createdNote, (note) => {

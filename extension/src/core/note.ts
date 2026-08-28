@@ -14,9 +14,17 @@ export function buildLinkNote(input: { title: string; url: string; description: 
 	return { title, body: description ? `${link}${EMPTY_LINE}${description}` : link };
 }
 
-export function buildClipNote(input: { title: string; url: string; content: string }): NoteDraft {
+// The source link always names the page it was clipped from (sourceTitle),
+// independent of what the user renames the note to.
+export function buildClipNote(input: {
+	title: string;
+	url: string;
+	content: string;
+	sourceTitle?: string;
+}): NoteDraft {
 	const title = input.title.trim() || input.url;
 	const content = input.content.trim();
-	const source = `Clipped from [${title}](${input.url})`;
+	const linkText = input.sourceTitle?.trim() || title;
+	const source = `Clipped from [${linkText}](${input.url})`;
 	return { title, body: content ? `${source}${EMPTY_LINE}${content}` : source };
 }
