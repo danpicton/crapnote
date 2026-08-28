@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -165,6 +166,120 @@ func TestSecurityHeaders_PassesThroughResponse(t *testing.T) {
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/nope", nil))
 	if w.Code != http.StatusNotFound {
 		t.Errorf("expected 404 passthrough, got %d", w.Code)
+	}
+}
+
+// csp returns the Content-Security-Policy header set by SecurityHeaders for a
+// request to path.
+func csp(t *testing.T, path string) string {
+	t.Helper()
+	h := middleware.SecurityHeaders()(http.HandlerFunc(okHandler))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+	return w.Header().Get("Content-Security-Policy")
+}
+
+func TestSecurityHeaders_SetsContentSecurityPolicy(t *testing.T) {
+	policy := csp(t, "/")
+	if policy == "" {
+		t.Fatal("Content-Security-Policy header is not set")
+	}
+
+	// The baseline from issue #45. Every one of these must survive any future
+	// loosening of the policy for the SvelteKit build.
+	for _, directive := range []string{
+		"default-src 'self'",
+		"img-src 'self' data: blob:",
+		"object-src 'none'",
+		"base-uri 'none'",
+		"frame-ancestors 'none'",
+	} {
+		if !strings.Contains(policy, directive) {
+			t.Errorf("policy missing %q\ngot: %s", directive, policy)
+		}
+	}
+}
+
+func TestSecurityHeaders_CSPFrameAncestorsAgreesWithXFrameOptions(t *testing.T) {
+	h := middleware.SecurityHeaders()(http.HandlerFunc(okHandler))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	// frame-ancestors is the modern replacement for X-Frame-Options; the two
+	// must not drift apart or a proxy honouring only one gets a weaker answer.
+	if got := w.Header().Get("X-Frame-Options"); got != "DENY" {
+		t.Fatalf("X-Frame-Options: want DENY, got %q", got)
+	}
+	if policy := w.Header().Get("Content-Security-Policy"); !strings.Contains(policy, "frame-ancestors 'none'") {
+		t.Errorf("X-Frame-Options is DENY but CSP lacks frame-ancestors 'none'\ngot: %s", policy)
+	}
+}
+
+func TestSecurityHeaders_CSPNeverAllowsUnsafeEval(t *testing.T) {
+	// No part of the SvelteKit or Milkdown bundle needs eval(). If this ever
+	// starts failing, find out what pulled eval in rather than relaxing it.
+	if policy := csp(t, "/"); strings.Contains(policy, "unsafe-eval") {
+		t.Errorf("policy must never permit 'unsafe-eval'\ngot: %s", policy)
+	}
+}
+
+func TestSecurityHeaders_CSPPinsExfiltrationChannelsToSelf(t *testing.T) {
+	policy := csp(t, "/")
+
+	// script-src carries 'unsafe-inline' (SvelteKit emits an inline bootstrap
+	// whose hash changes every build), so these directives are what actually
+	// stops injected script phoning data home. They must stay first-party.
+	for _, directive := range []string{
+		"connect-src 'self'",
+		"form-action 'self'",
+	} {
+		if !strings.Contains(policy, directive) {
+			t.Errorf("policy missing %q\ngot: %s", directive, policy)
+		}
+	}
+}
+
+func TestSecurityHeaders_CSPConfinesUnsafeInlineToScriptAndStyle(t *testing.T) {
+	policy := csp(t, "/")
+
+	// 'unsafe-inline' is granted only where the SvelteKit build forces it (see
+	// the reasoning on contentSecurityPolicy). Count the grants so a future
+	// edit cannot quietly spread it to another directive.
+	if got := strings.Count(policy, "'unsafe-inline'"); got != 2 {
+		t.Errorf("expected exactly 2 'unsafe-inline' grants (script-src, style-src), got %d\npolicy: %s", got, policy)
+	}
+	for _, directive := range []string{
+		"script-src 'self' 'unsafe-inline'",
+		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+	} {
+		if !strings.Contains(policy, directive) {
+			t.Errorf("policy missing %q\ngot: %s", directive, policy)
+		}
+	}
+}
+
+func TestSecurityHeaders_CSPAllowsOnlyGoogleFontsOffSite(t *testing.T) {
+	policy := csp(t, "/")
+
+	// app.html pulls its webfonts from Google at runtime; nothing else may be
+	// loaded off-origin. Any other https: origin appearing here is a mistake.
+	allowed := map[string]bool{
+		"https://fonts.googleapis.com": true,
+		"https://fonts.gstatic.com":    true,
+	}
+	for _, origin := range regexp.MustCompile(`https?://[^\s;]+`).FindAllString(policy, -1) {
+		if !allowed[origin] {
+			t.Errorf("unexpected off-site origin %q in policy\ngot: %s", origin, policy)
+		}
+	}
+}
+
+func TestSecurityHeaders_CSPAppliesToAPIResponses(t *testing.T) {
+	// SecurityHeaders is mounted globally, so JSON responses carry the policy
+	// too. Harmless (a JSON body loads no subresources) and it keeps the
+	// middleware free of path-sniffing.
+	if policy := csp(t, "/api/notes"); policy == "" {
+		t.Error("expected the CSP header on API responses as well as the SPA")
 	}
 }
 

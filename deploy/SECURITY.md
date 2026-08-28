@@ -41,3 +41,21 @@ The following are enforced in code and do not need operator configuration:
   environment variables.
 - **Pagination** — all list endpoints enforce a maximum page size
   (issue #18). Max is 100 items per request.
+- **Content-Security-Policy** — sent on every response alongside the existing
+  `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy` headers
+  (issue #45). Hardcoded in `SecurityHeaders` (`internal/middleware`) because
+  it describes the SvelteKit bundle embedded in the same binary. It keeps
+  `connect-src`, `img-src` and `form-action` first-party (so injected script
+  cannot exfiltrate notes off-origin), sets `object-src`/`base-uri` to `none`,
+  and adds `frame-ancestors 'none'` to back up `X-Frame-Options`. `script-src`
+  and `style-src` carry `'unsafe-inline'` — SvelteKit's hydration bootstrap is
+  an inline script whose hash changes on every frontend build, so it cannot be
+  hash-pinned from the server side; see the comment on `contentSecurityPolicy`
+  for the full reasoning and the follow-up that would remove it. `'unsafe-eval'`
+  is never granted.
+
+  Only `https://fonts.googleapis.com` and `https://fonts.gstatic.com` are
+  allowed off-origin, for the webfonts `app.html` loads at runtime. **If you
+  deploy somewhere those hosts are unreachable** (air-gapped networks, or an
+  egress allowlist), the app still works — webfonts are progressive
+  enhancement and the themes fall back to system faces.
