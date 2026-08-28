@@ -36,6 +36,30 @@ func TestMetrics_NotServedOnPublicMux(t *testing.T) {
 	}
 }
 
+// ServeMux matches "/metrics" exactly, so the trailing-slash form is a
+// separate pattern: without its own registration it falls through to the SPA
+// catch-all and answers 200 text/html — the same "appears to succeed" outcome
+// the explicit 404 above exists to prevent.
+func TestMetrics_TrailingSlashNotServedOnPublicMux(t *testing.T) {
+	mux := newTestMux(t)
+
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodHead} {
+		req := httptest.NewRequest(method, "/metrics/", nil)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%s /metrics/ = %d, want 404", method, w.Code)
+		}
+		if ct := w.Header().Get("Content-Type"); strings.HasPrefix(ct, "text/html") {
+			t.Errorf("%s /metrics/ fell through to the SPA catch-all (Content-Type %q)", method, ct)
+		}
+		if strings.Contains(w.Body.String(), "go_goroutines") {
+			t.Errorf("%s /metrics/ leaked Prometheus exposition on the public mux", method)
+		}
+	}
+}
+
 // Default config (METRICS_ADDR unset) starts no metrics listener at all.
 func TestServeMetrics_DisabledByDefault(t *testing.T) {
 	srv, err := serveMetrics("", discardLogger())
