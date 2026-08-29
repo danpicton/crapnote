@@ -49,6 +49,9 @@ describe('clipPayloadFromClick', () => {
 
 		const doc = new DOMParser().parseFromString(payload.html, 'text/html');
 		expect(doc.body.querySelectorAll('*')).toHaveLength(1);
+		// Unescaped, the attribute closes early and the rest of the URL is
+		// reparsed as further attributes on the img.
+		expect(doc.body.querySelector('img')?.attributes).toHaveLength(1);
 		expect(doc.body.querySelector('img')?.getAttribute('src')).toBe(srcUrl);
 	});
 });

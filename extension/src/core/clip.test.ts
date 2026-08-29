@@ -50,6 +50,38 @@ describe('clipTextFromHTML', () => {
 	it('leaves a single-cell row without a leading separator', () => {
 		expect(clipTextFromHTML('<table><tr><td>Only</td></tr></table>')).toBe('Only');
 	});
+
+	it('separates cells inline when their content is wrapped in a block element', () => {
+		// The common real-world shape: every cell holds a <div> or <p>. The
+		// cell boundary has to absorb the block break, or the separator is
+		// stranded on a line of its own.
+		expect(
+			clipTextFromHTML(
+				'<table><tr><td><div>A</div></td><td><div>B</div></td></tr>' +
+					'<tr><td><p>C</p></td><td><p>D</p></td></tr></table>',
+			),
+		).toBe('A | B\n\nC | D');
+	});
+
+	it('separates a mix of inline and block cell content on one line', () => {
+		expect(
+			clipTextFromHTML('<table><tr><td>A</td><td><div>B</div></td></tr></table>'),
+		).toBe('A | B');
+	});
+
+	it('drops a separator left dangling by an empty cell', () => {
+		expect(clipTextFromHTML('<table><tr><td></td><td>B</td></tr></table>')).toBe('B');
+		expect(clipTextFromHTML('<table><tr><td>A</td><td></td></tr></table>')).toBe('A');
+		expect(clipTextFromHTML('<table><tr><td></td><td></td></tr></table>')).toBe('');
+	});
+
+	it('keeps preformatted cell content intact', () => {
+		expect(
+			clipTextFromHTML(
+				'<table><tr><td><pre>if x:\n    y()</pre></td><td>note</td></tr></table>',
+			),
+		).toBe('if x:\n    y() | note');
+	});
 });
 
 describe('imageSourcesFromHTML', () => {

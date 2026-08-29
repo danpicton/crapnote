@@ -81,6 +81,10 @@ function walk(
 	preformatted: boolean,
 	counter: { next: number; total: number },
 ): void {
+	// Cells emitted from this node — non-zero only while walking a row, so
+	// a non-cell child (TR also admits <script> and <template>) never reads
+	// as a preceding column.
+	let cells = 0;
 	for (const child of Array.from(node.childNodes)) {
 		if (child.nodeType === Node.TEXT_NODE) {
 			const text = child.textContent ?? '';
@@ -103,8 +107,22 @@ function walk(
 			parts.push(`${PRE_MARK}\n\n`);
 			continue;
 		}
-		if (CELL_TAGS.has(el.tagName) && el.previousElementSibling) {
-			parts.push(CELL_SEPARATOR);
+		if (CELL_TAGS.has(el.tagName)) {
+			// A cell is resolved on its own so the block breaks around its
+			// content (cells commonly wrap theirs in a <div> or <p>) are
+			// trimmed off before it joins the row — otherwise the separator
+			// is stranded on a line of its own. Only whitespace is trimmed,
+			// so PRE_MARK sentinels stay paired.
+			const cellParts: string[] = [];
+			walk(el, cellParts, preformatted, counter);
+			const cell = cellParts.join('').trim();
+			// An empty cell contributes no separator: a row must not open or
+			// close with one dangling.
+			if (!cell) continue;
+			if (cells > 0) parts.push(CELL_SEPARATOR);
+			parts.push(cell);
+			cells++;
+			continue;
 		}
 		const isBlock = BLOCK_TAGS.has(el.tagName);
 		if (isBlock) parts.push('\n\n');
