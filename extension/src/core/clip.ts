@@ -17,10 +17,17 @@ const BLOCK_TAGS = new Set([
 	'BLOCKQUOTE', 'PRE', 'TABLE', 'UL', 'OL', 'SECTION', 'ARTICLE', 'FIGURE',
 ]);
 
+const CELL_TAGS = new Set(['TD', 'TH']);
+
+// Cells are separated inline rather than by adding them to BLOCK_TAGS: a
+// block break would put every cell in its own paragraph and lose the row
+// structure that TR already carries.
+const CELL_SEPARATOR = ' | ';
+
 // Converts a captured selection's HTML into plain text for the clip content
 // box. Text comes through as-is; every image is masked (and only masked)
 // with the literal `<image content>` marker. Block elements become
-// paragraph breaks.
+// paragraph breaks; table cells are separated inline within their row.
 export function clipTextFromHTML(html: string): string {
 	const doc = new DOMParser().parseFromString(html, 'text/html');
 	const parts: string[] = [];
@@ -95,6 +102,9 @@ function walk(
 			walk(el, parts, true, counter);
 			parts.push(`${PRE_MARK}\n\n`);
 			continue;
+		}
+		if (CELL_TAGS.has(el.tagName) && el.previousElementSibling) {
+			parts.push(CELL_SEPARATOR);
 		}
 		const isBlock = BLOCK_TAGS.has(el.tagName);
 		if (isBlock) parts.push('\n\n');

@@ -29,6 +29,27 @@ describe('clipTextFromHTML', () => {
 	it('keeps paragraphs on separate lines', () => {
 		expect(clipTextFromHTML('<p>One</p><p>Two</p>')).toBe('One\n\nTwo');
 	});
+
+	it('separates table cells within a row while keeping rows on their own lines', () => {
+		expect(
+			clipTextFromHTML(
+				'<table><tr><td>A</td><td>B</td></tr><tr><td>C</td><td>D</td></tr></table>',
+			),
+		).toBe('A | B\n\nC | D');
+	});
+
+	it('separates header cells the same way as data cells', () => {
+		expect(
+			clipTextFromHTML(
+				'<table><thead><tr><th>H1</th><th>H2</th></tr></thead>' +
+					'<tbody><tr><td>1</td><td>2</td></tr></tbody></table>',
+			),
+		).toBe('H1 | H2\n\n1 | 2');
+	});
+
+	it('leaves a single-cell row without a leading separator', () => {
+		expect(clipTextFromHTML('<table><tr><td>Only</td></tr></table>')).toBe('Only');
+	});
 });
 
 describe('imageSourcesFromHTML', () => {
