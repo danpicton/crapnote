@@ -17,7 +17,12 @@ Both builds share the same TypeScript source; only the manifest differs
   In the popup, images show as a `<image content>` placeholder (numbered —
   `<image content 2>` — when the clip has more than one, so deleting a
   placeholder drops exactly that image); on save each placeholder becomes
-  the real image, uploaded to CrapNote's image store. Default tag `Webclip`.
+  the real image, uploaded to CrapNote's image store — four at a time, so a
+  large clip stays under the server's upload rate limit, retrying the images
+  it still refuses. Anything that can't be stored (an SVG, say, which the
+  image store won't accept) stays pointed at the original site and the popup
+  says how many, instead of closing as if all was well; saving again retries
+  the ones that could still succeed. Default tag `Webclip`.
   Clips open in the ordinary toolbar popup (`action.openPopup()`), falling
   back to a detached window only where that API is unavailable.
 - **Clip image** — right-click a single image → *Clip image to CrapNote*.

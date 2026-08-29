@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import html from './popup.html?raw';
 import { initPopup, type PopupDeps } from './controller';
 import { DEFAULT_SETTINGS } from '../core/settings';
-import type { CrapNoteClient, Tag } from '../core/crapnote';
+import { ApiError, type CrapNoteClient, type Tag } from '../core/crapnote';
 import { readeckDestination } from '../core/destinations';
 
 function clientStub(tags: Tag[] = [{ id: 1, name: 'Links' }]) {
@@ -217,6 +217,77 @@ describe('popup in clip mode', () => {
 		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
 
 		expect(d.client.uploadImage).toHaveBeenCalledTimes(1);
+	});
+
+	it('reports images it could not store instead of closing as if all was well', async () => {
+		const d = deps({
+			context: {
+				mode: 'clip',
+				url: 'https://example.com/a',
+				title: 'Example Page',
+				content: 'Logo: <image content>',
+				images: ['https://example.com/logo.svg'],
+			},
+		});
+		// The server accepts only jpeg/png/gif/webp, so an SVG is a 415.
+		(d.client.uploadImage as ReturnType<typeof vi.fn>).mockRejectedValue(
+			new ApiError(415, 'CrapNote API POST /api/images failed: 415'),
+		);
+		await initPopup(document, d);
+
+		el<HTMLFormElement>('save-form').dispatchEvent(new Event('submit'));
+		await vi.waitFor(() => expect(d.client.createNote).toHaveBeenCalled());
+
+		expect(el('status').textContent).toBe(
+			'Saved, but 1 of 1 images still link to the original site: ' +
+				'1 in a format CrapNote cannot store.',
+		);
+		expect(d.close).not.toHaveBeenCalled();
+		expect(el<HTMLButtonElement>('save').disabled).toBe(false);
+		// The note is still saved — with the image hot-linked.
+		expect(d.client.createNote).toHaveBeenCalledWith(
+			'Example Page',
+			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nLogo: ![](https://example.com/logo.svg)',
+		);
+	});
+
+	it('re-attempts a rate-limited image on the next save and repairs the note', async () => {
+		const d = deps({
+			context: {
+				mode: 'clip',
+				url: 'https://example.com/a',
+				title: 'Example Page',
+				content: 'Look: <image content>',
+				images: ['https://example.com/pic.jpg'],
+			},
+		});
+		const upload = d.client.uploadImage as ReturnType<typeof vi.fn>;
+		// Retry-After 0 keeps the in-attempt backoff instant; every attempt
+		// of the first save is refused, as with a drained token bucket.
+		let call = 0;
+		upload.mockImplementation(async () => {
+			if (++call <= 5) throw new ApiError(429, 'upload rate limit exceeded', 0);
+			return '/api/images/up-late';
+		});
+		await initPopup(document, d);
+
+		const form = el<HTMLFormElement>('save-form');
+		form.dispatchEvent(new Event('submit'));
+		await vi.waitFor(() =>
+			expect(el('status').textContent).toContain('still link to the original site'),
+		);
+		expect(el('status').textContent).toContain('Save again to retry them.');
+
+		form.dispatchEvent(new Event('submit'));
+		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
+
+		// The failure was never cached, so the retry uploaded it and the
+		// existing note was updated to point at the stored copy.
+		expect(d.client.updateNote).toHaveBeenCalledWith(
+			42,
+			'Example Page',
+			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nLook: ![](/api/images/up-late)',
+		);
 	});
 
 	it('saves the clip note with the source line above the content', async () => {

@@ -4,7 +4,7 @@ import type { Destination } from '../core/destinations';
 import { buildLinkNote, buildClipNote } from '../core/note';
 import { parseTagInput } from '../core/tags';
 import { saveNote } from '../core/save';
-import { inlineClipImages } from '../core/images';
+import { inlineClipImages, summarizeImageFailures, type ClipImageCache } from '../core/images';
 
 export interface PopupContext {
 	mode: 'link' | 'clip';
@@ -116,26 +116,41 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 	// that already accepted the page aren't sent it again.
 	let createdNote: Note | undefined;
 	const savedDestinations = new Set<string>();
-	const uploadedImages = new Map<string, string>();
+	const uploadedImages: ClipImageCache = new Map();
 
 	async function save(): Promise<void> {
 		const status = el('status');
 		const button = el<HTMLButtonElement>('save');
 		button.disabled = true;
 		status.textContent = 'Saving…';
+		let imageWarning = '';
 		try {
 			const title = el<HTMLInputElement>('title').value;
 			let content = el<HTMLTextAreaElement>('content').value;
 			if (context.mode === 'clip') {
 				// The <image content> masks are display-only; the saved note
 				// gets the real images.
-				content = await inlineClipImages(
+				const clip = await inlineClipImages(
 					content,
 					context.images ?? [],
-					{ fetchBlob: deps.fetchBlob, upload: (blob) => client.uploadImage(blob) },
+					{
+						fetchBlob: deps.fetchBlob,
+						upload: (blob) => client.uploadImage(blob),
+						onProgress: (done, total) => {
+							// Uploads can wait out the server's rate limit,
+							// so say what's happening rather than sit on
+							// "Saving…" for a minute.
+							if (total > 1) status.textContent = `Uploading images… ${done}/${total}`;
+						},
+					},
 					uploadedImages,
 				);
+				content = clip.content;
+				// Every image that couldn't be stored is hot-linked in the
+				// note; the user is told rather than the popup just closing.
+				if (clip.failures.length > 0) imageWarning = summarizeImageFailures(clip);
 			}
+			status.textContent = 'Saving…';
 			const draft =
 				context.mode === 'clip'
 					? buildClipNote({ title, url: context.url, content, sourceTitle: context.title })
@@ -156,6 +171,13 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 						savedDestinations.add(dest.id);
 					}
 				}
+			}
+			if (imageWarning) {
+				// The note is saved either way — leave the popup open so the
+				// warning is readable and a retry can repair the images.
+				status.textContent = imageWarning;
+				button.disabled = false;
+				return;
 			}
 			deps.close();
 		} catch (err) {

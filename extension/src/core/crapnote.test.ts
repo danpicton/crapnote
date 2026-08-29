@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { CrapNoteClient } from './crapnote';
+import { ApiError, CrapNoteClient } from './crapnote';
 
 function fetchStub(status: number, body: unknown) {
 	return vi.fn(async () => new Response(JSON.stringify(body), { status }));
@@ -94,6 +94,38 @@ describe('CrapNoteClient', () => {
 		expect(new Headers(init.headers).get('Authorization')).toBe('Bearer tok123');
 		expect(init.body).toBeInstanceOf(FormData);
 		expect((init.body as FormData).get('image')).toBeInstanceOf(Blob);
+	});
+
+	it('reports the upload status so callers can tell permanent failures apart', async () => {
+		const fetch = vi.fn(
+			async () => new Response(JSON.stringify({ error: 'not an image' }), { status: 415 }),
+		);
+		const client = new CrapNoteClient(config, fetch);
+
+		const err = await client
+			.uploadImage(new Blob(['<svg/>'], { type: 'image/svg+xml' }))
+			.catch((e: unknown) => e);
+
+		expect(err).toBeInstanceOf(ApiError);
+		expect((err as ApiError).status).toBe(415);
+	});
+
+	it('parses Retry-After on a rate-limited upload', async () => {
+		const fetch = vi.fn(
+			async () =>
+				new Response(JSON.stringify({ error: 'upload rate limit exceeded' }), {
+					status: 429,
+					headers: { 'Retry-After': '60' },
+				}),
+		);
+		const client = new CrapNoteClient(config, fetch);
+
+		const err = (await client
+			.uploadImage(new Blob(['bytes'], { type: 'image/png' }))
+			.catch((e: unknown) => e)) as ApiError;
+
+		expect(err.status).toBe(429);
+		expect(err.retryAfterMs).toBe(60_000);
 	});
 
 	it('throws a descriptive error on a non-2xx response', async () => {
