@@ -155,7 +155,7 @@ describe('popup in clip mode', () => {
 		expect(document.querySelector('#destination-rows input')).toBeNull();
 	});
 
-	it('substitutes masks with uploaded images on save', async () => {
+	it('saves the note with hot-links first, then folds in each stored image', async () => {
 		const d = deps({
 			context: {
 				mode: 'clip',
@@ -165,17 +165,111 @@ describe('popup in clip mode', () => {
 				images: ['https://example.com/pic.jpg'],
 			},
 		});
-		(d.client.uploadImage as ReturnType<typeof vi.fn>).mockResolvedValue('/api/images/up-9');
+		const order: string[] = [];
+		(d.client.createNote as ReturnType<typeof vi.fn>).mockImplementation(
+			async (title: string, body: string) => {
+				order.push('createNote');
+				return { id: 42, title, body };
+			},
+		);
+		(d.client.uploadImage as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+			order.push('uploadImage');
+			return '/api/images/up-9';
+		});
 		await initPopup(document, d);
 
 		el<HTMLFormElement>('save-form').dispatchEvent(new Event('submit'));
 		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
 
+		// The note exists before any image bytes are stored, so a popup
+		// destroyed mid-upload can never strand an image with nothing
+		// referencing it.
+		expect(order).toEqual(['createNote', 'uploadImage']);
 		expect(d.fetchBlob).toHaveBeenCalledWith('https://example.com/pic.jpg');
 		expect(d.client.createNote).toHaveBeenCalledWith(
 			'Example Page',
+			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nLook: ![](https://example.com/pic.jpg)',
+		);
+		expect(d.client.updateNote).toHaveBeenCalledWith(
+			42,
+			'Example Page',
 			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nLook: ![](/api/images/up-9)',
 		);
+	});
+
+	it('keeps an image that stored before a later one failed referenced by the note', async () => {
+		const d = deps({
+			context: {
+				mode: 'clip',
+				url: 'https://example.com/a',
+				title: 'Example Page',
+				content: 'One <image content 1> two <image content 2>',
+				images: ['https://example.com/a.png', 'https://example.com/logo.svg'],
+			},
+		});
+		const upload = d.client.uploadImage as ReturnType<typeof vi.fn>;
+		upload.mockImplementation(async (blob: Blob) => {
+			if (await blob.text() === 'svg') throw new ApiError(415, 'not an image');
+			return '/api/images/up-a';
+		});
+		(d.fetchBlob as ReturnType<typeof vi.fn>).mockImplementation(async (url: string) =>
+			url.endsWith('.svg') ? new Blob(['svg']) : new Blob(['png']),
+		);
+		await initPopup(document, d);
+
+		el<HTMLFormElement>('save-form').dispatchEvent(new Event('submit'));
+		await vi.waitFor(() =>
+			expect(el('status').textContent).toContain('still link to the original site'),
+		);
+
+		expect(d.client.updateNote).toHaveBeenLastCalledWith(
+			42,
+			'Example Page',
+			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\n' +
+				'One ![](/api/images/up-a) two ![](https://example.com/logo.svg)',
+		);
+	});
+
+	it('coalesces the note updates instead of writing once per image', async () => {
+		const images = Array.from({ length: 6 }, (_, i) => `https://example.com/${i}.png`);
+		const d = deps({
+			context: {
+				mode: 'clip',
+				url: 'https://example.com/a',
+				title: 'Example Page',
+				content: images.map((_, i) => `<image content ${i + 1}>`).join(' '),
+				images,
+			},
+		});
+		let n = 0;
+		(d.client.uploadImage as ReturnType<typeof vi.fn>).mockImplementation(
+			async () => `/api/images/up-${n++}`,
+		);
+		// Hold the first note update open until every image has landed, so
+		// all six completions arrive while a write is in flight.
+		let release = (): void => {};
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const updateNote = d.client.updateNote as ReturnType<typeof vi.fn>;
+		updateNote.mockImplementation(async (id: number, title: string, body: string) => {
+			if (updateNote.mock.calls.length === 1) await held;
+			return { id, title, body };
+		});
+		await initPopup(document, d);
+
+		el<HTMLFormElement>('save-form').dispatchEvent(new Event('submit'));
+		await vi.waitFor(() => expect(d.client.uploadImage).toHaveBeenCalledTimes(images.length));
+		release();
+		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
+
+		// The held write plus a single catch-up carrying everything that
+		// landed meanwhile — not one write per image.
+		expect(updateNote).toHaveBeenCalledTimes(2);
+		const finalBody = updateNote.mock.calls[1]?.[2] as string;
+		for (let i = 0; i < images.length; i++) {
+			expect(finalBody).toContain(`![](/api/images/up-${i})`);
+		}
 	});
 
 	it('keeps the page title in the source link when the note title is edited', async () => {

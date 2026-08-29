@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { inlineClipImages, summarizeImageFailures, type ClipImageCache } from './images';
+import {
+	inlineClipImages,
+	renderClipContent,
+	summarizeImageFailures,
+	type ClipImageCache,
+} from './images';
 import { ApiError } from './crapnote';
 
 describe('inlineClipImages', () => {
@@ -294,6 +299,20 @@ describe('inlineClipImages against the server rate limit', () => {
 		expect(clip.failures).toEqual([]);
 		expect(clip.content).not.toContain('https://x/');
 		expect(peak).toBeLessThanOrEqual(4);
+	});
+});
+
+describe('renderClipContent', () => {
+	it('embeds what is stored so far and hot-links the rest', () => {
+		const cache: ClipImageCache = new Map([['https://x/a.png', { url: '/api/images/up-a' }]]);
+
+		const body = renderClipContent(
+			'One <image content 1> two <image content 2>',
+			['https://x/a.png', 'https://x/b.png'],
+			cache,
+		);
+
+		expect(body).toBe('One ![](/api/images/up-a) two ![](https://x/b.png)');
 	});
 });
 

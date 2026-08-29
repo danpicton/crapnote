@@ -4,7 +4,12 @@ import type { Destination } from '../core/destinations';
 import { buildLinkNote, buildClipNote } from '../core/note';
 import { parseTagInput } from '../core/tags';
 import { saveNote } from '../core/save';
-import { inlineClipImages, summarizeImageFailures, type ClipImageCache } from '../core/images';
+import {
+	inlineClipImages,
+	renderClipContent,
+	summarizeImageFailures,
+	type ClipImageCache,
+} from '../core/images';
 
 export interface PopupContext {
 	mode: 'link' | 'clip';
@@ -127,13 +132,56 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 		let imageRetryable = false;
 		try {
 			const title = el<HTMLInputElement>('title').value;
-			let content = el<HTMLTextAreaElement>('content').value;
+			const body = el<HTMLTextAreaElement>('content').value;
+			const tagNames = parseTagInput(el<HTMLInputElement>('tags').value);
+			const sources = context.images ?? [];
+			// The note as it stands right now: masks replaced by whatever is
+			// already stored, the origin URL where nothing is yet.
+			const draftNow = () =>
+				context.mode === 'clip'
+					? buildClipNote({
+							title,
+							url: context.url,
+							content: renderClipContent(body, sources, uploadedImages),
+							sourceTitle: context.title,
+						})
+					: buildLinkNote({ title, url: context.url, description: body });
+
+			// Rewrites the note to match the images stored so far. Calls that
+			// arrive while one is in flight join it — the loop re-renders
+			// after every write, so it always ends on the current state
+			// without issuing an update per image.
+			let inflight: Promise<void> | undefined;
+			const syncNote = (): Promise<void> => {
+				if (inflight) return inflight;
+				inflight = (async () => {
+					for (let next = draftNow(); createdNote && next.body !== createdNote.body; ) {
+						createdNote = await client.updateNote(createdNote.id, next.title, next.body);
+						next = draftNow();
+					}
+				})().finally(() => {
+					inflight = undefined;
+				});
+				return inflight;
+			};
+
+			const draft = draftNow();
+			// Save the note before uploading a single image. A popup is
+			// destroyed the moment it loses focus and uploads can run for a
+			// minute or more against the rate limit, so anything stored has
+			// to be referenced by a real note from the start — otherwise it
+			// is stranded against the user's image quota with nothing
+			// pointing at it.
+			createdNote = await saveNote(client, draft, tagNames, createdNote, (note) => {
+				createdNote = note;
+			});
+
 			if (context.mode === 'clip') {
 				// The <image content> masks are display-only; the saved note
-				// gets the real images.
+				// gets the real images, folded in as each one lands.
 				const clip = await inlineClipImages(
-					content,
-					context.images ?? [],
+					body,
+					sources,
 					{
 						fetchBlob: deps.fetchBlob,
 						upload: (blob) => client.uploadImage(blob),
@@ -142,11 +190,15 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 							// so say what's happening rather than sit on
 							// "Saving…" for a minute.
 							if (total > 0) status.textContent = `Uploading images… ${done}/${total}`;
+							// Best-effort while uploads continue; the awaited
+							// sync below reports a write that really failed.
+							if (done > 0) void syncNote().catch(() => {});
 						},
 					},
 					uploadedImages,
 				);
-				content = clip.content;
+				if (inflight) await inflight;
+				await syncNote();
 				// Every image that couldn't be stored is hot-linked in the
 				// note; the user is told rather than the popup just closing.
 				if (clip.failures.length > 0) {
@@ -154,15 +206,7 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 					imageRetryable = clip.failures.some((f) => f.kind === 'transient');
 				}
 			}
-			status.textContent = 'Saving…';
-			const draft =
-				context.mode === 'clip'
-					? buildClipNote({ title, url: context.url, content, sourceTitle: context.title })
-					: buildLinkNote({ title, url: context.url, description: content });
-			const tagNames = parseTagInput(el<HTMLInputElement>('tags').value);
-			createdNote = await saveNote(client, draft, tagNames, createdNote, (note) => {
-				createdNote = note;
-			});
+
 			if (destinations.length > 0) {
 				// The default link tag only marks the note as a link inside
 				// CrapNote — at a destination everything is a link, so drop it.

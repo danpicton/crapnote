@@ -122,6 +122,43 @@ async function forEachWithLimit<T>(
 	await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
+// A mask maps to its source by index when numbered (so user edits can't
+// mispair them) and positionally otherwise.
+function sourceMapper(sources: string[]): (numbered: string | undefined) => string | undefined {
+	let positional = 0;
+	return (numbered) => sources[numbered !== undefined ? Number(numbered) - 1 : positional++];
+}
+
+// The distinct sources a body's masks actually point at.
+function referencedSources(content: string, sources: string[]): Set<string> {
+	const sourceAt = sourceMapper(sources);
+	const referenced = new Set<string>();
+	for (const match of content.matchAll(MASK_RE)) {
+		const source = sourceAt(match[1]);
+		if (source) referenced.add(source);
+	}
+	return referenced;
+}
+
+// Substitutes each mask with whatever the cache holds for its source right
+// now, hot-linking the original where nothing is stored yet. Pure, so the
+// caller can re-render the note body as uploads land rather than waiting
+// for the whole batch.
+export function renderClipContent(
+	content: string,
+	sources: string[],
+	cache: ClipImageCache,
+): string {
+	const sourceAt = sourceMapper(sources);
+	return content.replace(MASK_RE, (mask, numbered: string | undefined) => {
+		const source = sourceAt(numbered);
+		// No fetchable source (empty src, or the mask has no matching
+		// image) — leave the mask as-is.
+		if (!source) return mask;
+		return `![](${cache.get(source)?.url ?? source})`;
+	});
+}
+
 // The `<image content>` masks are display-only, for the clip popup. On
 // save, each mask is substituted with the real image: downloaded and
 // re-uploaded to CrapNote so the note is self-contained, falling back to
@@ -138,19 +175,9 @@ export async function inlineClipImages(
 	deps: ImageDeps,
 	cache: ClipImageCache = new Map(),
 ): Promise<InlinedClip> {
-	const sourceAt = (numbered: string | undefined, positional: number): string | undefined => {
-		const index = numbered !== undefined ? Number(numbered) - 1 : positional;
-		return sources[index];
-	};
-
 	// Resolve every referenced source concurrently before substituting;
 	// only the substitution needs mask order.
-	let positional = 0;
-	const referenced = new Set<string>();
-	for (const match of content.matchAll(MASK_RE)) {
-		const source = sourceAt(match[1], match[1] === undefined ? positional++ : 0);
-		if (source) referenced.add(source);
-	}
+	const referenced = referencedSources(content, sources);
 	const needed = Array.from(referenced).filter((source) => !cache.has(source));
 
 	const failures: ImageFailure[] = [];
@@ -171,16 +198,11 @@ export async function inlineClipImages(
 		if (cached?.failure) failures.push(cached.failure);
 	}
 
-	positional = 0;
-	const inlined = content.replace(MASK_RE, (mask, numbered: string | undefined) => {
-		const source = sourceAt(numbered, numbered === undefined ? positional++ : 0);
-		// No fetchable source (empty src, or the mask has no matching
-		// image) — leave the mask as-is.
-		if (!source) return mask;
-		return `![](${cache.get(source)?.url ?? source})`;
-	});
-
-	return { content: inlined, total: referenced.size, failures };
+	return {
+		content: renderClipContent(content, sources, cache),
+		total: referenced.size,
+		failures,
+	};
 }
 
 // One line for the popup: how many images ended up hot-linking, and
