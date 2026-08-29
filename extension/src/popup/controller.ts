@@ -147,23 +147,22 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 						})
 					: buildLinkNote({ title, url: context.url, description: body });
 
-			// Rewrites the note to match the images stored so far. Calls that
-			// arrive while one is in flight join it — the loop re-renders
-			// after every write, so it always ends on the current state
-			// without issuing an update per image.
-			let inflight: Promise<void> | undefined;
-			const syncNote = (): Promise<void> => {
-				if (inflight) return inflight;
-				inflight = (async () => {
-					for (let next = draftNow(); createdNote && next.body !== createdNote.body; ) {
-						createdNote = await client.updateNote(createdNote.id, next.title, next.body);
-						next = draftNow();
-					}
-				})().finally(() => {
-					inflight = undefined;
-				});
-				return inflight;
-			};
+			// Rewrites the note to match the images stored so far. Writes are
+			// serialised on a tail promise: each one renders when it runs, so
+			// it always writes current state, and one that finds nothing new
+			// is a no-op — which is what collapses a burst of completions
+			// into a single write. A failed write doesn't break the chain;
+			// the awaited sync after the uploads reports one that matters.
+			let tail: Promise<void> = Promise.resolve();
+			const syncNote = (): Promise<void> =>
+				(tail = tail
+					.catch(() => {})
+					.then(async () => {
+						const next = draftNow();
+						if (createdNote && next.body !== createdNote.body) {
+							createdNote = await client.updateNote(createdNote.id, next.title, next.body);
+						}
+					}));
 
 			const draft = draftNow();
 			// Save the note before uploading a single image. A popup is
@@ -197,7 +196,6 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 					},
 					uploadedImages,
 				);
-				if (inflight) await inflight;
 				await syncNote();
 				// Every image that couldn't be stored is hot-linked in the
 				// note; the user is told rather than the popup just closing.

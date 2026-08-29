@@ -230,6 +230,49 @@ describe('popup in clip mode', () => {
 		);
 	});
 
+	it('references a stored image while the remaining uploads are still running', async () => {
+		const d = deps({
+			context: {
+				mode: 'clip',
+				url: 'https://example.com/a',
+				title: 'Example Page',
+				content: 'One <image content 1> two <image content 2>',
+				images: ['https://example.com/a.png', 'https://example.com/b.png'],
+			},
+		});
+		// Hold the second upload open indefinitely: nothing about the end of
+		// the save can satisfy this test.
+		let releaseSecond = (): void => {};
+		const secondHeld = new Promise<void>((resolve) => {
+			releaseSecond = resolve;
+		});
+		let call = 0;
+		(d.client.uploadImage as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+			if (++call === 1) return '/api/images/up-a';
+			await secondHeld;
+			return '/api/images/up-b';
+		});
+		await initPopup(document, d);
+
+		el<HTMLFormElement>('save-form').dispatchEvent(new Event('submit'));
+
+		// While upload two is still in flight, the note already points at the
+		// stored copy of image one — that is what keeps an interrupted save
+		// from stranding it.
+		await vi.waitFor(() =>
+			expect(d.client.updateNote).toHaveBeenCalledWith(
+				42,
+				'Example Page',
+				'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\n' +
+					'One ![](/api/images/up-a) two ![](https://example.com/b.png)',
+			),
+		);
+		expect(d.close).not.toHaveBeenCalled();
+
+		releaseSecond();
+		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
+	});
+
 	it('coalesces the note updates instead of writing once per image', async () => {
 		const images = Array.from({ length: 6 }, (_, i) => `https://example.com/${i}.png`);
 		const d = deps({
@@ -330,11 +373,13 @@ describe('popup in clip mode', () => {
 		await initPopup(document, d);
 
 		el<HTMLFormElement>('save-form').dispatchEvent(new Event('submit'));
-		await vi.waitFor(() => expect(d.client.createNote).toHaveBeenCalled());
-
-		expect(el('status').textContent).toBe(
-			'Saved, but 1 of 1 images still link to the original site: ' +
-				'1 in a format CrapNote cannot store.',
+		// The note is created before the uploads start, so waiting on
+		// createNote would race the upload it is meant to outlast.
+		await vi.waitFor(() =>
+			expect(el('status').textContent).toBe(
+				'Saved, but 1 of 1 images still link to the original site: ' +
+					'1 in a format CrapNote cannot store.',
+			),
 		);
 		expect(d.close).not.toHaveBeenCalled();
 		// Nothing retryable failed, so saving again would only redo the whole
