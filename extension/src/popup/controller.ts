@@ -4,7 +4,12 @@ import type { Destination } from '../core/destinations';
 import { buildLinkNote, buildClipNote } from '../core/note';
 import { parseTagInput } from '../core/tags';
 import { saveNote } from '../core/save';
-import { inlineClipImages } from '../core/images';
+import {
+	inlineClipImages,
+	renderClipContent,
+	summarizeImageFailures,
+	type ClipImageCache,
+} from '../core/images';
 
 export interface PopupContext {
 	mode: 'link' | 'clip';
@@ -116,34 +121,90 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 	// that already accepted the page aren't sent it again.
 	let createdNote: Note | undefined;
 	const savedDestinations = new Set<string>();
-	const uploadedImages = new Map<string, string>();
+	const uploadedImages: ClipImageCache = new Map();
 
 	async function save(): Promise<void> {
 		const status = el('status');
 		const button = el<HTMLButtonElement>('save');
 		button.disabled = true;
 		status.textContent = 'Saving…';
+		let imageWarning = '';
+		let imageRetryable = false;
 		try {
 			const title = el<HTMLInputElement>('title').value;
-			let content = el<HTMLTextAreaElement>('content').value;
-			if (context.mode === 'clip') {
-				// The <image content> masks are display-only; the saved note
-				// gets the real images.
-				content = await inlineClipImages(
-					content,
-					context.images ?? [],
-					{ fetchBlob: deps.fetchBlob, upload: (blob) => client.uploadImage(blob) },
-					uploadedImages,
-				);
-			}
-			const draft =
-				context.mode === 'clip'
-					? buildClipNote({ title, url: context.url, content, sourceTitle: context.title })
-					: buildLinkNote({ title, url: context.url, description: content });
+			const body = el<HTMLTextAreaElement>('content').value;
 			const tagNames = parseTagInput(el<HTMLInputElement>('tags').value);
+			const sources = context.images ?? [];
+			// The note as it stands right now: masks replaced by whatever is
+			// already stored, the origin URL where nothing is yet.
+			const draftNow = () =>
+				context.mode === 'clip'
+					? buildClipNote({
+							title,
+							url: context.url,
+							content: renderClipContent(body, sources, uploadedImages),
+							sourceTitle: context.title,
+						})
+					: buildLinkNote({ title, url: context.url, description: body });
+
+			// Rewrites the note to match the images stored so far. Writes are
+			// serialised on a tail promise: each one renders when it runs, so
+			// it always writes current state, and one that finds nothing new
+			// is a no-op — which is what collapses a burst of completions
+			// into a single write. A failed write doesn't break the chain;
+			// the awaited sync after the uploads reports one that matters.
+			let tail: Promise<void> = Promise.resolve();
+			const syncNote = (): Promise<void> =>
+				(tail = tail
+					.catch(() => {})
+					.then(async () => {
+						const next = draftNow();
+						if (createdNote && next.body !== createdNote.body) {
+							createdNote = await client.updateNote(createdNote.id, next.title, next.body);
+						}
+					}));
+
+			const draft = draftNow();
+			// Save the note before uploading a single image. A popup is
+			// destroyed the moment it loses focus and uploads can run for a
+			// minute or more against the rate limit, so anything stored has
+			// to be referenced by a real note from the start — otherwise it
+			// is stranded against the user's image quota with nothing
+			// pointing at it.
 			createdNote = await saveNote(client, draft, tagNames, createdNote, (note) => {
 				createdNote = note;
 			});
+
+			if (context.mode === 'clip') {
+				// The <image content> masks are display-only; the saved note
+				// gets the real images, folded in as each one lands.
+				const clip = await inlineClipImages(
+					body,
+					sources,
+					{
+						fetchBlob: deps.fetchBlob,
+						upload: (blob) => client.uploadImage(blob),
+						onProgress: (done, total) => {
+							// Uploads can wait out the server's rate limit,
+							// so say what's happening rather than sit on
+							// "Saving…" for a minute.
+							if (total > 0) status.textContent = `Uploading images… ${done}/${total}`;
+							// Best-effort while uploads continue; the awaited
+							// sync below reports a write that really failed.
+							if (done > 0) void syncNote().catch(() => {});
+						},
+					},
+					uploadedImages,
+				);
+				await syncNote();
+				// Every image that couldn't be stored is hot-linked in the
+				// note; the user is told rather than the popup just closing.
+				if (clip.failures.length > 0) {
+					imageWarning = summarizeImageFailures(clip);
+					imageRetryable = clip.failures.some((f) => f.kind === 'transient');
+				}
+			}
+
 			if (destinations.length > 0) {
 				// The default link tag only marks the note as a link inside
 				// CrapNote — at a destination everything is a link, so drop it.
@@ -156,6 +217,16 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 						savedDestinations.add(dest.id);
 					}
 				}
+			}
+			if (imageWarning) {
+				// The note is saved either way — leave the popup open so the
+				// warning is readable and a retry can repair the images.
+				// Saving again only helps while something retryable failed;
+				// with only permanent failures another click would re-run the
+				// whole save and still never close, so the button stays off.
+				status.textContent = imageWarning;
+				button.disabled = !imageRetryable;
+				return;
 			}
 			deps.close();
 		} catch (err) {

@@ -18,6 +18,31 @@ export interface Tag {
 
 export type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
+// Carries the HTTP status so callers can tell a transient failure (429, a
+// 5xx, a dropped connection) from a permanent one — a 415 for a format the
+// server will never accept, or a 507 once the user's image quota is full.
+export class ApiError extends Error {
+	constructor(
+		readonly status: number,
+		message: string,
+		// Parsed from Retry-After when the server sends one.
+		readonly retryAfterMs?: number,
+	) {
+		super(message);
+		this.name = 'ApiError';
+	}
+}
+
+// Retry-After is either a delay in seconds or an HTTP date.
+function retryAfterMs(res: Response): number | undefined {
+	const header = res.headers.get('Retry-After');
+	if (!header) return undefined;
+	const seconds = Number(header);
+	if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+	const date = Date.parse(header);
+	return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
+}
+
 export class CrapNoteClient {
 	constructor(
 		private config: CrapNoteConfig,
@@ -65,7 +90,11 @@ export class CrapNoteClient {
 			body: form,
 		});
 		if (!res.ok) {
-			throw new Error(`CrapNote API POST /api/images failed: ${res.status}`);
+			throw new ApiError(
+				res.status,
+				`CrapNote API POST /api/images failed: ${res.status}`,
+				retryAfterMs(res),
+			);
 		}
 		const { url } = (await res.json()) as { url: string };
 		return url;
@@ -81,7 +110,11 @@ export class CrapNoteClient {
 			...(body !== undefined ? { body: JSON.stringify(body) } : {}),
 		});
 		if (!res.ok) {
-			throw new Error(`CrapNote API ${method} ${path} failed: ${res.status}`);
+			throw new ApiError(
+				res.status,
+				`CrapNote API ${method} ${path} failed: ${res.status}`,
+				retryAfterMs(res),
+			);
 		}
 		if (res.status === 204) return undefined as T;
 		return (await res.json()) as T;
