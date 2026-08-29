@@ -2,8 +2,10 @@ export const MENU_CLIP_SELECTION = 'crapnote-clip-selection';
 export const MENU_CLIP_SELECTION_NO_IMAGES = 'crapnote-clip-selection-no-images';
 export const MENU_CLIP_IMAGE = 'crapnote-clip-image';
 
-// For plain text that will travel through the HTML clip pipeline (e.g. the
-// selectionText fallback when script injection fails).
+// For untrusted strings interpolated into the HTML clip pipeline: the
+// selectionText fallback when script injection fails, and the src of an
+// image clip (a data: URL keeps its quotes verbatim, so unescaped it would
+// terminate the attribute early and truncate the source).
 export function escapeHTML(text: string): string {
 	return text
 		.replace(/&/g, '&amp;')
@@ -40,7 +42,7 @@ export function clipPayloadFromClick(
 ): ClipPayload {
 	const html =
 		info.menuItemId === MENU_CLIP_IMAGE && info.srcUrl
-			? `<img src="${info.srcUrl}">`
+			? `<img src="${escapeHTML(info.srcUrl)}">`
 			: selectionHTML;
 	return {
 		url: tab.url ?? '',

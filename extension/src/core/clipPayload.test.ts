@@ -36,6 +36,21 @@ describe('clipPayloadFromClick', () => {
 		expect(payload.html).toBe('<img src="https://example.com/pic.jpg">');
 		expect(payload.url).toBe('https://example.com/a');
 	});
+
+	it('escapes a srcUrl containing quotes so the img survives parsing intact', () => {
+		// data: URLs have an opaque path, so the URL parser leaves quotes
+		// verbatim — unescaped they terminate the src attribute early.
+		const srcUrl =
+			'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg"></svg>';
+		const payload = clipPayloadFromClick(
+			{ menuItemId: 'crapnote-clip-image', srcUrl },
+			tab,
+		);
+
+		const doc = new DOMParser().parseFromString(payload.html, 'text/html');
+		expect(doc.body.querySelectorAll('*')).toHaveLength(1);
+		expect(doc.body.querySelector('img')?.getAttribute('src')).toBe(srcUrl);
+	});
 });
 
 describe('isFreshClip', () => {
