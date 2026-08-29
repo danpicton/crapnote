@@ -41,31 +41,34 @@ The following are enforced in code and do not need operator configuration:
   environment variables.
 - **Pagination** — all list endpoints enforce a maximum page size
   (issue #18). Max is 100 items per request.
-- **Content-Security-Policy** — sent on every response alongside the existing
-  `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy` headers
-  (issue #45). Hardcoded in `SecurityHeaders` (`internal/middleware`) because
-  it describes the SvelteKit bundle embedded in the same binary. It keeps
-  `connect-src` and `form-action` first-party — closing the scripted-request
-  and form-submission channels (fetch, XHR, WebSocket, `sendBeacon`,
-  auto-submitted forms) — sets `object-src`/`base-uri` to `none`, and adds
-  `frame-ancestors 'none'` to back up `X-Frame-Options`. `script-src`
-  and `style-src` carry `'unsafe-inline'` — SvelteKit's hydration bootstrap is
-  an inline script whose hash changes on every frontend build, so it cannot be
-  hash-pinned from the server side; see the comment on `contentSecurityPolicy`
-  for the full reasoning and the follow-up that would remove it. `'unsafe-eval'`
-  is never granted.
+- **Content-Security-Policy** — enforced as two halves (issues #45, #90), so
+  auditing the response headers alone will understate it. The **header**, set by
+  `SecurityHeaders` (`internal/middleware`) on every response alongside
+  `X-Content-Type-Options`, `X-Frame-Options` and `Referrer-Policy`, carries one
+  directive: `frame-ancestors 'none'`, backing up `X-Frame-Options`. Everything
+  else is baked into `index.html` by the frontend build as
+  `<meta http-equiv="content-security-policy">` — `default-src 'self'`,
+  `script-src` with the build's own hash for SvelteKit's inline bootstrap and no
+  `'unsafe-inline'`, `connect-src`/`form-action` first-party (closing the
+  scripted-request and form-submission channels: fetch, XHR, WebSocket,
+  `sendBeacon`, auto-submitted forms), and `object-src`/`base-uri` `none`.
+  `'unsafe-eval'` is never granted. Browsers enforce both halves at once and a
+  resource must satisfy each; nothing is duplicated between them. See
+  `docs/csp.md` — an operator or reverse proxy that adds resource directives of
+  its own will intersect with the built policy and can stop the app booting.
 
   **It is not an exfiltration barrier.** CSP has no directive covering
   top-level navigation (`navigate-to` was dropped from the spec and never
-  shipped), so while `'unsafe-inline'` remains in `script-src`, injected script
-  can still navigate the page to an attacker URL with data in the query string;
-  the allowlisted `https://fonts.googleapis.com` in `style-src` is a second,
-  narrower channel. `img-src` also permits any `https:` origin, because notes
-  legitimately contain remote images — markdown pasted from elsewhere, and the
-  browser extension's fallback of hot-linking an original URL when re-upload
-  fails — and images cannot execute script. Treat the policy as raising the
-  cost of a sanitisation gap, not as containment for an attacker already
-  running script.
+  shipped), so script that does execute can still navigate the page to an
+  attacker URL with data in the query string; the allowlisted
+  `https://fonts.googleapis.com` in `style-src` is a second, narrower channel.
+  `img-src` also permits any `https:` origin, because notes legitimately contain
+  remote images — markdown pasted from elsewhere, and the browser extension's
+  fallback of hot-linking an original URL when re-upload fails — and images
+  cannot execute script. `style-src` keeps `'unsafe-inline'`: ProseMirror writes
+  `style` attributes at runtime, and those cannot be hash-allowlisted without
+  `'unsafe-hashes'`. With `script-src` hashed, the policy's value is that
+  injected script does not run at all, not that it cannot phone home.
 
   Apart from images, the only named off-origin hosts are
   `https://fonts.googleapis.com` and `https://fonts.gstatic.com`, for the
