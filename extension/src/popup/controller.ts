@@ -124,6 +124,7 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 		button.disabled = true;
 		status.textContent = 'Saving…';
 		let imageWarning = '';
+		let imageRetryable = false;
 		try {
 			const title = el<HTMLInputElement>('title').value;
 			let content = el<HTMLTextAreaElement>('content').value;
@@ -140,7 +141,7 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 							// Uploads can wait out the server's rate limit,
 							// so say what's happening rather than sit on
 							// "Saving…" for a minute.
-							if (total > 1) status.textContent = `Uploading images… ${done}/${total}`;
+							if (total > 0) status.textContent = `Uploading images… ${done}/${total}`;
 						},
 					},
 					uploadedImages,
@@ -148,7 +149,10 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 				content = clip.content;
 				// Every image that couldn't be stored is hot-linked in the
 				// note; the user is told rather than the popup just closing.
-				if (clip.failures.length > 0) imageWarning = summarizeImageFailures(clip);
+				if (clip.failures.length > 0) {
+					imageWarning = summarizeImageFailures(clip);
+					imageRetryable = clip.failures.some((f) => f.kind === 'transient');
+				}
 			}
 			status.textContent = 'Saving…';
 			const draft =
@@ -175,8 +179,11 @@ export async function initPopup(doc: Document, deps: PopupDeps): Promise<void> {
 			if (imageWarning) {
 				// The note is saved either way — leave the popup open so the
 				// warning is readable and a retry can repair the images.
+				// Saving again only helps while something retryable failed;
+				// with only permanent failures another click would re-run the
+				// whole save and still never close, so the button stays off.
 				status.textContent = imageWarning;
-				button.disabled = false;
+				button.disabled = !imageRetryable;
 				return;
 			}
 			deps.close();

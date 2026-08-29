@@ -139,6 +139,44 @@ describe('inlineClipImages', () => {
 		expect(d.upload).toHaveBeenCalledTimes(1);
 	});
 
+	it('never retries a request the server refused outright, and caches it', async () => {
+		const d = deps();
+		// An oversized image: the handler's MaxBytesReader turns it into a
+		// 400, which no number of further uploads will change.
+		d.upload.mockRejectedValue(new ApiError(400, 'image too large or bad request'));
+		const cache: ClipImageCache = new Map();
+
+		const first = await inlineClipImages('<image content>', ['https://x/huge.png'], d, cache);
+
+		expect(first.content).toBe('![](https://x/huge.png)');
+		expect(first.failures[0]?.kind).toBe('rejected');
+		expect(d.upload).toHaveBeenCalledTimes(1);
+		expect(d.sleep).not.toHaveBeenCalled();
+
+		await inlineClipImages('<image content>', ['https://x/huge.png'], d, cache);
+		expect(d.upload).toHaveBeenCalledTimes(1);
+	});
+
+	it('still retries a server error', async () => {
+		const d = deps();
+		d.upload.mockRejectedValueOnce(new ApiError(503, 'bad gateway')).mockResolvedValue('/api/images/up-2nd');
+
+		const clip = await inlineClipImages('<image content>', ['https://x/a.png'], d);
+
+		expect(clip.content).toBe('![](/api/images/up-2nd)');
+		expect(d.sleep).toHaveBeenCalledWith(6_000);
+	});
+
+	it('keeps a floor under Retry-After so a zero delay cannot burn the budget', async () => {
+		const d = deps();
+		// A proxy in front of CrapNote answering "retry immediately".
+		d.upload.mockRejectedValueOnce(new ApiError(429, 'slow down', 0)).mockResolvedValue('/api/images/up-2nd');
+
+		await inlineClipImages('<image content>', ['https://x/a.png'], d);
+
+		expect(d.sleep).toHaveBeenCalledWith(1_000);
+	});
+
 	it('uploads at most four images at a time', async () => {
 		let inFlight = 0;
 		let peak = 0;
@@ -268,12 +306,14 @@ describe('summarizeImageFailures', () => {
 				{ source: 'a', kind: 'transient', message: 'boom' },
 				{ source: 'b', kind: 'unsupported', message: '415' },
 				{ source: 'c', kind: 'unsupported', message: '415' },
+				{ source: 'd', kind: 'rejected', message: '400' },
 			],
 		});
 
 		expect(message).toBe(
-			'Saved, but 3 of 12 images still link to the original site: ' +
-				'1 could not be uploaded, 2 in a format CrapNote cannot store. Save again to retry them.',
+			'Saved, but 4 of 12 images still link to the original site: ' +
+				'1 could not be uploaded, 2 in a format CrapNote cannot store, 1 refused by the server. ' +
+				'Save again to retry them.',
 		);
 	});
 

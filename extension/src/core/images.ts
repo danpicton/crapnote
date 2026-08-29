@@ -10,10 +10,12 @@ export interface ImageDeps {
 }
 
 // `transient` failures are worth another attempt (429, 5xx, a dropped
-// connection); the other two are not — the server will never accept an SVG
-// (`isAllowedImage` permits only jpeg/png/gif/webp), and a full quota stays
-// full for as long as the popup is open.
-export type ImageFailureKind = 'transient' | 'unsupported' | 'quota';
+// connection); the rest are the server's settled answer for this image and
+// more uploads won't change it — it will never accept an SVG
+// (`isAllowedImage` permits only jpeg/png/gif/webp), a full quota stays
+// full for as long as the popup is open, and `rejected` covers the other
+// 4xx (an oversized image is a 400, a bad token a 401).
+export type ImageFailureKind = 'transient' | 'unsupported' | 'quota' | 'rejected';
 
 export interface ImageFailure {
 	source: string;
@@ -52,21 +54,25 @@ const CONCURRENCY = 4;
 // because a token frees every 6s and the popup has to stay open throughout.
 const MAX_ATTEMPTS = 5;
 const DEFAULT_RETRY_MS = 6_000;
+// A proxy in front of the server can answer 0 (or a date already past); a
+// floor keeps that from burning the whole budget in a millisecond.
+const MIN_RETRY_MS = 1_000;
 const MAX_RETRY_MS = 30_000;
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 function classify(err: unknown): ImageFailureKind {
-	if (err instanceof ApiError) {
-		if (err.status === 415) return 'unsupported';
-		if (err.status === 507) return 'quota';
-	}
-	return 'transient';
+	// No status at all: a transport failure, worth retrying.
+	if (!(err instanceof ApiError)) return 'transient';
+	if (err.status === 415) return 'unsupported';
+	if (err.status === 507) return 'quota';
+	if (err.status === 429 || err.status >= 500) return 'transient';
+	return 'rejected';
 }
 
 function retryDelay(err: unknown): number {
 	const asked = err instanceof ApiError ? err.retryAfterMs : undefined;
-	return Math.min(asked ?? DEFAULT_RETRY_MS, MAX_RETRY_MS);
+	return Math.min(Math.max(asked ?? DEFAULT_RETRY_MS, MIN_RETRY_MS), MAX_RETRY_MS);
 }
 
 function describe(err: unknown): string {
@@ -186,8 +192,10 @@ export function summarizeImageFailures(clip: InlinedClip): string {
 	if (transient > 0) reasons.push(`${transient} could not be uploaded`);
 	const unsupported = permanent.filter((f) => f.kind === 'unsupported').length;
 	if (unsupported > 0) reasons.push(`${unsupported} in a format CrapNote cannot store`);
-	const quota = permanent.length - unsupported;
+	const quota = permanent.filter((f) => f.kind === 'quota').length;
 	if (quota > 0) reasons.push(`${quota} over your image quota`);
+	const rejected = permanent.length - unsupported - quota;
+	if (rejected > 0) reasons.push(`${rejected} refused by the server`);
 	return (
 		`Saved, but ${clip.failures.length} of ${clip.total} images still link to the ` +
 		`original site: ${reasons.join(', ')}.` +

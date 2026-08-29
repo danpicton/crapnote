@@ -243,7 +243,9 @@ describe('popup in clip mode', () => {
 				'1 in a format CrapNote cannot store.',
 		);
 		expect(d.close).not.toHaveBeenCalled();
-		expect(el<HTMLButtonElement>('save').disabled).toBe(false);
+		// Nothing retryable failed, so saving again would only redo the whole
+		// save and still never close — the button stays off.
+		expect(el<HTMLButtonElement>('save').disabled).toBe(true);
 		// The note is still saved — with the image hot-linked.
 		expect(d.client.createNote).toHaveBeenCalledWith(
 			'Example Page',
@@ -252,42 +254,50 @@ describe('popup in clip mode', () => {
 	});
 
 	it('re-attempts a rate-limited image on the next save and repairs the note', async () => {
-		const d = deps({
-			context: {
-				mode: 'clip',
-				url: 'https://example.com/a',
-				title: 'Example Page',
-				content: 'Look: <image content>',
-				images: ['https://example.com/pic.jpg'],
-			},
-		});
-		const upload = d.client.uploadImage as ReturnType<typeof vi.fn>;
-		// Retry-After 0 keeps the in-attempt backoff instant; every attempt
-		// of the first save is refused, as with a drained token bucket.
-		let call = 0;
-		upload.mockImplementation(async () => {
-			if (++call <= 5) throw new ApiError(429, 'upload rate limit exceeded', 0);
-			return '/api/images/up-late';
-		});
-		await initPopup(document, d);
+		// The backoff waits out the real Retry-After, so drive the clock.
+		vi.useFakeTimers();
+		try {
+			const d = deps({
+				context: {
+					mode: 'clip',
+					url: 'https://example.com/a',
+					title: 'Example Page',
+					content: 'Look: <image content>',
+					images: ['https://example.com/pic.jpg'],
+				},
+			});
+			const upload = d.client.uploadImage as ReturnType<typeof vi.fn>;
+			// Every attempt of the first save is refused, as against a
+			// drained token bucket; the next save finds a refilled one.
+			let call = 0;
+			upload.mockImplementation(async () => {
+				if (++call <= 5) throw new ApiError(429, 'upload rate limit exceeded', 60_000);
+				return '/api/images/up-late';
+			});
+			await initPopup(document, d);
 
-		const form = el<HTMLFormElement>('save-form');
-		form.dispatchEvent(new Event('submit'));
-		await vi.waitFor(() =>
-			expect(el('status').textContent).toContain('still link to the original site'),
-		);
-		expect(el('status').textContent).toContain('Save again to retry them.');
+			const form = el<HTMLFormElement>('save-form');
+			form.dispatchEvent(new Event('submit'));
+			await vi.advanceTimersByTimeAsync(4 * 30_000);
+			await vi.waitFor(() =>
+				expect(el('status').textContent).toContain('still link to the original site'),
+			);
+			expect(el('status').textContent).toContain('Save again to retry them.');
+			expect(el<HTMLButtonElement>('save').disabled).toBe(false);
 
-		form.dispatchEvent(new Event('submit'));
-		await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
+			form.dispatchEvent(new Event('submit'));
+			await vi.waitFor(() => expect(d.close).toHaveBeenCalled());
 
-		// The failure was never cached, so the retry uploaded it and the
-		// existing note was updated to point at the stored copy.
-		expect(d.client.updateNote).toHaveBeenCalledWith(
-			42,
-			'Example Page',
-			'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nLook: ![](/api/images/up-late)',
-		);
+			// The failure was never cached, so the retry uploaded it and the
+			// existing note was updated to point at the stored copy.
+			expect(d.client.updateNote).toHaveBeenCalledWith(
+				42,
+				'Example Page',
+				'Clipped from [Example Page](https://example.com/a)\n\n&nbsp;\n\nLook: ![](/api/images/up-late)',
+			);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('saves the clip note with the source line above the content', async () => {
