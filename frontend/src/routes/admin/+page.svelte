@@ -49,11 +49,27 @@
 	let lastInvite = $state<InviteResult | null>(null);
 	let copied = $state(false);
 
+	// Nothing on this page renders until the guard below has confirmed an
+	// admin session, so a non-admin never sees admin chrome mid-redirect.
+	let authorized = $state(false);
+
 	onMount(async () => {
-		if (!auth.user?.is_admin) {
-			goto('/');
+		// This runs before the root layout's own onMount (children mount
+		// first), so on a full page load auth.user is still null and
+		// auth.loading still true here. Wait for the session check to settle
+		// before deciding anything — reading auth.user now would bounce a
+		// genuine admin on every reload or deep link.
+		await auth.ready();
+		if (!auth.user) {
+			// Logged out: the root layout redirects to /login. Sending them
+			// to / from here would race that and land them on the wrong page.
 			return;
 		}
+		if (!auth.user.is_admin) {
+			void goto('/');
+			return;
+		}
+		authorized = true;
 		await loadUsers();
 	});
 
@@ -230,6 +246,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
+{#if authorized}
 <div class="admin-page">
 	<a href="/" class="wordmark">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
 	<!-- Mobile page title (outside scrollable inner so it stays fixed at top) -->
@@ -507,6 +524,7 @@
 	onsubmit={submitPasswordChange}
 	oncancel={closePasswordModal}
 />
+{/if}
 
 <style>
 	.admin-page {

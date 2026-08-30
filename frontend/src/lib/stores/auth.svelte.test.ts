@@ -154,3 +154,89 @@ describe('offline session restore', () => {
 		expect(clearSessionUser).not.toHaveBeenCalled();
 	});
 });
+
+// A fresh module instance per test: readiness is module-level state (has the
+// first session check started / settled?), so tests must not inherit it.
+async function freshAuth() {
+	vi.resetModules();
+	const mod = await import('./auth.svelte');
+	return mod.auth;
+}
+
+describe('auth readiness', () => {
+	it('ready() waits for an in-flight init instead of resolving early', async () => {
+		const auth = await freshAuth();
+		let resolveMe!: (u: typeof fakeUser) => void;
+		vi.mocked(api.auth.me).mockReturnValue(
+			new Promise<typeof fakeUser>((resolve) => {
+				resolveMe = resolve;
+			})
+		);
+
+		const initPromise = auth.init();
+		let settled = false;
+		const readyPromise = auth.ready().then(() => {
+			settled = true;
+		});
+
+		await new Promise((r) => setTimeout(r, 0));
+		expect(settled).toBe(false);
+		expect(auth.loading).toBe(true);
+
+		resolveMe(fakeUser);
+		await Promise.all([initPromise, readyPromise]);
+
+		expect(settled).toBe(true);
+		expect(auth.user).toEqual(fakeUser);
+		expect(auth.loading).toBe(false);
+		expect(api.auth.me).toHaveBeenCalledTimes(1);
+	});
+
+	it('ready() starts the session check when nothing has begun one', async () => {
+		// A route guard can run before the root layout's onMount has called
+		// init() — children mount first — so ready() must not resolve into a
+		// logged-out state just because init() has not been called yet.
+		const auth = await freshAuth();
+		vi.mocked(api.auth.me).mockResolvedValue(fakeUser);
+
+		await auth.ready();
+
+		expect(api.auth.me).toHaveBeenCalledTimes(1);
+		expect(auth.user).toEqual(fakeUser);
+		expect(auth.loading).toBe(false);
+	});
+
+	it('concurrent callers share a single /api/auth/me request', async () => {
+		const auth = await freshAuth();
+		vi.mocked(api.auth.me).mockResolvedValue(fakeUser);
+
+		await Promise.all([auth.ready(), auth.init(), auth.init()]);
+
+		expect(api.auth.me).toHaveBeenCalledTimes(1);
+	});
+
+	it('ready() resolves without a new request once the check has settled', async () => {
+		const auth = await freshAuth();
+		vi.mocked(api.auth.me).mockResolvedValue(fakeUser);
+		await auth.init();
+		vi.mocked(api.auth.me).mockClear();
+
+		await auth.ready();
+
+		expect(api.auth.me).not.toHaveBeenCalled();
+		expect(auth.user).toEqual(fakeUser);
+	});
+
+	it('an explicit init() after settling still re-checks the session', async () => {
+		const auth = await freshAuth();
+		vi.mocked(api.auth.me).mockResolvedValue(fakeUser);
+		await auth.init();
+		vi.mocked(api.auth.me).mockClear();
+		vi.mocked(api.auth.me).mockResolvedValue({ ...fakeUser, username: 'renamed' });
+
+		await auth.init();
+
+		expect(api.auth.me).toHaveBeenCalledTimes(1);
+		expect(auth.user?.username).toBe('renamed');
+	});
+});
