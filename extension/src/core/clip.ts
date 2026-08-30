@@ -17,10 +17,17 @@ const BLOCK_TAGS = new Set([
 	'BLOCKQUOTE', 'PRE', 'TABLE', 'UL', 'OL', 'SECTION', 'ARTICLE', 'FIGURE',
 ]);
 
+const CELL_TAGS = new Set(['TD', 'TH']);
+
+// Cells are separated inline rather than by adding them to BLOCK_TAGS: a
+// block break would put every cell in its own paragraph and lose the row
+// structure that TR already carries.
+const CELL_SEPARATOR = ' | ';
+
 // Converts a captured selection's HTML into plain text for the clip content
 // box. Text comes through as-is; every image is masked (and only masked)
 // with the literal `<image content>` marker. Block elements become
-// paragraph breaks.
+// paragraph breaks; table cells are separated inline within their row.
 export function clipTextFromHTML(html: string): string {
 	const doc = new DOMParser().parseFromString(html, 'text/html');
 	const parts: string[] = [];
@@ -74,6 +81,10 @@ function walk(
 	preformatted: boolean,
 	counter: { next: number; total: number },
 ): void {
+	// Cells emitted from this node — non-zero only while walking a row, so
+	// a non-cell child (TR also admits <script> and <template>) never reads
+	// as a preceding column.
+	let cells = 0;
 	for (const child of Array.from(node.childNodes)) {
 		if (child.nodeType === Node.TEXT_NODE) {
 			const text = child.textContent ?? '';
@@ -94,6 +105,23 @@ function walk(
 			parts.push(`\n\n${PRE_MARK}`);
 			walk(el, parts, true, counter);
 			parts.push(`${PRE_MARK}\n\n`);
+			continue;
+		}
+		if (CELL_TAGS.has(el.tagName)) {
+			// A cell is resolved on its own so the block breaks around its
+			// content (cells commonly wrap theirs in a <div> or <p>) are
+			// trimmed off before it joins the row — otherwise the separator
+			// is stranded on a line of its own. Only whitespace is trimmed,
+			// so PRE_MARK sentinels stay paired.
+			const cellParts: string[] = [];
+			walk(el, cellParts, preformatted, counter);
+			const cell = cellParts.join('').trim();
+			// An empty cell contributes no separator: a row must not open or
+			// close with one dangling.
+			if (!cell) continue;
+			if (cells > 0) parts.push(CELL_SEPARATOR);
+			parts.push(cell);
+			cells++;
 			continue;
 		}
 		const isBlock = BLOCK_TAGS.has(el.tagName);
