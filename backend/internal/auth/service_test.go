@@ -441,6 +441,54 @@ func TestService_ValidateSession_LockedUser(t *testing.T) {
 	}
 }
 
+// newTestServiceWithSessions mirrors newTestServiceWithRepo but also hands back
+// the SessionRepo so tests can assert on stored session rows directly.
+func newTestServiceWithSessions(t *testing.T) (*auth.Service, *auth.UserRepo, *auth.SessionRepo) {
+	t.Helper()
+	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+	users := auth.NewUserRepo(database)
+	sessions := auth.NewSessionRepo(database)
+	svc := auth.NewService(users, sessions, 7*24*time.Hour)
+	return svc, users, sessions
+}
+
+// A locked user's session is normally deleted at lock time by
+// RevokeUserSessions, but that revocation is logged rather than fatal. If it
+// failed, the row would linger forever — DeleteExpired never reaps it because
+// it has not expired by timestamp. ValidateSession self-heals by deleting the
+// session it just rejected, mirroring the expiry path.
+func TestService_ValidateSession_LockedUser_DeletesSession(t *testing.T) {
+	svc, users, sessions := newTestServiceWithSessions(t)
+	ctx := context.Background()
+	u := createUser(t, users, "alice", "correctpass", false)
+
+	sess, err := svc.Login(ctx, "alice", "correctpass")
+	if err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+
+	// Lock the account directly, standing in for a lock whose session
+	// revocation failed: the session row is still present.
+	if err := users.Lock(ctx, u.ID); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+	if _, err := sessions.Find(ctx, sess.ID); err != nil {
+		t.Fatalf("session should still exist before validation: %v", err)
+	}
+
+	if _, err := svc.ValidateSession(ctx, sess.ID); err != auth.ErrAccountLocked {
+		t.Fatalf("expected ErrAccountLocked, got %v", err)
+	}
+
+	if _, err := sessions.Find(ctx, sess.ID); err != auth.ErrNotFound {
+		t.Fatalf("expected session to be deleted from the store, got %v", err)
+	}
+}
+
 func TestService_Login_AutoLockout_RevokesExistingSessions(t *testing.T) {
 	svc, users := newTestServiceWithRepo(t)
 	ctx := context.Background()
