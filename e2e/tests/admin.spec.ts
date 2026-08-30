@@ -67,10 +67,21 @@ test.describe('User management', () => {
     await expect(page.locator('.account-name')).toHaveText(username);
     await expect(page.getByRole('link', { name: /user management/i })).toHaveCount(0);
 
-    // Typing the URL in gets bounced back to the notes list...
-    await page.goto('/admin');
+    // Navigate client-side, the way an in-app link would: a full page load of
+    // /admin bounces everyone, admins included, because the page's onMount
+    // guard runs before the layout has awaited auth.init(). Only once the
+    // identity is loaded does the redirect actually test the admin gate — an
+    // admin reaching /admin this way stays there (see the first test).
+    await page.evaluate(() => {
+      const a = document.createElement('a');
+      a.href = '/admin';
+      a.id = 'goto-admin';
+      a.textContent = 'admin';
+      document.body.append(a);
+    });
+    await page.click('#goto-admin');
     await expect(page).toHaveURL('/');
-    // ...and the endpoint behind the screen refuses them too.
+    // The endpoint behind the screen refuses them too.
     const denied = await page.request.get('/api/admin/users');
     expect(denied.status()).toBe(403);
   });

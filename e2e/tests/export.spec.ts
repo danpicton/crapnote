@@ -34,6 +34,12 @@ test.describe('Export', () => {
     // magic bytes. What is inside it is the Go export tests' business.
     const body = await res.body();
     expect(body.subarray(0, 2).toString('latin1')).toBe('PK');
+
+    // ...and 'PK' alone is also an unencrypted archive, so check that the
+    // password was applied: bit 0 of the local file header's general-purpose
+    // flag (byte 6) marks an encrypted entry. This build writes 0x09 there
+    // with a password and 0x08 without one.
+    expect(body[6] & 0x01).toBe(1);
   });
 
   test('the settings page downloads the export', async ({ page }) => {
