@@ -39,6 +39,12 @@ var ErrInvalidCredentials = errors.New("invalid credentials")
 // ErrAccountLocked is returned when a locked user attempts to authenticate.
 var ErrAccountLocked = errors.New("account locked")
 
+// ErrLoginNotConfigured is returned by Login when the Service was built with
+// a zero session TTL. Such a service cannot mint a usable session — the
+// session would expire at the instant it was created — so this is a
+// construction bug in the caller, not an authentication failure.
+var ErrLoginNotConfigured = errors.New("auth service not configured for login: zero session TTL")
+
 // ErrInviteInvalid is returned for any CompleteSetup failure mode (missing,
 // expired, already-used). A single error avoids leaking which condition
 // matched on a public endpoint.
@@ -110,8 +116,20 @@ func (s *Service) SeedAdmin(ctx context.Context, username, password string) erro
 // Returns ErrInvalidCredentials for unknown users or wrong passwords, and
 // ErrAccountLocked for users whose accounts are locked (either by an admin,
 // or automatically after too many failed attempts — automatic locks lapse
-// after the configured cool-down).
+// after the configured cool-down). Returns ErrLoginNotConfigured if the
+// Service was constructed with a zero session TTL.
 func (s *Service) Login(ctx context.Context, username, password string) (*Session, error) {
+	// Checked before the user lookup and before any password comparison. The
+	// outcome depends only on how this Service was constructed, never on the
+	// supplied credentials, so failing first leaks nothing an attacker could
+	// use — it is uniform for every request — while avoiding both the bcrypt
+	// work and, more importantly, the write side effects further down
+	// (failed-attempt increments, auto-lock, session revocation) on behalf of
+	// a service that could never have returned a usable session anyway.
+	if s.ttl <= 0 {
+		return nil, ErrLoginNotConfigured
+	}
+
 	u, err := s.users.FindByUsername(ctx, username)
 	if errors.Is(err, ErrNotFound) {
 		// Perform a dummy comparison to avoid timing attacks.

@@ -21,10 +21,18 @@ type AdminHandler struct {
 	svc   *Service // always present; carries session access and (optionally) invites
 }
 
+// adminServiceSessionTTL is the session TTL given to the AdminHandler's
+// embedded Service. It is deliberately zero: the admin handler only reads
+// users and revokes sessions — it never authenticates anyone, so it needs no
+// session lifetime. Service.Login rejects a zero-TTL service with
+// ErrLoginNotConfigured rather than minting an already-expired session, so
+// this stays a documented no-op rather than a silent footgun.
+const adminServiceSessionTTL time.Duration = 0
+
 // NewAdminHandler creates a new AdminHandler for the admin CRUD endpoints.
 // Invite-based endpoints are unavailable; use NewAdminHandlerWithInvites.
 func NewAdminHandler(users *UserRepo, sessions *SessionRepo) *AdminHandler {
-	return &AdminHandler{users: users, svc: NewService(users, sessions, 0)}
+	return &AdminHandler{users: users, svc: NewService(users, sessions, adminServiceSessionTTL)}
 }
 
 // NewAdminHandlerWithInvites creates a new AdminHandler with access to the

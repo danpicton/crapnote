@@ -2,6 +2,7 @@ package auth_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -100,6 +101,31 @@ func TestService_Login_UnknownUser(t *testing.T) {
 	_, err := svc.Login(context.Background(), "nobody", "pass")
 	if err != auth.ErrInvalidCredentials {
 		t.Fatalf("expected ErrInvalidCredentials for unknown user, got %v", err)
+	}
+}
+
+func TestService_Login_ZeroTTLService_IsRejected(t *testing.T) {
+	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	// A service constructed with a zero session TTL (as NewAdminHandler does)
+	// is not configured to mint sessions. Login must refuse loudly rather than
+	// issue a session that expired the instant it was created.
+	svc := auth.NewService(auth.NewUserRepo(database), auth.NewSessionRepo(database), 0)
+	ctx := context.Background()
+	if err := svc.SeedAdmin(ctx, "admin", "correctpassword"); err != nil {
+		t.Fatalf("SeedAdmin: %v", err)
+	}
+
+	sess, err := svc.Login(ctx, "admin", "correctpassword")
+	if !errors.Is(err, auth.ErrLoginNotConfigured) {
+		t.Fatalf("expected ErrLoginNotConfigured, got %v", err)
+	}
+	if sess != nil {
+		t.Fatalf("expected no session to be minted, got %+v", sess)
 	}
 }
 
