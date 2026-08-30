@@ -67,22 +67,34 @@ test.describe('User management', () => {
     await expect(page.locator('.account-name')).toHaveText(username);
     await expect(page.getByRole('link', { name: /user management/i })).toHaveCount(0);
 
-    // Navigate client-side, the way an in-app link would: a full page load of
-    // /admin bounces everyone, admins included, because the page's onMount
-    // guard runs before the layout has awaited auth.init(). Only once the
-    // identity is loaded does the redirect actually test the admin gate — an
-    // admin reaching /admin this way stays there (see the first test).
-    await page.evaluate(() => {
-      const a = document.createElement('a');
-      a.href = '/admin';
-      a.id = 'goto-admin';
-      a.textContent = 'admin';
-      document.body.append(a);
-    });
-    await page.click('#goto-admin');
+    // A full page load of /admin: the guard waits for the session to settle
+    // before deciding, so this exercises the admin gate rather than the
+    // not-yet-loaded state (see the direct-load test for the admin side).
+    await page.goto('/admin');
     await expect(page).toHaveURL('/');
     // The endpoint behind the screen refuses them too.
     const denied = await page.request.get('/api/admin/users');
     expect(denied.status()).toBe(403);
+  });
+
+  test('an admin can load /admin directly', async ({ page }) => {
+    await login(page);
+
+    // A fresh navigation, not a client-side one: the guard must wait for the
+    // root layout's session check instead of reading a still-empty auth store.
+    await page.goto('/admin');
+
+    await expect(page.getByRole('row', { name: /^admin/ }).first()).toBeVisible();
+    await expect(page).toHaveURL('/admin');
+
+    // A reload lands in the same place.
+    await page.reload();
+    await expect(page.getByRole('row', { name: /^admin/ }).first()).toBeVisible();
+    await expect(page).toHaveURL('/admin');
+  });
+
+  test('a logged-out visitor loading /admin lands on /login', async ({ page }) => {
+    await page.goto('/admin');
+    await expect(page).toHaveURL(/\/login/);
   });
 });

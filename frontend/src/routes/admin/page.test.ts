@@ -1,5 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { tick } from 'svelte';
+import { goto } from '$app/navigation';
 import AdminPage from './+page.svelte';
 
 const mockApi = vi.hoisted(() => ({
@@ -18,12 +20,16 @@ vi.mock('$lib/api', () => ({
 	},
 }));
 
-vi.mock('$lib/stores/auth.svelte', () => ({
-	auth: {
-		user: { id: 1, username: 'admin', is_admin: true, created_at: '' },
-		loading: false,
-	},
+type MockUser = { id: number; username: string; is_admin: boolean; created_at: string };
+
+// Mutable so the guard tests can model a full page load: auth is still
+// loading when the page mounts and settles a tick later.
+const mockAuth = vi.hoisted(() => ({
+	user: null as MockUser | null,
+	loading: true,
+	ready: vi.fn(() => Promise.resolve()),
 }));
+vi.mock('$lib/stores/auth.svelte', () => ({ auth: mockAuth }));
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
@@ -44,8 +50,16 @@ const mockUsers = [
 	{ id: 2, username: 'alice', is_admin: false, locked: false, created_at: '2024-01-01T00:00:00Z' },
 ];
 
+const adminUser: MockUser = { id: 1, username: 'admin', is_admin: true, created_at: '' };
+const plainUser: MockUser = { id: 2, username: 'alice', is_admin: false, created_at: '' };
+
 beforeEach(() => {
 	vi.clearAllMocks();
+	// Default: the session is already loaded and belongs to an admin, i.e.
+	// client-side navigation from Settings.
+	mockAuth.user = adminUser;
+	mockAuth.loading = false;
+	mockAuth.ready.mockImplementation(() => Promise.resolve());
 	mockFetch.mockResolvedValue(ok(mockUsers));
 });
 
@@ -191,8 +205,9 @@ describe('Admin page', () => {
 		render(AdminPage);
 		await waitFor(() => screen.getByPlaceholderText(/^username$/i));
 
-		// Switch mode.
-		await fireEvent.click(screen.getByLabelText(/send setup link/i));
+		// Switch mode. Anchored: the per-user "Send setup link to <name>"
+		// buttons in the table match a looser pattern.
+		await fireEvent.click(screen.getByLabelText(/^send setup link$/i));
 
 		// Password fields should now be gone.
 		expect(screen.queryByPlaceholderText(/^password$/i)).not.toBeInTheDocument();
@@ -278,5 +293,94 @@ describe('Admin — Typemark', () => {
 		await waitFor(() => screen.getAllByRole('heading', { name: /user management/i }));
 		const link = screen.getByRole('link', { name: /^crapnote/i });
 		expect(link).toHaveAttribute('href', '/');
+	});
+});
+
+describe('Admin page — route guard', () => {
+	// The root layout renders children immediately and only awaits
+	// auth.init() in its own onMount, which runs after this page's. So on a
+	// full page load the session is still unresolved at mount time; the guard
+	// has to wait for auth.ready() before deciding anything.
+	function pendingAuth(settleAs: MockUser | null) {
+		let settle!: () => void;
+		mockAuth.user = null;
+		mockAuth.loading = true;
+		mockAuth.ready.mockImplementation(
+			() =>
+				new Promise<void>((resolve) => {
+					settle = () => {
+						mockAuth.user = settleAs;
+						mockAuth.loading = false;
+						resolve();
+					};
+				})
+		);
+		return () => settle();
+	}
+
+	async function flush() {
+		await tick();
+		await new Promise((r) => setTimeout(r, 0));
+		await tick();
+	}
+
+	it('waits for auth to settle before deciding, then loads the user list', async () => {
+		const settle = pendingAuth(adminUser);
+
+		render(AdminPage);
+		await flush();
+
+		// Nothing decided, nothing fetched, nothing shown yet.
+		expect(goto).not.toHaveBeenCalled();
+		expect(mockFetch).not.toHaveBeenCalled();
+		expect(screen.queryByRole('heading', { name: /user management/i })).toBeNull();
+
+		settle();
+
+		await waitFor(() => {
+			expect(screen.getAllByText('alice').length).toBeGreaterThan(0);
+		});
+		expect(goto).not.toHaveBeenCalled();
+		expect(mockFetch).toHaveBeenCalledWith('/api/admin/users', { credentials: 'include' });
+	});
+
+	it('redirects a non-admin to / without fetching or rendering anything', async () => {
+		const settle = pendingAuth(plainUser);
+
+		render(AdminPage);
+		settle();
+		await waitFor(() => {
+			expect(goto).toHaveBeenCalledWith('/');
+		});
+
+		expect(mockFetch).not.toHaveBeenCalled();
+		expect(screen.queryByRole('heading', { name: /user management/i })).toBeNull();
+	});
+
+	it('leaves a logged-out visitor to the root layout (no bounce to /)', async () => {
+		const settle = pendingAuth(null);
+
+		render(AdminPage);
+		settle();
+		await flush();
+
+		// The root layout sends unauthenticated visitors to /login; redirecting
+		// to / from here would race it and land them on the wrong page.
+		expect(goto).not.toHaveBeenCalled();
+		expect(mockFetch).not.toHaveBeenCalled();
+		expect(screen.queryByRole('heading', { name: /user management/i })).toBeNull();
+	});
+
+	it('still works for an admin arriving by client-side navigation', async () => {
+		// auth already settled before this page mounted.
+		mockAuth.user = adminUser;
+		mockAuth.loading = false;
+
+		render(AdminPage);
+
+		await waitFor(() => {
+			expect(screen.getAllByText('alice').length).toBeGreaterThan(0);
+		});
+		expect(goto).not.toHaveBeenCalled();
 	});
 });
