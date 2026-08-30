@@ -342,6 +342,11 @@ func (s *Service) ValidateSession(ctx context.Context, sessionID string) (*User,
 		return nil, err
 	}
 	if u.Locked(time.Now()) {
+		// Self-heal: locking normally revokes the user's sessions, but that
+		// revocation is logged rather than fatal. Drop the row we just
+		// rejected so a failed revocation cannot leave a session that
+		// DeleteExpired will never reap, as on the expiry path above.
+		s.sessions.Delete(ctx, sessionID) //nolint:errcheck
 		return nil, ErrAccountLocked
 	}
 	return u, nil
