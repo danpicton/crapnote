@@ -71,7 +71,7 @@ func main() {
 	authSvc.SetLockoutPolicy(lockoutAttempts, lockoutCooldown)
 
 	authHandler := auth.NewHandler(authSvc)
-	adminHandler := auth.NewAdminHandlerWithInvites(userRepo, sessRepo, authSvc)
+	adminHandler := auth.NewAdminHandlerWithInvites(userRepo, authSvc)
 	setupHandler := auth.NewSetupHandler(authSvc)
 
 	// API tokens — bearer auth for external clients (CLIs, scripts).

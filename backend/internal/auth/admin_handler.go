@@ -29,7 +29,7 @@ func NewAdminHandler(users *UserRepo, sessions *SessionRepo) *AdminHandler {
 
 // NewAdminHandlerWithInvites creates a new AdminHandler with access to the
 // auth Service, enabling the invite endpoints.
-func NewAdminHandlerWithInvites(users *UserRepo, sessions *SessionRepo, svc *Service) *AdminHandler {
+func NewAdminHandlerWithInvites(users *UserRepo, svc *Service) *AdminHandler {
 	return &AdminHandler{users: users, svc: svc}
 }
 

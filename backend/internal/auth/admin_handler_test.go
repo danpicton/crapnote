@@ -63,7 +63,7 @@ func newAdminInviteFixture(t *testing.T) (*auth.AdminHandler, *auth.User, *auth.
 	if err != nil {
 		t.Fatalf("find admin: %v", err)
 	}
-	return auth.NewAdminHandlerWithInvites(userRepo, sessRepo, svc), admin, svc
+	return auth.NewAdminHandlerWithInvites(userRepo, svc), admin, svc
 }
 
 func TestAdminHandler_ListUsers(t *testing.T) {
