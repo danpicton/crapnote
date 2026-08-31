@@ -87,9 +87,38 @@ export class OfflineError extends ApiError {
 /** Marker header set by the service worker on its synthetic offline 503s. */
 const OFFLINE_HEADER = 'X-Crapnote-Offline';
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/**
+ * Deadline for the session check, and only for it.
+ *
+ * The root layout renders nothing until `/api/auth/me` settles, so a server
+ * that accepts the connection and never answers — captive portal, wedged
+ * backend, overloaded box — would otherwise hold the whole app blank until
+ * the browser's own multi-minute network timeout. A server that does not
+ * answer is, from here, indistinguishable from being offline, so the abort
+ * surfaces as `OfflineError` and the app takes its offline path: the unlock
+ * screen, or /login if this browser cannot prove ownership. Still fail-closed,
+ * but on a screen the user can act on.
+ *
+ * Deliberately not applied to other calls: an export or an image upload is
+ * legitimately slow, and cancelling those would be a bug, not a safeguard.
+ */
+export const SESSION_CHECK_TIMEOUT_MS = 10_000;
+
+async function request<T>(
+	method: string,
+	path: string,
+	body?: unknown,
+	timeoutMs?: number
+): Promise<T> {
 	const headers: Record<string, string> = {};
 	if (body !== undefined) headers['Content-Type'] = 'application/json';
+
+	// AbortController rather than AbortSignal.timeout: same effect, no
+	// reliance on a newer API, and the timer is cleared below so a settled
+	// request never fires a stray abort at an unrelated moment.
+	const controller = timeoutMs !== undefined ? new AbortController() : undefined;
+	const timer =
+		controller !== undefined ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
 
 	let res: Response;
 	try {
@@ -98,11 +127,15 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 			headers,
 			body: body !== undefined ? JSON.stringify(body) : undefined,
 			credentials: 'include',
+			signal: controller?.signal,
 		});
 	} catch {
-		// fetch rejects only on network-level failure (offline, DNS, CORS) —
-		// there is no HTTP response to inspect.
+		// fetch rejects only on network-level failure (offline, DNS, CORS) or
+		// on our own abort — there is no HTTP response to inspect, and both
+		// mean the same thing to every caller: the server is not reachable.
 		throw new OfflineError();
+	} finally {
+		if (timer !== undefined) clearTimeout(timer);
 	}
 
 	if (!res.ok) {
@@ -125,7 +158,7 @@ export const api = {
 		login: (username: string, password: string) =>
 			request<User>('POST', '/api/auth/login', { username, password }),
 		logout: () => request<void>('POST', '/api/auth/logout'),
-		me: () => request<User>('GET', '/api/auth/me'),
+		me: () => request<User>('GET', '/api/auth/me', undefined, SESSION_CHECK_TIMEOUT_MS),
 		changePassword: (newPassword: string) =>
 			request<void>('POST', '/api/auth/password', { new_password: newPassword }),
 	},

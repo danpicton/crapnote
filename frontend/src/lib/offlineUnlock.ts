@@ -278,6 +278,46 @@ const PROOF_KEY = 'crapnote:offline-unlock-session';
 interface ProofRecord {
 	userId: number;
 	at: number;
+	/** HMAC-SHA-256 over `userId` and `at`, keyed by this browser's unlock
+	 * material. Without it the proof was one line of forgeable JSON — a far
+	 * weaker artefact than the KDF record it stands in for. */
+	mac: string;
+}
+
+/** The signed statement. Versioned and prefixed so a MAC can never be
+ * reinterpreted as a signature over something else. */
+function proofMessage(userId: number, at: number): Uint8Array {
+	return new TextEncoder().encode(`crapnote:proof:v1:${userId}:${at}`);
+}
+
+/**
+ * HMACs the proof with the account's stored PBKDF2 output as the key.
+ *
+ * That output is already in localStorage, so this needs no new stored secret
+ * and — crucially — no password at verification time, which is the entire
+ * point of a session proof. It cannot make the proof unforgeable to script
+ * running in the origin (nothing client-side can; see #56/#61), but it does
+ * mean a proof cannot be fabricated without the unlock record, cannot be
+ * moved to another account or timestamp, and cannot be carried to a browser
+ * whose record was derived from a different salt.
+ */
+async function proofMac(userId: number, at: number): Promise<string | null> {
+	const rec = readRecord(userId);
+	const s = subtle();
+	if (!rec || !s) return null;
+	try {
+		const key = await s.importKey(
+			'raw',
+			rec.hash as unknown as BufferSource,
+			{ name: 'HMAC', hash: 'SHA-256' },
+			false,
+			['sign']
+		);
+		const sig = await s.sign('HMAC', key, proofMessage(userId, at) as unknown as BufferSource);
+		return toBase64(new Uint8Array(sig));
+	} catch {
+		return null;
+	}
 }
 
 /**
@@ -290,9 +330,15 @@ interface ProofRecord {
  * out", and the next person opens the app afresh. Keeping this beside the
  * store in localStorage would recreate the very hole the unlock closes.
  */
-export function markIdentityProved(userId: number, now: number = Date.now()): void {
+export async function markIdentityProved(userId: number, now: number = Date.now()): Promise<void> {
+	const mac = await proofMac(userId, now);
+	// No unlock material means no key to authenticate the proof with. Storing
+	// an unauthenticated one instead would defeat the MAC entirely — a forger
+	// would just delete the record and take the weaker path — so take no
+	// proof at all and let the unlock screen (or /login) handle it.
+	if (!mac) return;
 	try {
-		sessionStorage.setItem(PROOF_KEY, JSON.stringify({ userId, at: now } satisfies ProofRecord));
+		sessionStorage.setItem(PROOF_KEY, JSON.stringify({ userId, at: now, mac } satisfies ProofRecord));
 	} catch {
 		// Storage unavailable — the user is asked to unlock instead, which is
 		// the safe direction.
@@ -300,22 +346,42 @@ export function markIdentityProved(userId: number, now: number = Date.now()): vo
 }
 
 /**
- * True when `userId` was proved in this browsing session and that proof is
- * still young enough. Every failure path — no record, wrong account, corrupt
- * data, unavailable storage, expired — returns false, so a reload is only
- * ever spared the prompt on positive evidence.
+ * True when `userId` was proved in this browsing session, that proof still
+ * carries a valid MAC, and it is neither stale nor stamped in the future.
+ * Every failure path — no proof, no unlock material, wrong account, corrupt
+ * data, unavailable storage, bad MAC, expired — returns false, so a reload is
+ * only ever spared the prompt on positive evidence.
  */
-export function identityProvedInThisSession(userId: number, now: number = Date.now()): boolean {
+export async function identityProvedInThisSession(
+	userId: number,
+	now: number = Date.now()
+): Promise<boolean> {
+	let rec: ProofRecord;
 	try {
 		const raw = sessionStorage.getItem(PROOF_KEY);
 		if (!raw) return false;
-		const rec = JSON.parse(raw) as ProofRecord;
-		if (typeof rec?.userId !== 'number' || typeof rec?.at !== 'number') return false;
-		if (rec.userId !== userId) return false;
-		return now - rec.at < UNLOCK_PROOF_MAX_AGE_MS;
+		rec = JSON.parse(raw) as ProofRecord;
 	} catch {
 		return false;
 	}
+	if (typeof rec?.userId !== 'number' || typeof rec?.at !== 'number') return false;
+	if (typeof rec?.mac !== 'string' || !rec.mac) return false;
+	if (rec.userId !== userId) return false;
+
+	// `now` is the page's clock, so a proof stamped in the future would sail
+	// past the age check for ever. Age must be non-negative as well as small.
+	const age = now - rec.at;
+	if (age < 0 || age >= UNLOCK_PROOF_MAX_AGE_MS) return false;
+
+	const expected = await proofMac(rec.userId, rec.at);
+	if (!expected) return false;
+	let actual: Uint8Array;
+	try {
+		actual = fromBase64(rec.mac);
+	} catch {
+		return false;
+	}
+	return equalsConstantTime(actual, fromBase64(expected));
 }
 
 /** Drops the proof (logout, with the rest of the local footprint). */

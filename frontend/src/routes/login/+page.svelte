@@ -1,7 +1,10 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { ApiError, OfflineError } from '$lib/api';
 	import { auth } from '$lib/stores/auth.svelte';
+	import { readSessionUser } from '$lib/localData';
+	import { hasUnlockPasscode } from '$lib/offlineUnlock';
 	import { hasStashedShare } from '$lib/share';
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 
@@ -9,6 +12,29 @@
 	let password = $state('');
 	let error = $state('');
 	let submitting = $state(false);
+	let notice = $state('');
+
+	/**
+	 * Explain the dead end before it is walked into.
+	 *
+	 * Someone can land here with a pocketful of cached notes they cannot
+	 * reach: offline with nothing to log in against, or — the pre-upgrade
+	 * window — a browser that remembers who was last signed in but holds no
+	 * unlock material, because the session was restored from a cookie and the
+	 * app never saw a password to record. Both look like a blank login form
+	 * with no explanation, and the second is not obviously recoverable unless
+	 * we say how.
+	 */
+	onMount(() => {
+		const remembered = readSessionUser();
+		const canUnlockOffline = remembered !== null && hasUnlockPasscode(remembered.id);
+		if (remembered && !canUnlockOffline) {
+			notice =
+				'This device has notes saved offline but cannot open them yet. Log in once here to unlock them the next time you are offline.';
+		} else if (typeof navigator !== 'undefined' && !navigator.onLine) {
+			notice = "You're offline. Reconnect to log in.";
+		}
+	});
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
@@ -24,13 +50,9 @@
 				// OfflineError extends ApiError, so this check must come first
 				// or an offline attempt reads as "invalid credentials".
 				//
-				// Landing here offline usually means this browser holds cached
-				// notes but no way to prove they are yours — a session that
-				// was restored from a cookie never gave the app a password to
-				// remember. Say so, rather than leaving someone staring at a
-				// login form they cannot submit and notes they cannot reach.
-				error =
-					"You're offline. Reconnect to log in — logging in once while online lets this device unlock your saved notes offline from then on.";
+				// The standing notice above already explains what logging in
+				// once online buys, so keep this to the immediate fact.
+				error = "You're offline. Reconnect to log in.";
 			} else if (err instanceof ApiError) {
 				if (err.status === 403) {
 					error = 'This account has been locked. Contact an administrator.';
@@ -66,6 +88,8 @@
 		<form onsubmit={handleSubmit} class="login-form">
 			{#if error}
 				<p role="alert" class="error">{error}</p>
+			{:else if notice}
+				<p class="notice">{notice}</p>
 			{/if}
 
 			<div class="field">
@@ -266,6 +290,13 @@
 		padding: 0.5rem 0.75rem;
 		background: var(--danger-bg);
 		border: 1px solid var(--danger-bd);
+		margin: 0;
+	}
+	.notice {
+		font-family: var(--sans);
+		font-size: 0.8125rem;
+		line-height: 1.4;
+		color: var(--text-3);
 		margin: 0;
 	}
 

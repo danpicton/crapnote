@@ -20,20 +20,36 @@ import { test, expect, type BrowserContext, type Page } from '@playwright/test';
  * marked 503 exactly as it would with the backend down. Service workers stay
  * ENABLED: these tests are about the SW serving the cached shell.
  */
-async function goOffline(context: BrowserContext, page: Page) {
-  await context.route('**/api/**', (route) => route.abort());
-  await context.setOffline(true);
-  // Prove the app really is taking the offline path rather than trusting the
-  // emulation: the SW must answer /api/auth/me with its offline marker.
+/**
+ * Confirms, from inside the page, that /api/auth/me is genuinely unreachable
+ * right now: either the service worker answered with its marked offline 503,
+ * or the fetch failed outright. Both are what the app treats as offline; a
+ * plain 200 or an unmarked error is not.
+ *
+ * Call this after each navigation, not just once at the start. Asserting the
+ * precondition and then navigating is the exact shape of the bug this helper
+ * exists to prevent — `setOffline` alone held for the first document and then
+ * quietly stopped applying to service-worker fetches.
+ */
+async function assertStillOffline(page: Page, where: string) {
   const seen = await page.evaluate(async () => {
     try {
       const res = await fetch('/api/auth/me');
-      return { status: res.status, marker: res.headers.get('X-Crapnote-Offline') };
+      return { reached: true, status: res.status, marker: res.headers.get('X-Crapnote-Offline') };
     } catch {
-      return { status: 0, marker: 'network-failure' };
+      return { reached: false, status: 0, marker: null as string | null };
     }
   });
-  expect(seen.marker, `expected an offline /api/auth/me, got ${JSON.stringify(seen)}`).not.toBeNull();
+  const offline = seen.reached === false || seen.marker === '1';
+  expect(offline, `expected /api/auth/me to be unreachable at ${where}, got ${JSON.stringify(seen)}`).toBe(
+    true,
+  );
+}
+
+async function goOffline(context: BrowserContext, page: Page) {
+  await context.route('**/api/**', (route) => route.abort());
+  await context.setOffline(true);
+  await assertStillOffline(page, 'goOffline');
 }
 
 async function goOnline(context: BrowserContext) {
@@ -134,15 +150,18 @@ test.describe('Offline mode', () => {
 
     // Cold start: the SW serves the cached shell, the list paints from IDB.
     await page.reload();
+    await assertStillOffline(page, 'after the cold-start reload');
     await expect(page.getByText(KEEP).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('Offline', { exact: true }).first()).toBeVisible();
 
     // A note never opened online still opens offline via its own route.
     await page.goto(`/notes/${keep.id}`);
+    await assertStillOffline(page, 'after navigating to /notes/:id');
     await expect(page.getByText(`Body of ${KEEP}`)).toBeVisible();
 
     // An unvisited page still opens offline.
     await page.goto('/settings');
+    await assertStillOffline(page, 'after navigating to /settings');
     await expect(page.getByRole('heading', { name: /settings/i }).first()).toBeVisible();
 
     // ── Offline delete ───────────────────────────────────────────────────
@@ -399,6 +418,7 @@ test.describe('Offline cold start in a fresh browsing session', () => {
     // must NOT re-prompt — that is the offline-first promise.
     await goOffline(context, page);
     await page.reload();
+    await assertStillOffline(page, 'after the same-session offline reload');
     await expect(page.getByText(TITLE).first()).toBeVisible({ timeout: 15_000 });
     await expect(page.getByLabel(/^password for this account/i)).toHaveCount(0);
 
@@ -406,6 +426,7 @@ test.describe('Offline cold start in a fresh browsing session', () => {
     // sessionStorage goes — which is exactly what closing a browser does.
     await page.evaluate(() => sessionStorage.clear());
     await page.reload();
+    await assertStillOffline(page, 'after the fresh-session cold start');
 
     // Cold start: locked, and nothing cached is shown.
     await expect(page.getByLabel(/^password for this account/i)).toBeVisible({ timeout: 15_000 });

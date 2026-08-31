@@ -67,7 +67,7 @@ async function loadSession(): Promise<void> {
 		// and this browsing session now has a proof that spares the next
 		// offline reload in this tab a password prompt.
 		locked = false;
-		markIdentityProved(user.id);
+		await markIdentityProved(user.id);
 		persistSessionUser(user);
 		await ensureOfflineOwner(user.id);
 	} catch (err) {
@@ -85,15 +85,17 @@ async function loadSession(): Promise<void> {
 			//     tab. sessionStorage carries that and dies with the tab, so
 			//     it separates "the same person reloaded" from "someone
 			//     opened the app afresh", which is the exact line #61 draws.
-			//     No prompt, and no unlock record needed: a cookie-restored
-			//     session never gave the app a password to store.
+			//     The proof is MAC'd with this browser's unlock material, so
+			//     it cannot be forged, re-dated, or carried here from
+			//     elsewhere — and a browser with no unlock material can hold
+			//     no proof, which is why case 3 catches those.
 			//  2. Otherwise, if this browser holds unlock material, come back
 			//     locked and make them re-enter the password.
 			//  3. Otherwise there is no way to prove ownership at all, so the
 			//     identity is not restored. Fail closed; never "no passcode,
 			//     therefore let them in".
 			const remembered = readSessionUser();
-			if (remembered && identityProvedInThisSession(remembered.id)) {
+			if (remembered && (await identityProvedInThisSession(remembered.id))) {
 				user = remembered;
 				locked = false;
 				await ensureOfflineOwner(user.id);
@@ -177,7 +179,7 @@ export const auth = {
 			locked = false;
 			// Proved for the rest of this browsing session, so reloading
 			// while still offline doesn't ask again.
-			if (user) markIdentityProved(user.id);
+			if (user) await markIdentityProved(user.id);
 			return true;
 		}
 		recordFailedUnlock();
@@ -188,11 +190,10 @@ export const auth = {
 	async login(username: string, password: string) {
 		user = await api.auth.login(username, password);
 		locked = false;
-		markIdentityProved(user.id);
-		// The one moment the app legitimately holds the password: derive and
-		// keep the material that lets this browser be unlocked offline later.
-		// Only the salt, the KDF parameters and the derived bytes are stored.
+		// Order matters: the session proof is authenticated with the unlock
+		// material, so the record has to exist before a proof can be taken.
 		await storeUnlockPasscode(user.id, password);
+		await markIdentityProved(user.id);
 		resetUnlockAttempts();
 		lockoutMs = 0;
 		// A successful login IS a settled session check, so ready() must not

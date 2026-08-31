@@ -18,9 +18,11 @@ import {
 const RECORD_KEY = 'crapnote:offline-unlock';
 
 beforeEach(() => {
+	// Unstub FIRST: a test that replaces `sessionStorage` with a throwing
+	// stub would otherwise leave the next test unable to clear it.
+	vi.unstubAllGlobals();
 	localStorage.clear();
 	sessionStorage.clear();
-	vi.unstubAllGlobals();
 });
 
 describe('offline unlock passcode', () => {
@@ -192,53 +194,124 @@ describe('offline unlock throttle', () => {
  * "someone opened this app afresh" without a wall-clock guess.
  */
 describe('identity proof for the current browsing session', () => {
-	it('remembers a proof taken in this browsing session', () => {
-		markIdentityProved(7, 1_000);
-		expect(identityProvedInThisSession(7, 1_000)).toBe(true);
+	// Every proof is authenticated with the account's unlock material, so a
+	// record has to exist before one can be taken.
+	beforeEach(async () => {
+		await storeUnlockPasscode(7, 'pw');
 	});
 
-	it('is not a proof for a different account', () => {
-		markIdentityProved(7, 1_000);
-		expect(identityProvedInThisSession(8, 1_000)).toBe(false);
+	it('remembers a proof taken in this browsing session', async () => {
+		await markIdentityProved(7, 1_000);
+		expect(await identityProvedInThisSession(7, 1_000)).toBe(true);
 	});
 
-	it('has none when nothing was ever proved', () => {
-		expect(identityProvedInThisSession(7, 1_000)).toBe(false);
+	it('is not a proof for a different account', async () => {
+		await markIdentityProved(7, 1_000);
+		expect(await identityProvedInThisSession(8, 1_000)).toBe(false);
 	});
 
-	it('expires, so a browser left open unattended re-locks', () => {
-		markIdentityProved(7, 1_000);
-		expect(identityProvedInThisSession(7, 1_000 + UNLOCK_PROOF_MAX_AGE_MS - 1)).toBe(true);
-		expect(identityProvedInThisSession(7, 1_000 + UNLOCK_PROOF_MAX_AGE_MS + 1)).toBe(false);
+	it('has none when nothing was ever proved', async () => {
+		expect(await identityProvedInThisSession(7, 1_000)).toBe(false);
 	});
 
-	it('does not outlive the browsing session it was taken in', () => {
-		markIdentityProved(7, 1_000);
+	it('expires, so a browser left open unattended re-locks', async () => {
+		await markIdentityProved(7, 1_000);
+		expect(await identityProvedInThisSession(7, 1_000 + UNLOCK_PROOF_MAX_AGE_MS - 1)).toBe(true);
+		expect(await identityProvedInThisSession(7, 1_000 + UNLOCK_PROOF_MAX_AGE_MS + 1)).toBe(false);
+	});
+
+	it('refuses a future-dated proof, so the cap cannot be dodged by the clock', async () => {
+		// `now` comes from the page, so a proof stamped in the future would
+		// otherwise stay valid indefinitely.
+		await markIdentityProved(7, 5_000_000);
+		expect(await identityProvedInThisSession(7, 1_000)).toBe(false);
+	});
+
+	it('does not outlive the browsing session it was taken in', async () => {
+		await markIdentityProved(7, 1_000);
 		// Closing the tab/window is what clears sessionStorage; nothing else
 		// in the profile does. localStorage explicitly must NOT carry it.
 		expect(localStorage.getItem('crapnote:offline-unlock-session')).toBeNull();
 		sessionStorage.clear();
-		expect(identityProvedInThisSession(7, 1_000)).toBe(false);
+		expect(await identityProvedInThisSession(7, 1_000)).toBe(false);
 	});
 
-	it('is dropped explicitly at logout', () => {
-		markIdentityProved(7, 1_000);
+	it('is dropped explicitly at logout', async () => {
+		await markIdentityProved(7, 1_000);
 		clearIdentityProof();
-		expect(identityProvedInThisSession(7, 1_000)).toBe(false);
+		expect(await identityProvedInThisSession(7, 1_000)).toBe(false);
 	});
 
-	it('fails closed on a corrupt record', () => {
+	it('fails closed on a corrupt record', async () => {
 		sessionStorage.setItem('crapnote:offline-unlock-session', 'not json');
-		expect(identityProvedInThisSession(7, 1_000)).toBe(false);
+		expect(await identityProvedInThisSession(7, 1_000)).toBe(false);
 	});
 
-	it('fails closed when sessionStorage is unavailable', () => {
+	it('fails closed when sessionStorage is unavailable', async () => {
 		vi.stubGlobal('sessionStorage', {
 			getItem: () => { throw new Error('blocked'); },
 			setItem: () => { throw new Error('blocked'); },
 			removeItem: () => { throw new Error('blocked'); },
 		});
-		expect(() => markIdentityProved(7, 1_000)).not.toThrow();
-		expect(identityProvedInThisSession(7, 1_000)).toBe(false);
+		await expect(markIdentityProved(7, 1_000)).resolves.toBeUndefined();
+		expect(await identityProvedInThisSession(7, 1_000)).toBe(false);
+	});
+
+	it('cannot be forged by writing plausible JSON', async () => {
+		// The whole point: without this, one line of JSON opened the cache
+		// with no password and no crypto, making the proof a far weaker
+		// artefact than the KDF record it stands in for.
+		sessionStorage.setItem(
+			'crapnote:offline-unlock-session',
+			JSON.stringify({ userId: 7, at: 1_000 })
+		);
+		expect(await identityProvedInThisSession(7, 1_000)).toBe(false);
+
+		sessionStorage.setItem(
+			'crapnote:offline-unlock-session',
+			JSON.stringify({ userId: 7, at: 1_000, mac: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=' })
+		);
+		expect(await identityProvedInThisSession(7, 1_000)).toBe(false);
+	});
+
+	it('cannot be moved to another timestamp or account', async () => {
+		await markIdentityProved(7, 1_000);
+		const proof = JSON.parse(sessionStorage.getItem('crapnote:offline-unlock-session')!);
+
+		sessionStorage.setItem(
+			'crapnote:offline-unlock-session',
+			JSON.stringify({ ...proof, at: 4_000 })
+		);
+		expect(await identityProvedInThisSession(7, 4_000)).toBe(false);
+
+		sessionStorage.setItem(
+			'crapnote:offline-unlock-session',
+			JSON.stringify({ ...proof, userId: 8 })
+		);
+		expect(await identityProvedInThisSession(8, 1_000)).toBe(false);
+	});
+
+	it('cannot be transplanted onto a browser with different unlock material', async () => {
+		await markIdentityProved(7, 1_000);
+		const proof = sessionStorage.getItem('crapnote:offline-unlock-session')!;
+
+		// Same account, same password, different install (different salt).
+		localStorage.removeItem('crapnote:offline-unlock');
+		await storeUnlockPasscode(7, 'pw');
+		sessionStorage.setItem('crapnote:offline-unlock-session', proof);
+
+		expect(await identityProvedInThisSession(7, 1_000)).toBe(false);
+	});
+
+	it('takes no proof at all when there is no unlock material to key it with', async () => {
+		// Fail closed rather than fall back to an unauthenticated proof: an
+		// optional MAC is no MAC, because the forger simply deletes the
+		// record and takes the weaker path.
+		localStorage.removeItem('crapnote:offline-unlock');
+
+		await markIdentityProved(7, 1_000);
+
+		expect(sessionStorage.getItem('crapnote:offline-unlock-session')).toBeNull();
+		expect(await identityProvedInThisSession(7, 1_000)).toBe(false);
 	});
 });

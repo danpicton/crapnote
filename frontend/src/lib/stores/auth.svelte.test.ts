@@ -42,8 +42,8 @@ vi.mock('$lib/offlineUnlock', () => ({
 	recordFailedUnlock: vi.fn(),
 	resetUnlockAttempts: vi.fn(),
 	unlockLockoutRemainingMs: vi.fn().mockReturnValue(0),
-	markIdentityProved: vi.fn(),
-	identityProvedInThisSession: vi.fn().mockReturnValue(false),
+	markIdentityProved: vi.fn().mockResolvedValue(undefined),
+	identityProvedInThisSession: vi.fn().mockResolvedValue(false),
 	clearIdentityProof: vi.fn(),
 }));
 
@@ -75,7 +75,7 @@ beforeEach(() => {
 	vi.mocked(hasUnlockPasscode).mockReturnValue(true);
 	vi.mocked(verifyUnlockPasscode).mockResolvedValue(true);
 	vi.mocked(unlockLockoutRemainingMs).mockReturnValue(0);
-	vi.mocked(identityProvedInThisSession).mockReturnValue(false);
+	vi.mocked(identityProvedInThisSession).mockResolvedValue(false);
 });
 
 describe('auth.logout', () => {
@@ -427,7 +427,7 @@ describe('offline unlock: same-session continuity', () => {
 		const auth = await freshAuth();
 		vi.mocked(api.auth.me).mockRejectedValue(new OfflineError());
 		vi.mocked(readSessionUser).mockReturnValueOnce(fakeUser);
-		vi.mocked(identityProvedInThisSession).mockReturnValue(true);
+		vi.mocked(identityProvedInThisSession).mockResolvedValue(true);
 
 		await auth.init();
 
@@ -436,20 +436,22 @@ describe('offline unlock: same-session continuity', () => {
 		expect(auth.canReadCache).toBe(true);
 	});
 
-	it('still restores offline in the same session when no unlock record exists', async () => {
-		// A session already server-confirmed in this tab (cookie restore, so
-		// the app never saw the password) must not lose offline access on
-		// reload just because there is nothing to unlock with.
+	it('cannot hold a proof at all without unlock material, so it fails closed', async () => {
+		// The proof is authenticated with the unlock record, so a browser
+		// without one can hold no proof — `identityProvedInThisSession` is
+		// false there by construction. That closes the pre-upgrade window
+		// (a cookie-restored session that never saw a password) to /login
+		// rather than leaving an unauthenticated proof anyone could forge.
 		const auth = await freshAuth();
 		vi.mocked(api.auth.me).mockRejectedValue(new OfflineError());
 		vi.mocked(readSessionUser).mockReturnValueOnce(fakeUser);
-		vi.mocked(identityProvedInThisSession).mockReturnValue(true);
+		vi.mocked(identityProvedInThisSession).mockResolvedValue(false);
 		vi.mocked(hasUnlockPasscode).mockReturnValue(false);
 
 		await auth.init();
 
+		expect(auth.user).toBeNull();
 		expect(auth.locked).toBe(false);
-		expect(auth.user).toEqual(fakeUser);
 	});
 
 	it('locks a fresh browsing session even though the profile is unchanged', async () => {
@@ -458,7 +460,7 @@ describe('offline unlock: same-session continuity', () => {
 		const auth = await freshAuth();
 		vi.mocked(api.auth.me).mockRejectedValue(new OfflineError());
 		vi.mocked(readSessionUser).mockReturnValueOnce(fakeUser);
-		vi.mocked(identityProvedInThisSession).mockReturnValue(false);
+		vi.mocked(identityProvedInThisSession).mockResolvedValue(false);
 
 		await auth.init();
 
@@ -477,6 +479,17 @@ describe('offline unlock: same-session continuity', () => {
 		vi.mocked(api.auth.login).mockResolvedValue(fakeUser);
 		await auth.login('alice', 'pw');
 		expect(markIdentityProved).toHaveBeenCalledWith(3);
+	});
+
+	it('stores the unlock record before taking a proof keyed by it', async () => {
+		const auth = await freshAuth();
+		vi.mocked(api.auth.login).mockResolvedValue(fakeUser);
+
+		await auth.login('alice', 'pw');
+
+		const stored = vi.mocked(storeUnlockPasscode).mock.invocationCallOrder[0];
+		const proved = vi.mocked(markIdentityProved).mock.invocationCallOrder[0];
+		expect(stored).toBeLessThan(proved);
 	});
 
 	it('takes a proof on a successful unlock, so the next reload is quiet', async () => {

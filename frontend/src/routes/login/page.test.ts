@@ -27,8 +27,23 @@ vi.mock('$app/navigation', () => ({
 	goto: vi.fn(),
 }));
 
+// Spread the originals: the real auth store is under test here too, and it
+// imports the rest of both modules.
+vi.mock('$lib/localData', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/localData')>()),
+	readSessionUser: vi.fn().mockReturnValue(null),
+}));
+vi.mock('$lib/offlineUnlock', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/offlineUnlock')>()),
+	hasUnlockPasscode: vi.fn().mockReturnValue(false),
+	storeUnlockPasscode: vi.fn().mockResolvedValue(undefined),
+	markIdentityProved: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { api } from '$lib/api';
 import { goto } from '$app/navigation';
+import { readSessionUser } from '$lib/localData';
+import { hasUnlockPasscode } from '$lib/offlineUnlock';
 
 beforeEach(() => {
 	vi.clearAllMocks();
@@ -167,5 +182,58 @@ describe('Login page offline', () => {
 
 		await waitFor(() => expect(screen.getByText(/you're offline/i)).toBeInTheDocument());
 		expect(screen.queryByText(/invalid username or password/i)).not.toBeInTheDocument();
+	});
+});
+
+
+/**
+ * Someone can land here holding cached notes they cannot reach. Saying so on
+ * arrival matters: the explanation used to be reachable only by filling in
+ * credentials and pressing a button that could not succeed.
+ */
+describe('Login page: offline explanation on arrival', () => {
+	const remembered = { id: 3, username: 'alice', is_admin: false, created_at: '' };
+
+	beforeEach(() => {
+		vi.mocked(readSessionUser).mockReturnValue(null);
+		vi.mocked(hasUnlockPasscode).mockReturnValue(false);
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+	});
+
+	it('explains how to enable offline unlock when this device has notes but no way in', async () => {
+		vi.mocked(readSessionUser).mockReturnValue(remembered);
+		vi.mocked(hasUnlockPasscode).mockReturnValue(false);
+
+		render(LoginPage);
+
+		await waitFor(() =>
+			expect(screen.getByText(/log in once here to unlock them/i)).toBeInTheDocument(),
+		);
+	});
+
+	it('says plainly that logging in needs a connection when offline', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+
+		render(LoginPage);
+
+		await waitFor(() => expect(screen.getByText(/you're offline/i)).toBeInTheDocument());
+	});
+
+	it('says nothing on an ordinary online visit', async () => {
+		render(LoginPage);
+		await new Promise((r) => setTimeout(r, 20));
+
+		expect(screen.queryByText(/you're offline/i)).not.toBeInTheDocument();
+		expect(screen.queryByText(/log in once here to unlock/i)).not.toBeInTheDocument();
+	});
+
+	it('says nothing when this device can already unlock offline', async () => {
+		vi.mocked(readSessionUser).mockReturnValue(remembered);
+		vi.mocked(hasUnlockPasscode).mockReturnValue(true);
+
+		render(LoginPage);
+		await new Promise((r) => setTimeout(r, 20));
+
+		expect(screen.queryByText(/log in once here to unlock/i)).not.toBeInTheDocument();
 	});
 });
