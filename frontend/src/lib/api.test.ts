@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { api, ApiError, OfflineError } from './api';
+import { api, ApiError, OfflineError, SESSION_CHECK_TIMEOUT_MS } from './api';
 
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
@@ -127,5 +127,63 @@ describe('OfflineError', () => {
 		const err = new OfflineError();
 		expect(err).toBeInstanceOf(ApiError);
 		expect(err.status).toBe(503);
+	});
+});
+
+/**
+ * The session check gates the entire app: the root layout renders nothing
+ * until it settles, so a server that accepts the connection and never answers
+ * — captive portal, wedged backend — used to hold the app blank until the
+ * browser's own multi-minute network timeout.
+ */
+describe('session-check deadline', () => {
+	it('gives up on a hung /api/auth/me and reports it as offline', async () => {
+		vi.useFakeTimers();
+		try {
+			mockFetch.mockImplementationOnce(
+				(_path: string, init: RequestInit) =>
+					new Promise((_resolve, reject) => {
+						// A real fetch rejects with AbortError when its signal fires.
+						init.signal?.addEventListener('abort', () =>
+							reject(new DOMException('aborted', 'AbortError')),
+						);
+					}),
+			);
+
+			const pending = api.auth.me();
+			const assertion = expect(pending).rejects.toBeInstanceOf(OfflineError);
+			await vi.advanceTimersByTimeAsync(SESSION_CHECK_TIMEOUT_MS + 10);
+			await assertion;
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('passes an abort signal only where a stall would strand the user', async () => {
+		const user = { id: 1, username: 'alice', is_admin: false, created_at: '' };
+		mockFetch.mockResolvedValueOnce(ok(user));
+		await api.auth.me();
+		expect(mockFetch.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
+
+		// A long-running upload or export must not inherit the gate's deadline.
+		mockFetch.mockResolvedValueOnce(ok([]));
+		await api.notes.list();
+		expect(mockFetch.mock.calls[1][1].signal).toBeUndefined();
+	});
+
+	it('clears its timer once the response lands, so no stray abort fires later', async () => {
+		vi.useFakeTimers();
+		try {
+			const user = { id: 1, username: 'alice', is_admin: false, created_at: '' };
+			mockFetch.mockResolvedValueOnce(ok(user));
+			await api.auth.me();
+			const signal = mockFetch.mock.calls[0][1].signal as AbortSignal;
+
+			await vi.advanceTimersByTimeAsync(SESSION_CHECK_TIMEOUT_MS * 2);
+
+			expect(signal.aborted).toBe(false);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

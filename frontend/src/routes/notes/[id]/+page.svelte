@@ -20,6 +20,8 @@
 	import { api, OfflineError, type Note, type Tag } from '$lib/api';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
 	import { openOfflineDB, getNote as getOfflineNote, upsertNote, type CachedNote } from '$lib/offlineDB';
+	import { openOwnedOfflineDB } from '$lib/localData';
+	import { auth } from '$lib/stores/auth.svelte';
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 	import {
 		Bold, Italic, Underline, Quote, Code, FileCode2,
@@ -200,12 +202,33 @@
 		titleInput?.select();
 	}
 
+	/**
+	 * Opens the offline note store only when this browser may read it: the
+	 * session has settled (`onMount` runs before the root layout has resolved
+	 * `/api/auth/me`) and the store belongs to that user. Offline, `ready()`
+	 * still settles and falls back to the identity remembered at the last
+	 * login, so the legitimate owner keeps their cached notes.
+	 *
+	 * Guarding the list on `/` alone would not be a fix: note ids are small
+	 * consecutive integers, so `/notes/1` would hand out the same cached
+	 * bodies one URL at a time. Returns null to mean "read nothing".
+	 */
+	async function openOwnedCache(): Promise<IDBDatabase | null> {
+		await auth.ready();
+		// Offline, the remembered identity only counts once the password has
+		// been re-verified: it and the store share a browser profile and
+		// survive a browser close together, so ownership alone proves the
+		// machine, not the person.
+		if (!auth.canReadCache) return null;
+		return openOwnedOfflineDB(auth.user?.id ?? null);
+	}
+
 	onMount(async () => {
 		// Negative IDs are offline-created temp notes — load directly from cache
 		if (noteId < 0 || !navigator.onLine) {
-			const db = await openOfflineDB();
-			const cached = await getOfflineNote(db, noteId);
-			db.close();
+			const db = await openOwnedCache();
+			const cached = db ? await getOfflineNote(db, noteId) : null;
+			db?.close();
 			if (cached) {
 				note = {
 					id: cached.id, title: cached.title, body: cached.body,
@@ -228,9 +251,9 @@
 			]);
 			// If the local cache has unsynced edits for this note, keep them —
 			// otherwise a reconnect would silently discard the user's offline work.
-			const db = await openOfflineDB();
-			const cached = await getOfflineNote(db, noteId);
-			db.close();
+			const db = await openOwnedCache();
+			const cached = db ? await getOfflineNote(db, noteId) : null;
+			db?.close();
 			if (cached && cached.is_dirty && !cached.is_new) {
 				note = {
 					...serverNote,
@@ -246,9 +269,9 @@
 			await maybeFocusTitleForNewNote();
 		} catch {
 			// API unavailable — try the offline cache
-			const db = await openOfflineDB();
-			const cached = await getOfflineNote(db, noteId);
-			db.close();
+			const db = await openOwnedCache();
+			const cached = db ? await getOfflineNote(db, noteId) : null;
+			db?.close();
 			if (cached) {
 				note = {
 					id: cached.id, title: cached.title, body: cached.body,

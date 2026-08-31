@@ -6,9 +6,33 @@ import {
 	readSessionUser,
 	clearSessionUser,
 } from '$lib/localData';
+import {
+	storeUnlockPasscode,
+	hasUnlockPasscode,
+	verifyUnlockPasscode,
+	recordFailedUnlock,
+	resetUnlockAttempts,
+	unlockLockoutRemainingMs,
+	markIdentityProved,
+	identityProvedInThisSession,
+} from '$lib/offlineUnlock';
 
 let user = $state<User | null>(null);
 let loading = $state(true);
+/**
+ * True when an identity was restored from local storage and nothing in this
+ * browsing session has proved it. The identity marker and the offline note
+ * store sit in the same browser profile and survive a browser close together,
+ * so one matching the other proves only that this is the same *machine* — not
+ * the same *person*. Until the password is re-entered, nothing cached may be
+ * read or rendered.
+ *
+ * A reload in the same tab is not a fresh start, so it is not re-prompted:
+ * see `identityProvedInThisSession`.
+ */
+let locked = $state(false);
+/** Milliseconds left on the failed-attempt cooldown, for the unlock screen. */
+let lockoutMs = $state(0);
 
 // The in-flight session check, shared by every caller of init()/ready(), and
 // whether one has ever completed. The root layout and a route guard both want
@@ -39,6 +63,11 @@ async function loadSession(): Promise<void> {
 	loading = true;
 	try {
 		user = await api.auth.me();
+		// The server vouched for this session, so there is nothing to unlock —
+		// and this browsing session now has a proof that spares the next
+		// offline reload in this tab a password prompt.
+		locked = false;
+		await markIdentityProved(user.id);
 		persistSessionUser(user);
 		await ensureOfflineOwner(user.id);
 	} catch (err) {
@@ -47,11 +76,42 @@ async function loadSession(): Promise<void> {
 			// identity persisted at the last successful login/session
 			// check. Without this the PWA bounces to /login in airplane
 			// mode even though the user's notes are cached locally.
-			user = readSessionUser();
-			if (user) await ensureOfflineOwner(user.id);
+			//
+			// Restoring it does NOT automatically mean trusting it. Three
+			// cases, in order:
+			//
+			//  1. This identity was already proved in THIS browsing session —
+			//     a server-confirmed session, a login, or an unlock, in this
+			//     tab. sessionStorage carries that and dies with the tab, so
+			//     it separates "the same person reloaded" from "someone
+			//     opened the app afresh", which is the exact line #61 draws.
+			//     The proof is MAC'd with this browser's unlock material, so
+			//     it cannot be forged, re-dated, or carried here from
+			//     elsewhere — and a browser with no unlock material can hold
+			//     no proof, which is why case 3 catches those.
+			//  2. Otherwise, if this browser holds unlock material, come back
+			//     locked and make them re-enter the password.
+			//  3. Otherwise there is no way to prove ownership at all, so the
+			//     identity is not restored. Fail closed; never "no passcode,
+			//     therefore let them in".
+			const remembered = readSessionUser();
+			if (remembered && (await identityProvedInThisSession(remembered.id))) {
+				user = remembered;
+				locked = false;
+				await ensureOfflineOwner(user.id);
+			} else if (remembered && hasUnlockPasscode(remembered.id)) {
+				user = remembered;
+				locked = true;
+				lockoutMs = unlockLockoutRemainingMs();
+				await ensureOfflineOwner(user.id);
+			} else {
+				user = null;
+				locked = false;
+			}
 		} else {
 			// The server answered but this session isn't usable right now.
 			user = null;
+			locked = false;
 			// Forget the persisted identity only on a genuine auth
 			// rejection — a transient 5xx (reachable proxy, backend
 			// restarting) must not strand the next offline start on
@@ -72,6 +132,21 @@ export const auth = {
 	get loading() {
 		return loading;
 	},
+	/** True while a restored-but-unproven identity is waiting for its password. */
+	get locked() {
+		return locked;
+	},
+	/** Milliseconds left on the failed-attempt cooldown (0 when attempts are allowed). */
+	get unlockLockoutMs() {
+		return lockoutMs;
+	},
+	/**
+	 * The single question every cached-data reader asks: is there a user, and
+	 * has this browser been proved to belong to them?
+	 */
+	get canReadCache() {
+		return user !== null && !locked;
+	},
 	init: startSessionCheck,
 	/**
 	 * Resolves once the session state is trustworthy: joins an in-flight
@@ -86,8 +161,46 @@ export const auth = {
 		return checked ? Promise.resolve() : startSessionCheck();
 	},
 
+	/**
+	 * Verifies the password locally and lifts the lock. Returns false — and
+	 * leaves the session locked — for a wrong password or while a cooldown is
+	 * running. The throttle is checked BEFORE the KDF runs, so a caller
+	 * cannot spend the cooldown deriving keys.
+	 */
+	async unlock(password: string): Promise<boolean> {
+		const remaining = unlockLockoutRemainingMs();
+		if (remaining > 0) {
+			lockoutMs = remaining;
+			return false;
+		}
+		if (user && (await verifyUnlockPasscode(user.id, password))) {
+			resetUnlockAttempts();
+			lockoutMs = 0;
+			locked = false;
+			// Proved for the rest of this browsing session, so reloading
+			// while still offline doesn't ask again.
+			if (user) await markIdentityProved(user.id);
+			return true;
+		}
+		recordFailedUnlock();
+		lockoutMs = unlockLockoutRemainingMs();
+		return false;
+	},
+
 	async login(username: string, password: string) {
 		user = await api.auth.login(username, password);
+		locked = false;
+		// Order matters: the session proof is authenticated with the unlock
+		// material, so the record has to exist before a proof can be taken.
+		await storeUnlockPasscode(user.id, password);
+		await markIdentityProved(user.id);
+		resetUnlockAttempts();
+		lockoutMs = 0;
+		// A successful login IS a settled session check, so ready() must not
+		// go fetch /api/auth/me again: the notes page awaits it before it
+		// will read the offline store, and an extra round-trip there would
+		// delay the first paint after every login for no new information.
+		checked = true;
 		persistSessionUser(user);
 		await ensureOfflineOwner(user.id);
 	},
@@ -99,6 +212,8 @@ export const auth = {
 			// user: cached /api responses and the offline note store would
 			// otherwise be readable by (and sync under) the next account.
 			user = null;
+			locked = false;
+			lockoutMs = 0;
 			await clearLocalData();
 		}
 	},

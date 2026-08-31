@@ -86,9 +86,13 @@ test.describe('Tags', () => {
     await page.locator('.tag-panel-item', { hasText: 'filter-tag' }).click();
     await filterDone;
 
-    // Only tagged note visible in list
-    await expect(page.getByRole('list').getByText('Tagged note')).toBeVisible();
-    await expect(page.getByRole('list').getByText('Untagged note')).not.toBeVisible();
+    // Only tagged note visible in list. `exact` matters: "Tagged note" is a
+    // substring of "Untagged note", so a loose match resolves to two elements
+    // and raises a strict-mode violation — which aborts instead of retrying,
+    // turning the normal gap between the filtered response arriving and the
+    // list re-rendering into a failure.
+    await expect(page.getByRole('list').getByText('Tagged note', { exact: true })).toBeVisible();
+    await expect(page.getByRole('list').getByText('Untagged note', { exact: true })).not.toBeVisible();
   });
 
   test('"All" tab restores full note list', async ({ page }) => {

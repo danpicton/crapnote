@@ -5,6 +5,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { registerSW } from '$lib/sw-register';
+	import OfflineUnlock from '$lib/components/OfflineUnlock.svelte';
 
 	let { children } = $props();
 
@@ -64,4 +65,49 @@
 	});
 </script>
 
-{@render children()}
+<!--
+	A restored-but-unproven identity never reaches the app. The notes routes
+	read the offline cache on mount, so gating inside them alone would still
+	let a frame of the previous user's titles paint before the guard cleared
+	it; withholding `children` means those components are never constructed.
+
+	`auth.locked` is false until the session check resolves, so this has to
+	wait for `auth.loading` too — otherwise the app renders first and the
+	notes route mounts (and fetches) on what turns out to be a locked start,
+	which makes the sentence above false. The cost is that a cold load's
+	/api/notes waits one round trip behind /api/auth/me. The routes keep their
+	own `auth.canReadCache` check regardless: this gate is defence in depth,
+	not a licence to drop that one.
+
+	Public routes are never withheld — they render nothing cached, and putting
+	a spinner in front of /login would block the only way back in.
+-->
+{#if isPublicPath($page.url.pathname)}
+	{@render children()}
+{:else if auth.loading}
+	<div class="app-loading" data-testid="app-loading" aria-busy="true" aria-live="polite">
+		<span class="sr-only">Loading…</span>
+	</div>
+{:else if auth.locked}
+	<OfflineUnlock />
+{:else}
+	{@render children()}
+{/if}
+
+<style>
+	.app-loading {
+		min-height: 100dvh;
+		background: var(--bg);
+	}
+	.sr-only {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
+	}
+</style>

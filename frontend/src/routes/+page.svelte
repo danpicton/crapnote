@@ -25,6 +25,7 @@
 	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
 	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote, noteFlags } from '$lib/offlineDB';
+	import { openOwnedOfflineDB } from '$lib/localData';
 	import type { CachedNote } from '$lib/offlineDB';
 	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
@@ -58,7 +59,11 @@
 
 	let notes = $state<Note[]>([]);
 	let isOnline = $state(typeof navigator !== 'undefined' ? navigator.onLine : true);
-	let syncStatus = $state<'synced' | 'syncing' | 'unsynced'>('synced');
+	// 'unknown' is not a cosmetic extra: when the local store cannot be read
+	// the app has no idea whether work is outstanding, and collapsing that
+	// into 'synced' claims all is saved in exactly the state where it cannot
+	// know. It is treated as not-synced everywhere below.
+	let syncStatus = $state<'synced' | 'syncing' | 'unsynced' | 'unknown'>('synced');
 	let lastSyncAt = $state<Date | null>(null);
 	let lastSyncSummary = $state<string>('');
 
@@ -287,7 +292,9 @@
 	let mobileSyncState = $derived.by((): 'synced' | 'syncing' | 'pending' | 'offline' | 'offline-pending' => {
 		if (!isOnline) return syncStatus === 'unsynced' ? 'offline-pending' : 'offline';
 		if (syncStatus === 'syncing') return 'syncing';
-		if (syncStatus === 'unsynced') return 'pending';
+		// 'unknown' shows as pending: erring towards "there may be work to
+		// push" is the safe direction when the store can't be read.
+		if (syncStatus === 'unsynced' || syncStatus === 'unknown') return 'pending';
 		return 'synced';
 	});
 
@@ -382,6 +389,40 @@
 
 	let selectedNote = $derived(notes.find((n) => n.id === selectedId) ?? null);
 
+	/**
+	 * Opens the offline note store only when this browser may touch it.
+	 *
+	 * Two things have to be true, and neither holds at mount time. First the
+	 * session has to have settled: `onMount` runs before the root layout has
+	 * resolved `/api/auth/me`, so reading `auth.user` here without awaiting
+	 * would see null on every full page load and, worse, would paint whatever
+	 * IndexedDB happens to hold to whoever opened the browser. `auth.ready()`
+	 * joins the layout's in-flight check rather than issuing a second one, and
+	 * settles offline too — `/api/auth/me` fails fast there and the store
+	 * falls back to the identity remembered at the last login, which is what
+	 * keeps airplane-mode starts working for the legitimate owner.
+	 *
+	 * Second, that identity has to have been proved. Offline it comes from
+	 * localStorage, which sits beside the IndexedDB store in the same profile
+	 * and survives a browser close with it — so ownership alone would be
+	 * satisfied by whoever opens the app next. `auth.canReadCache` stays false
+	 * until the account password has been re-verified locally.
+	 *
+	 * Only then does the store itself have to belong to that user;
+	 * `openOwnedOfflineDB` fails closed on a mismatch, an unowned store, or no
+	 * user at all. A null return means "render and cache nothing", never
+	 * "carry on unguarded".
+	 */
+	async function openOwnedCache(): Promise<IDBDatabase | null> {
+		await auth.ready();
+		// Offline, a restored identity is not yet a proven one: the marker and
+		// the store live in the same profile and survive a browser close
+		// together, so `owner === user.id` would hold for whoever opened the
+		// app next. `canReadCache` is false until the password is re-entered.
+		if (!auth.canReadCache) return null;
+		return openOwnedOfflineDB(auth.user?.id ?? null);
+	}
+
 	function cachedToNote(c: CachedNote): Note {
 		return {
 			id: c.id,
@@ -395,7 +436,8 @@
 	}
 
 	async function loadFromCache(): Promise<Note[]> {
-		const db = await openOfflineDB();
+		const db = await openOwnedCache();
+		if (!db) return [];
 		const cached = await getAllNotes(db);
 		db.close();
 		// Apply filters using cached metadata. Notes deleted or archived
@@ -421,7 +463,8 @@
 	 */
 	async function loadTagsFromCache(): Promise<Tag[]> {
 		try {
-			const db = await openOfflineDB();
+			const db = await openOwnedCache();
+			if (!db) return [];
 			const cached = await getAllNotes(db);
 			db.close();
 			const byId = new Map<number, Tag>();
@@ -441,7 +484,12 @@
 	}
 
 	async function cacheNotesForOffline(serverNotes: Note[]): Promise<void> {
-		const db = await openOfflineDB();
+		// Writing into someone else's store would defeat the read guard: the
+		// rows would then sit under an owner id that matches that user, who
+		// would be shown this account's notes on their next offline start.
+		// The eviction pass below would also delete their cached notes.
+		const db = await openOwnedCache();
+		if (!db) return;
 
 		const toKeep = new Set<number>();
 		let count = 0;
@@ -498,7 +546,10 @@
 	 * local changes whenever the sync itself failed.
 	 */
 	async function mergeServerWithCache(serverNotes: Note[]): Promise<Note[]> {
-		const db = await openOfflineDB();
+		const db = await openOwnedCache();
+		// No usable cache: show the server list as-is rather than overlaying
+		// local content that may not be this user's.
+		if (!db) return sortNotes(serverNotes, (n) => n.updated_at);
 		const cached = await getAllNotes(db);
 		db.close();
 
@@ -640,10 +691,14 @@
 
 		// Finalise status from IDB — if anything remained dirty (network errors)
 		// keep the "unsynced" indicator on.
-		const db = await openOfflineDB();
-		const stillDirty = await getDirtyNotes(db);
-		db.close();
-		syncStatus = stillDirty.length > 0 ? 'unsynced' : 'synced';
+		const db = await openOwnedCache();
+		if (!db) {
+			syncStatus = 'unknown';
+		} else {
+			const stillDirty = await getDirtyNotes(db);
+			db.close();
+			syncStatus = stillDirty.length > 0 ? 'unsynced' : 'synced';
+		}
 
 		lastSyncAt = new Date();
 		lastSyncSummary = `pushed ${result.pushed.created + result.pushed.updated + result.pushed.deleted + result.pushed.archived}, conflicts ${result.conflicts}, errors ${result.errors}`;
@@ -658,6 +713,7 @@
 	/** Human-readable tooltip for the sync indicator. */
 	let syncTooltip = $derived.by(() => {
 		if (syncStatus === 'syncing') return 'Syncing…';
+		if (syncStatus === 'unknown') return 'Unknown — local changes cannot be read on this device';
 		if (!lastSyncAt) {
 			return syncStatus === 'unsynced' ? 'Unsynced changes — click to sync' : 'Click to sync now';
 		}
@@ -666,9 +722,16 @@
 		return `${state} · last sync ${when} (${lastSyncSummary}) — click to sync now`;
 	});
 
-	/** Read dirty-note count from IndexedDB and update syncStatus (no network call). */
+	/** Read dirty-note count from IndexedDB and update syncStatus (no network call).
+	 * Guarded like every other read: even a count betrays that the previous
+	 * user left unsynced work on this browser, and it runs unconditionally at
+	 * mount, before the layout can redirect an unauthenticated visitor. */
 	async function refreshSyncStatus() {
-		const db = await openOfflineDB();
+		const db = await openOwnedCache();
+		if (!db) {
+			syncStatus = 'unknown';
+			return;
+		}
 		const dirty = await getDirtyNotes(db);
 		db.close();
 		syncStatus = dirty.length > 0 ? 'unsynced' : 'synced';
@@ -902,7 +965,8 @@
 			// Offline — use the tags cached with the note, if any. A genuine
 			// server rejection still surfaces.
 			if (!(err instanceof OfflineError)) throw err;
-			const db = await openOfflineDB();
+			const db = await openOwnedCache();
+			if (!db) { noteTags = []; return; }
 			const cached = await getNote(db, id);
 			db.close();
 			noteTags = (cached?.tags ?? []).map((t) => ({ ...t, note_count: 0 }));
@@ -1622,7 +1686,7 @@
 				<button
 					type="button"
 					class="bottom-btn"
-					class:sync-unsynced={syncStatus === 'unsynced'}
+					class:sync-unsynced={syncStatus === 'unsynced' || syncStatus === 'unknown'}
 					class:sync-syncing={syncStatus === 'syncing'}
 					title={syncTooltip}
 					aria-label={syncTooltip}

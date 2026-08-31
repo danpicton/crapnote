@@ -58,7 +58,24 @@ vi.mock('$lib/api', () => {
 });
 
 vi.mock('$lib/stores/auth.svelte', () => ({
-	auth: { user: { id: 1, username: 'alice', is_admin: false, created_at: '' }, loading: false, logout: vi.fn() },
+	auth: {
+		user: { id: 1, username: 'alice', is_admin: false, created_at: '' },
+		loading: false,
+		logout: vi.fn(),
+		// The page awaits this before it touches the offline store, so every
+		// test needs it. Resolved by default = "auth already settled".
+		ready: vi.fn().mockResolvedValue(undefined),
+		locked: false,
+		// "There is a user AND this browser has been proved to be theirs."
+		canReadCache: true,
+	},
+}));
+
+// The offline-store ownership gate. Resolving to a handle is the "this
+// browser's cache belongs to the signed-in user" case that every other test
+// assumes; the guard tests override it with null.
+vi.mock('$lib/localData', () => ({
+	openOwnedOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
 }));
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
@@ -123,6 +140,8 @@ import { api, OfflineError } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
 import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 import { syncOfflineChanges } from '$lib/offlineSync';
+import { auth } from '$lib/stores/auth.svelte';
+import { openOwnedOfflineDB } from '$lib/localData';
 
 // Helper: override matchMedia to simulate a mobile or desktop viewport for one test.
 function mockViewport(mobile: boolean) {
@@ -1285,5 +1304,181 @@ describe('pinned note reordering', () => {
 
 		await fireEvent(grip, pointer('pointerup', 2));
 		vi.unstubAllGlobals();
+	});
+});
+
+/**
+ * Read-path ownership gate (issue #61).
+ *
+ * The offline store outlives a session: `clearLocalData()` only runs on an
+ * explicit logout, so a browser that was merely closed still holds the last
+ * user's note titles and bodies. Nothing may reach the DOM from it until we
+ * know who is looking — the live session when online, the identity remembered
+ * at the last login when offline — and that the store belongs to them.
+ */
+describe('offline cache ownership guard', () => {
+	const cachedNote = (title: string) => ({
+		id: 1, title, body: 'Confidential body', starred: false, pinned: false, tags: [],
+		server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+		is_dirty: false, is_new: false,
+	});
+
+	beforeEach(() => {
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue({ close: vi.fn() } as unknown as IDBDatabase);
+		vi.mocked(auth.ready).mockResolvedValue(undefined);
+		(auth as { canReadCache: boolean }).canReadCache = true;
+	});
+
+	/** Resolves once the mount-time list load has run to completion, so a
+	 * "nothing rendered" assertion can't pass merely by being early. */
+	async function listLoadSettled() {
+		await waitFor(() => expect(api.tags.list).toHaveBeenCalled());
+		await new Promise((r) => setTimeout(r, 20));
+	}
+
+	it('renders nothing from a store owned by someone else', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue(null);
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([cachedNote("Previous user's note")]);
+
+		render(Page);
+		await listLoadSettled();
+
+		expect(screen.queryByText("Previous user's note")).not.toBeInTheDocument();
+		expect(screen.queryByText(/Confidential body/)).not.toBeInTheDocument();
+	});
+
+	it('reads nothing from a store owned by someone else', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue(null);
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([cachedNote("Previous user's note")]);
+
+		render(Page);
+		await listLoadSettled();
+
+		// Belt and braces: the rows must not even be fetched out of IDB, so a
+		// future consumer of the list can't leak them some other way.
+		expect(offlineDB.getAllNotes).not.toHaveBeenCalled();
+	});
+
+	it('renders cached notes for the user the store belongs to', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([cachedNote('My own note')]);
+
+		render(Page);
+
+		await waitFor(() => expect(screen.getByText('My own note')).toBeInTheDocument());
+	});
+
+	it('checks ownership against the resolved user, not the one present at mount', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([cachedNote('Late-checked note')]);
+		let settleAuth!: () => void;
+		vi.mocked(auth.ready).mockReturnValue(new Promise<void>((r) => { settleAuth = () => r(); }));
+
+		render(Page);
+
+		// Nothing may paint while the session is still unknown: a flash of the
+		// previous user's titles is the leak, not just a steady-state render.
+		await new Promise((r) => setTimeout(r, 20));
+		expect(screen.queryByText('Late-checked note')).not.toBeInTheDocument();
+
+		settleAuth();
+		await waitFor(() => expect(screen.getByText('Late-checked note')).toBeInTheDocument());
+	});
+
+	it('does not write freshly fetched notes into a store owned by someone else', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue(null);
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ id: 5, title: 'Online Note' })]);
+
+		render(Page);
+		await waitFor(() => screen.getByText('Online Note'));
+		await listLoadSettled();
+
+		// Caching into a foreign store would let the guard hand this user's
+		// notes straight back to that store's owner.
+		expect(offlineDB.upsertNote).not.toHaveBeenCalled();
+		expect(offlineDB.deleteNote).not.toHaveBeenCalled();
+	});
+
+	it('does not rebuild the tag list from a foreign store', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue(null);
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ ...cachedNote('Some note'), tags: [{ id: 3, name: 'private-tag' }] },
+		]);
+		// /api/tags is unreachable, so the sidebar falls back to the tag names
+		// cached on the offline notes — another read of the same store.
+		vi.mocked(api.tags.list).mockRejectedValue(new OfflineError());
+
+		render(Page);
+		await listLoadSettled();
+
+		expect(offlineDB.getAllNotes).not.toHaveBeenCalled();
+	});
+});
+
+
+/**
+ * The ownership check alone is not the fix (issue #61 review): the offline
+ * store and the `crapnote:session-user` marker live in the same browser
+ * profile and survive a browser close together, so `owner === auth.user.id`
+ * holds for whoever opens the app next. Offline, the identity only counts
+ * once the password has been re-verified — `auth.canReadCache`.
+ */
+describe('offline cache unlock gate', () => {
+	const cachedNote = (title: string) => ({
+		id: 1, title, body: 'Confidential body', starred: false, pinned: false, tags: [],
+		server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+		is_dirty: false, is_new: false,
+	});
+
+	async function settled() {
+		await waitFor(() => expect(api.tags.list).toHaveBeenCalled());
+		await new Promise((r) => setTimeout(r, 20));
+	}
+
+	beforeEach(() => {
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue({ close: vi.fn() } as unknown as IDBDatabase);
+		vi.mocked(auth.ready).mockResolvedValue(undefined);
+		(auth as { canReadCache: boolean }).canReadCache = true;
+	});
+
+	it('reads nothing while the restored session is still locked', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		(auth as { canReadCache: boolean }).canReadCache = false;
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([cachedNote('Locked-away note')]);
+
+		render(Page);
+		await settled();
+
+		expect(screen.queryByText('Locked-away note')).not.toBeInTheDocument();
+		expect(offlineDB.getAllNotes).not.toHaveBeenCalled();
+		// The ownership check must never even be reached: it would pass.
+		expect(openOwnedOfflineDB).not.toHaveBeenCalled();
+	});
+
+	it('reads the cache again once the password has unlocked it', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([cachedNote('Unlocked note')]);
+
+		render(Page);
+
+		await waitFor(() => expect(screen.getByText('Unlocked note')).toBeInTheDocument());
+	});
+
+	it('does not claim everything is saved when it cannot read the store', async () => {
+		// "No readable store" is not "no unsynced work" — saying so in exactly
+		// the state where the app cannot know is the wrong way to be wrong.
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue(null);
+
+		render(Page);
+		await settled();
+
+		expect(screen.queryByTitle(/all changes synced/i)).not.toBeInTheDocument();
+		expect(screen.queryByTitle(/^click to sync now$/i)).not.toBeInTheDocument();
+		expect(screen.getByTitle(/unknown/i)).toBeInTheDocument();
 	});
 });
