@@ -34,7 +34,25 @@ vi.mock('$lib/localData', () => ({
 	clearSessionUser: vi.fn(),
 }));
 
+vi.mock('$lib/offlineUnlock', () => ({
+	storeUnlockPasscode: vi.fn().mockResolvedValue(undefined),
+	hasUnlockPasscode: vi.fn().mockReturnValue(true),
+	verifyUnlockPasscode: vi.fn().mockResolvedValue(true),
+	clearUnlockPasscode: vi.fn(),
+	recordFailedUnlock: vi.fn(),
+	resetUnlockAttempts: vi.fn(),
+	unlockLockoutRemainingMs: vi.fn().mockReturnValue(0),
+}));
+
 import { api, ApiError, OfflineError } from '$lib/api';
+import {
+	storeUnlockPasscode,
+	hasUnlockPasscode,
+	verifyUnlockPasscode,
+	recordFailedUnlock,
+	resetUnlockAttempts,
+	unlockLockoutRemainingMs,
+} from '$lib/offlineUnlock';
 import {
 	clearLocalData,
 	ensureOfflineOwner,
@@ -49,6 +67,9 @@ const fakeUser = { id: 3, username: 'alice', is_admin: false, created_at: '' };
 beforeEach(() => {
 	vi.clearAllMocks();
 	auth.setUser(null);
+	vi.mocked(hasUnlockPasscode).mockReturnValue(true);
+	vi.mocked(verifyUnlockPasscode).mockResolvedValue(true);
+	vi.mocked(unlockLockoutRemainingMs).mockReturnValue(0);
 });
 
 describe('auth.logout', () => {
@@ -253,5 +274,122 @@ describe('auth readiness', () => {
 
 		expect(api.auth.me).toHaveBeenCalledTimes(1);
 		expect(auth.user?.username).toBe('renamed');
+	});
+});
+
+
+/**
+ * Local unlock (issue #61). The offline store and the session-user marker
+ * live in the same browser profile and survive a browser close together, so
+ * matching them proves nothing about who is at the keyboard. Without a live
+ * server-confirmed session, the password is the only thing that separates the
+ * owner from the next person to open the app.
+ */
+describe('offline unlock gate', () => {
+	it('never locks a live, server-confirmed session', async () => {
+		const auth = await freshAuth();
+		vi.mocked(api.auth.me).mockResolvedValue(fakeUser);
+
+		await auth.init();
+
+		expect(auth.locked).toBe(false);
+		expect(auth.user).toEqual(fakeUser);
+	});
+
+	it('locks an offline restore, holding the identity but not trusting it yet', async () => {
+		const auth = await freshAuth();
+		vi.mocked(api.auth.me).mockRejectedValue(new OfflineError());
+		vi.mocked(readSessionUser).mockReturnValueOnce(fakeUser);
+
+		await auth.init();
+
+		expect(auth.locked).toBe(true);
+		expect(auth.user).toEqual(fakeUser);
+	});
+
+	it('fails closed offline when this browser has no unlock material', async () => {
+		// An install from before unlock shipped, or a browser without
+		// WebCrypto: there is no way to prove ownership, so the identity must
+		// not be restored at all — never "no passcode, therefore let them in".
+		const auth = await freshAuth();
+		vi.mocked(api.auth.me).mockRejectedValue(new OfflineError());
+		vi.mocked(readSessionUser).mockReturnValueOnce(fakeUser);
+		vi.mocked(hasUnlockPasscode).mockReturnValue(false);
+
+		await auth.init();
+
+		expect(auth.user).toBeNull();
+		expect(auth.locked).toBe(false);
+		expect(ensureOfflineOwner).not.toHaveBeenCalled();
+	});
+
+	it('stays logged out, and unlocked, offline when nobody was ever persisted', async () => {
+		const auth = await freshAuth();
+		vi.mocked(api.auth.me).mockRejectedValue(new OfflineError());
+
+		await auth.init();
+
+		expect(auth.user).toBeNull();
+		expect(auth.locked).toBe(false);
+	});
+
+	it('records unlock material at login, so the next offline start can be unlocked', async () => {
+		const auth = await freshAuth();
+		vi.mocked(api.auth.login).mockResolvedValue(fakeUser);
+
+		await auth.login('alice', 'pw');
+
+		expect(storeUnlockPasscode).toHaveBeenCalledWith('pw');
+		expect(auth.locked).toBe(false);
+	});
+
+	it('unlocks on the right password and clears the failure count', async () => {
+		const auth = await freshAuth();
+		vi.mocked(api.auth.me).mockRejectedValue(new OfflineError());
+		vi.mocked(readSessionUser).mockReturnValueOnce(fakeUser);
+		await auth.init();
+
+		await expect(auth.unlock('pw')).resolves.toBe(true);
+
+		expect(auth.locked).toBe(false);
+		expect(resetUnlockAttempts).toHaveBeenCalled();
+	});
+
+	it('stays locked on a wrong password and counts the failure', async () => {
+		const auth = await freshAuth();
+		vi.mocked(api.auth.me).mockRejectedValue(new OfflineError());
+		vi.mocked(readSessionUser).mockReturnValueOnce(fakeUser);
+		await auth.init();
+		vi.mocked(verifyUnlockPasscode).mockResolvedValue(false);
+
+		await expect(auth.unlock('wrong')).resolves.toBe(false);
+
+		expect(auth.locked).toBe(true);
+		expect(recordFailedUnlock).toHaveBeenCalledTimes(1);
+	});
+
+	it('refuses to even derive a key while a cooldown is running', async () => {
+		const auth = await freshAuth();
+		vi.mocked(api.auth.me).mockRejectedValue(new OfflineError());
+		vi.mocked(readSessionUser).mockReturnValueOnce(fakeUser);
+		await auth.init();
+		vi.mocked(unlockLockoutRemainingMs).mockReturnValue(30_000);
+
+		await expect(auth.unlock('pw')).resolves.toBe(false);
+
+		expect(verifyUnlockPasscode).not.toHaveBeenCalled();
+		expect(auth.locked).toBe(true);
+		expect(auth.unlockLockoutMs).toBe(30_000);
+	});
+
+	it('a locked session is not a readable one', async () => {
+		const auth = await freshAuth();
+		vi.mocked(api.auth.me).mockRejectedValue(new OfflineError());
+		vi.mocked(readSessionUser).mockReturnValueOnce(fakeUser);
+		await auth.init();
+
+		expect(auth.canReadCache).toBe(false);
+		await auth.unlock('pw');
+		expect(auth.canReadCache).toBe(true);
 	});
 });

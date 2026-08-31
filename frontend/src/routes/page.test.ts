@@ -65,6 +65,9 @@ vi.mock('$lib/stores/auth.svelte', () => ({
 		// The page awaits this before it touches the offline store, so every
 		// test needs it. Resolved by default = "auth already settled".
 		ready: vi.fn().mockResolvedValue(undefined),
+		locked: false,
+		// "There is a user AND this browser has been proved to be theirs."
+		canReadCache: true,
 	},
 }));
 
@@ -1323,6 +1326,7 @@ describe('offline cache ownership guard', () => {
 	beforeEach(() => {
 		vi.mocked(openOwnedOfflineDB).mockResolvedValue({ close: vi.fn() } as unknown as IDBDatabase);
 		vi.mocked(auth.ready).mockResolvedValue(undefined);
+		(auth as { canReadCache: boolean }).canReadCache = true;
 	});
 
 	/** Resolves once the mount-time list load has run to completion, so a
@@ -1412,5 +1416,69 @@ describe('offline cache ownership guard', () => {
 		await listLoadSettled();
 
 		expect(offlineDB.getAllNotes).not.toHaveBeenCalled();
+	});
+});
+
+
+/**
+ * The ownership check alone is not the fix (issue #61 review): the offline
+ * store and the `crapnote:session-user` marker live in the same browser
+ * profile and survive a browser close together, so `owner === auth.user.id`
+ * holds for whoever opens the app next. Offline, the identity only counts
+ * once the password has been re-verified — `auth.canReadCache`.
+ */
+describe('offline cache unlock gate', () => {
+	const cachedNote = (title: string) => ({
+		id: 1, title, body: 'Confidential body', starred: false, pinned: false, tags: [],
+		server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+		is_dirty: false, is_new: false,
+	});
+
+	async function settled() {
+		await waitFor(() => expect(api.tags.list).toHaveBeenCalled());
+		await new Promise((r) => setTimeout(r, 20));
+	}
+
+	beforeEach(() => {
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue({ close: vi.fn() } as unknown as IDBDatabase);
+		vi.mocked(auth.ready).mockResolvedValue(undefined);
+		(auth as { canReadCache: boolean }).canReadCache = true;
+	});
+
+	it('reads nothing while the restored session is still locked', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		(auth as { canReadCache: boolean }).canReadCache = false;
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([cachedNote('Locked-away note')]);
+
+		render(Page);
+		await settled();
+
+		expect(screen.queryByText('Locked-away note')).not.toBeInTheDocument();
+		expect(offlineDB.getAllNotes).not.toHaveBeenCalled();
+		// The ownership check must never even be reached: it would pass.
+		expect(openOwnedOfflineDB).not.toHaveBeenCalled();
+	});
+
+	it('reads the cache again once the password has unlocked it', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([cachedNote('Unlocked note')]);
+
+		render(Page);
+
+		await waitFor(() => expect(screen.getByText('Unlocked note')).toBeInTheDocument());
+	});
+
+	it('does not claim everything is saved when it cannot read the store', async () => {
+		// "No readable store" is not "no unsynced work" — saying so in exactly
+		// the state where the app cannot know is the wrong way to be wrong.
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue(null);
+
+		render(Page);
+		await settled();
+
+		expect(screen.queryByTitle(/all changes synced/i)).not.toBeInTheDocument();
+		expect(screen.queryByTitle(/^click to sync now$/i)).not.toBeInTheDocument();
+		expect(screen.getByTitle(/unknown/i)).toBeInTheDocument();
 	});
 });

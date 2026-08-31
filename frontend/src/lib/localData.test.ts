@@ -71,6 +71,17 @@ describe('clearLocalData', () => {
 		await expect(clearLocalData()).resolves.toBeUndefined();
 	});
 
+	it('forgets the offline unlock material', async () => {
+		stubCaches([]);
+		localStorage.setItem('crapnote:offline-unlock', JSON.stringify({ v: 1 }));
+		localStorage.setItem('crapnote:offline-unlock-attempts', JSON.stringify({ failures: 3 }));
+
+		await clearLocalData();
+
+		expect(localStorage.getItem('crapnote:offline-unlock')).toBeNull();
+		expect(localStorage.getItem('crapnote:offline-unlock-attempts')).toBeNull();
+	});
+
 	it('forgets the persisted session user', async () => {
 		stubCaches([]);
 		persistSessionUser({ id: 5, username: 'alice', is_admin: false, created_at: '' });

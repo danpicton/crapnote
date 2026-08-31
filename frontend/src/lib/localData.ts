@@ -1,4 +1,5 @@
 import { openOfflineDB, deleteOfflineDB, getOfflineOwner, setOfflineOwner, clearAllNotes } from '$lib/offlineDB';
+import { clearUnlockPasscode } from '$lib/offlineUnlock';
 import type { User } from '$lib/api';
 
 // localStorage key holding the last authenticated user, so the PWA can
@@ -61,6 +62,7 @@ export async function clearLocalData(): Promise<void> {
 		// Same: if IDB is unavailable there is nothing to clear.
 	}
 	clearSessionUser();
+	clearUnlockPasscode();
 }
 
 /**
@@ -101,20 +103,24 @@ export async function ensureOfflineOwner(userId: number): Promise<void> {
  *
  * The store outlives a session — `clearLocalData()` runs on an explicit
  * logout and nothing else — so a browser that was merely closed still holds
- * the previous user's note titles and bodies. Every read that can reach the
- * DOM, and every bulk write, goes through here so cached content is only ever
- * touched on behalf of the account it belongs to.
+ * the previous user's note titles and bodies. The list and note routes send
+ * every cache read that can reach the DOM, and the bulk `cacheNotesForOffline`
+ * write, through here. Single-note writes (the offline save/create/flag
+ * paths in the routes and in `offlineActions.ts`) still open the store
+ * directly — tracked in #107 — so this is not yet a complete chokepoint.
  *
  * `userId` is the resolved session user online, or the identity remembered at
- * the last login when offline (see `readSessionUser`). It is null when nobody
- * is or was signed in here.
+ * the last login when offline (see `readSessionUser`) — and offline that
+ * identity only counts once `auth.unlock()` has verified the password, which
+ * callers check separately. It is null when nobody is or was signed in here.
  *
  * Fails closed on every uncertainty:
  *   - no user id → refuse, so a browser with no remembered login renders nothing;
- *   - no owner recorded → refuse rather than adopt. `ensureOfflineOwner` runs
- *     as part of login and session restore, so by the time auth has settled a
- *     genuine user's store is always stamped; an unstamped one means the
- *     rows got there without an owner ever being established;
+ *   - no owner recorded → refuse rather than adopt. The sync path adopts an
+ *     unowned store instead, to avoid stranding pre-#60 offline edits; a read
+ *     that can reach the DOM has no such excuse, and an unstamped store means
+ *     `ensureOfflineOwner` never ran or silently failed (it swallows its
+ *     errors), which is exactly when guessing is least defensible;
  *   - owner ≠ userId → refuse. `ensureOfflineOwner` wipes on a switch, but it
  *     swallows its own failures, so this must not be assumed to have happened.
  *

@@ -59,7 +59,11 @@
 
 	let notes = $state<Note[]>([]);
 	let isOnline = $state(typeof navigator !== 'undefined' ? navigator.onLine : true);
-	let syncStatus = $state<'synced' | 'syncing' | 'unsynced'>('synced');
+	// 'unknown' is not a cosmetic extra: when the local store cannot be read
+	// the app has no idea whether work is outstanding, and collapsing that
+	// into 'synced' claims all is saved in exactly the state where it cannot
+	// know. It is treated as not-synced everywhere below.
+	let syncStatus = $state<'synced' | 'syncing' | 'unsynced' | 'unknown'>('synced');
 	let lastSyncAt = $state<Date | null>(null);
 	let lastSyncSummary = $state<string>('');
 
@@ -288,7 +292,9 @@
 	let mobileSyncState = $derived.by((): 'synced' | 'syncing' | 'pending' | 'offline' | 'offline-pending' => {
 		if (!isOnline) return syncStatus === 'unsynced' ? 'offline-pending' : 'offline';
 		if (syncStatus === 'syncing') return 'syncing';
-		if (syncStatus === 'unsynced') return 'pending';
+		// 'unknown' shows as pending: erring towards "there may be work to
+		// push" is the safe direction when the store can't be read.
+		if (syncStatus === 'unsynced' || syncStatus === 'unknown') return 'pending';
 		return 'synced';
 	});
 
@@ -396,12 +402,24 @@
 	 * falls back to the identity remembered at the last login, which is what
 	 * keeps airplane-mode starts working for the legitimate owner.
 	 *
-	 * Then the store itself has to belong to that user; `openOwnedOfflineDB`
-	 * fails closed on a mismatch, an unowned store, or no user at all. A null
-	 * return means "render and cache nothing", never "carry on unguarded".
+	 * Second, that identity has to have been proved. Offline it comes from
+	 * localStorage, which sits beside the IndexedDB store in the same profile
+	 * and survives a browser close with it — so ownership alone would be
+	 * satisfied by whoever opens the app next. `auth.canReadCache` stays false
+	 * until the account password has been re-verified locally.
+	 *
+	 * Only then does the store itself have to belong to that user;
+	 * `openOwnedOfflineDB` fails closed on a mismatch, an unowned store, or no
+	 * user at all. A null return means "render and cache nothing", never
+	 * "carry on unguarded".
 	 */
 	async function openOwnedCache(): Promise<IDBDatabase | null> {
 		await auth.ready();
+		// Offline, a restored identity is not yet a proven one: the marker and
+		// the store live in the same profile and survive a browser close
+		// together, so `owner === user.id` would hold for whoever opened the
+		// app next. `canReadCache` is false until the password is re-entered.
+		if (!auth.canReadCache) return null;
 		return openOwnedOfflineDB(auth.user?.id ?? null);
 	}
 
@@ -674,9 +692,13 @@
 		// Finalise status from IDB — if anything remained dirty (network errors)
 		// keep the "unsynced" indicator on.
 		const db = await openOwnedCache();
-		const stillDirty = db ? await getDirtyNotes(db) : [];
-		db?.close();
-		syncStatus = stillDirty.length > 0 ? 'unsynced' : 'synced';
+		if (!db) {
+			syncStatus = 'unknown';
+		} else {
+			const stillDirty = await getDirtyNotes(db);
+			db.close();
+			syncStatus = stillDirty.length > 0 ? 'unsynced' : 'synced';
+		}
 
 		lastSyncAt = new Date();
 		lastSyncSummary = `pushed ${result.pushed.created + result.pushed.updated + result.pushed.deleted + result.pushed.archived}, conflicts ${result.conflicts}, errors ${result.errors}`;
@@ -691,6 +713,7 @@
 	/** Human-readable tooltip for the sync indicator. */
 	let syncTooltip = $derived.by(() => {
 		if (syncStatus === 'syncing') return 'Syncing…';
+		if (syncStatus === 'unknown') return 'Unknown — local changes cannot be read on this device';
 		if (!lastSyncAt) {
 			return syncStatus === 'unsynced' ? 'Unsynced changes — click to sync' : 'Click to sync now';
 		}
@@ -705,8 +728,12 @@
 	 * mount, before the layout can redirect an unauthenticated visitor. */
 	async function refreshSyncStatus() {
 		const db = await openOwnedCache();
-		const dirty = db ? await getDirtyNotes(db) : [];
-		db?.close();
+		if (!db) {
+			syncStatus = 'unknown';
+			return;
+		}
+		const dirty = await getDirtyNotes(db);
+		db.close();
 		syncStatus = dirty.length > 0 ? 'unsynced' : 'synced';
 	}
 
@@ -1659,7 +1686,7 @@
 				<button
 					type="button"
 					class="bottom-btn"
-					class:sync-unsynced={syncStatus === 'unsynced'}
+					class:sync-unsynced={syncStatus === 'unsynced' || syncStatus === 'unknown'}
 					class:sync-syncing={syncStatus === 'syncing'}
 					title={syncTooltip}
 					aria-label={syncTooltip}

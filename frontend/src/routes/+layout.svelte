@@ -5,6 +5,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { registerSW } from '$lib/sw-register';
+	import OfflineUnlock from '$lib/components/OfflineUnlock.svelte';
 
 	let { children } = $props();
 
@@ -64,4 +65,15 @@
 	});
 </script>
 
-{@render children()}
+<!--
+	A restored-but-unproven identity never reaches the app. The notes routes
+	read the offline cache on mount, so gating inside them alone would still
+	let a frame of the previous user's titles paint before the guard cleared
+	it; withholding `children` means those components are never constructed.
+	`auth.locked` is only ever true offline, so an online session is untouched.
+-->
+{#if auth.locked && !isPublicPath($page.url.pathname)}
+	<OfflineUnlock />
+{:else}
+	{@render children()}
+{/if}

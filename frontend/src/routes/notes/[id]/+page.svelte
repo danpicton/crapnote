@@ -215,6 +215,11 @@
 	 */
 	async function openOwnedCache(): Promise<IDBDatabase | null> {
 		await auth.ready();
+		// Offline, the remembered identity only counts once the password has
+		// been re-verified: it and the store share a browser profile and
+		// survive a browser close together, so ownership alone proves the
+		// machine, not the person.
+		if (!auth.canReadCache) return null;
 		return openOwnedOfflineDB(auth.user?.id ?? null);
 	}
 

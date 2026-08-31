@@ -97,6 +97,8 @@ vi.mock('$lib/stores/auth.svelte', () => ({
 		user: { id: 1, username: 'alice', is_admin: false, created_at: '' },
 		loading: false,
 		ready: vi.fn().mockResolvedValue(undefined),
+		locked: false,
+		canReadCache: true,
 	},
 }));
 
@@ -109,6 +111,7 @@ vi.mock('$lib/localData', () => ({
 import { api } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
 import { openOwnedOfflineDB } from '$lib/localData';
+import { auth } from '$lib/stores/auth.svelte';
 import { goto } from '$app/navigation';
 
 const mockNote = (overrides = {}) => ({
@@ -699,6 +702,23 @@ describe('/notes/[id] offline cache ownership guard', () => {
 		vi.mocked(api.tags.list).mockResolvedValue([]);
 		vi.mocked(openOwnedOfflineDB).mockResolvedValue(null);
 		vi.mocked(offlineDB.getNote).mockResolvedValue(foreign);
+		(auth as { canReadCache: boolean }).canReadCache = true;
+	});
+
+	it('reads nothing while the restored session is still locked', async () => {
+		// The list route is gated by the layout; this route must refuse on its
+		// own too, since note ids are guessable and go straight to the store.
+		(auth as { canReadCache: boolean }).canReadCache = false;
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue({ close: vi.fn() } as unknown as IDBDatabase);
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(api.notes.get).mockRejectedValue(new Error('offline'));
+
+		render(NotePage);
+		await new Promise((r) => setTimeout(r, 20));
+
+		expect(screen.queryByDisplayValue("Previous user's title")).not.toBeInTheDocument();
+		expect(offlineDB.getNote).not.toHaveBeenCalled();
+		expect(openOwnedOfflineDB).not.toHaveBeenCalled();
 	});
 
 	it('renders nothing cached when offline and the store belongs to someone else', async () => {
