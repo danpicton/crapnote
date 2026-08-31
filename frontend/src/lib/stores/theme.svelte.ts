@@ -27,6 +27,14 @@ function createThemeStore() {
 	let current = $state<ThemeId>('light');
 	let globalTheme = $state<ThemeId | null>(null);
 
+	// Bumped every time setGlobal() writes the global theme. init() snapshots it
+	// before its fetch starts and discards the response if the count has moved
+	// on, so a slow GET can never resurrect a value the admin has just replaced.
+	// A counter rather than a "has ever been written" flag: the test is whether
+	// *this* fetch is older than the latest write, so an init() started after a
+	// save is still free to apply what it reads.
+	let globalWrites = 0;
+
 	function applyToDOM(t: ThemeId) {
 		document.documentElement.setAttribute('data-theme', t);
 		syncBrowserThemeColor();
@@ -78,8 +86,11 @@ function createThemeStore() {
 		}
 		applyToDOM(current);
 
+		const writesAtFetch = globalWrites;
 		try {
 			const { theme: global } = await api.theme.get();
+			// A setGlobal() landed while this was in flight; its value is newer.
+			if (globalWrites !== writesAtFetch) return;
 			if (isThemeId(global)) {
 				globalTheme = global;
 				if (!hasUserPreference()) {
@@ -104,6 +115,7 @@ function createThemeStore() {
 	async function setGlobal(id: ThemeId) {
 		if (!isThemeId(id)) return;
 		await api.theme.setGlobal(id);
+		globalWrites++;
 		globalTheme = id;
 		if (!hasUserPreference()) {
 			current = id;
