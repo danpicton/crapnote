@@ -64,6 +64,11 @@ func (s *Service) Delete(ctx context.Context, id, userID int64) error {
 
 // ensureUnlocked returns ErrLocked if the note is locked, ErrNotFound if it
 // does not belong to the user.
+//
+// This is a courtesy check, not the guarantee: a lock landing between it and
+// the write would slip past. Repo.Update and Repo.SoftDelete re-check
+// `locked = 0` in the statement that writes, which is what actually enforces
+// the lock.
 func (s *Service) ensureUnlocked(ctx context.Context, id, userID int64) error {
 	locked, err := s.repo.IsLocked(ctx, id, userID)
 	if err != nil {

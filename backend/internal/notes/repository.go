@@ -141,7 +141,12 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 
 // Update performs a partial update of a note's title and/or body. Only non-nil
 // fields are written; the other field keeps its current value.
-// Returns ErrNotFound if the note does not exist or belongs to a different user.
+// Returns ErrNotFound if the note does not exist or belongs to a different
+// user, and ErrLocked if it is locked.
+//
+// The lock is enforced by this statement's own WHERE clause rather than by a
+// preceding SELECT, so a lock landing between a caller's check and this write
+// (ToggleLock, or the daily AutoLockStale job) still stops the edit.
 func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string) (*Note, error) {
 	now := time.Now().UTC()
 	res, err := r.db.ExecContext(ctx, `
@@ -149,17 +154,39 @@ func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string
 		SET title      = CASE WHEN ? IS NOT NULL THEN ? ELSE title END,
 		    body       = CASE WHEN ? IS NOT NULL THEN ? ELSE body  END,
 		    updated_at = ?
-		WHERE id = ? AND user_id = ?`,
+		WHERE id = ? AND user_id = ? AND locked = 0`,
 		title, title, body, body, now, id, userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("update note rows affected: %w", err)
+	}
 	if rows == 0 {
-		return nil, ErrNotFound
+		return nil, r.explainBlockedWrite(ctx, id, userID)
 	}
 	return r.Get(ctx, id, userID)
+}
+
+// explainBlockedWrite says why a write guarded by `locked = 0` matched no rows,
+// so the caller can still tell a 404 from a 423.
+//
+// IsLocked reports ErrNotFound when the row is absent or another user's, which
+// is the right answer for both. Otherwise the row is present and the caller's,
+// and since note IDs are never reused (AUTOINCREMENT) and a note never changes
+// owner, it was present and theirs during the write too — leaving `locked = 0`
+// as the only predicate that can have failed. So this returns ErrLocked even
+// when the flag reads 0 by the time we look: that only means the note was
+// unlocked in the meantime, and the write still did not happen. The write
+// itself is decided by the single guarded statement, so nothing here can let an
+// edit through — this only names the failure.
+func (r *Repo) explainBlockedWrite(ctx context.Context, id, userID int64) error {
+	if _, err := r.IsLocked(ctx, id, userID); err != nil {
+		return err
+	}
+	return ErrLocked
 }
 
 // scanNotes drains a rows set selecting the standard note column list.
@@ -381,22 +408,41 @@ func (r *Repo) setBool(ctx context.Context, col string, id, userID int64, val bo
 
 // SoftDelete moves a note to the trash table.
 // Subsequent Get/List calls will exclude trashed notes.
+//
+// Ownership and the lock are both conditions of the INSERT rather than of a
+// preceding SELECT, so a note locked between a caller's check and this write is
+// never trashed: a refused delete writes no trash row at all.
+// Deleting an already-trashed note remains a no-op.
 func (r *Repo) SoftDelete(ctx context.Context, id, userID int64) error {
-	// Verify ownership first.
-	var exists int
-	if err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM notes WHERE id=? AND user_id=?`, id, userID,
-	).Scan(&exists); err != nil {
-		return fmt.Errorf("soft delete check: %w", err)
+	res, err := r.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO trash(note_id, user_id)
+		SELECT id, user_id FROM notes
+		WHERE id = ? AND user_id = ? AND locked = 0`,
+		id, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("soft delete: %w", err)
 	}
-	if exists == 0 {
-		return ErrNotFound
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("soft delete rows affected: %w", err)
+	}
+	if rows > 0 {
+		return nil
 	}
 
-	_, err := r.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO trash(note_id, user_id) VALUES(?, ?)`, id, userID,
-	)
-	return err
+	// No row inserted: the note is already in the trash (OR IGNORE swallowed
+	// the duplicate), or the SELECT matched nothing.
+	var trashed int
+	if err := r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM trash WHERE note_id = ? AND user_id = ?`, id, userID,
+	).Scan(&trashed); err != nil {
+		return fmt.Errorf("soft delete trash check: %w", err)
+	}
+	if trashed > 0 {
+		return nil
+	}
+	return r.explainBlockedWrite(ctx, id, userID)
 }
 
 // Archive moves a note to the archive (hidden from normal list but not deleted).

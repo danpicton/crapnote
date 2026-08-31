@@ -534,3 +534,240 @@ func lockNoteViaHandler(t *testing.T, h *notes.Handler, user *auth.User, id stri
 		t.Fatalf("lock note: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// ── the lock is enforced by the write statement itself ───────────────────────
+//
+// Service.Update / Service.Delete check the lock with ensureUnlocked before
+// they write. That check is a courtesy, not the guarantee: ToggleLock or the
+// daily AutoLockStale job can lock the note in the gap between the check and
+// the write. These tests drive the repository directly, which is the state the
+// racing writer leaves behind at the moment the write runs.
+
+// trashCount reports how many trash rows exist for a note.
+func trashCount(t *testing.T, database *db.DB, noteID int64) int {
+	t.Helper()
+	var n int
+	if err := database.QueryRow(
+		`SELECT COUNT(*) FROM trash WHERE note_id = ?`, noteID,
+	).Scan(&n); err != nil {
+		t.Fatalf("trashCount: %v", err)
+	}
+	return n
+}
+
+func TestNoteRepo_Update_RefusesLockedNote(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Locked", "original body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+
+	if _, err := repo.Update(ctx, note.ID, userID, strPtr("hacked"), strPtr("new body")); !errors.Is(err, notes.ErrLocked) {
+		t.Fatalf("expected ErrLocked from the UPDATE itself, got %v", err)
+	}
+
+	got, err := repo.Get(ctx, note.ID, userID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Title != "Locked" || got.Body != "original body" {
+		t.Fatalf("locked note was modified: %+v", got)
+	}
+}
+
+// A refused edit must not move updated_at — that column is the staleness clock
+// the auto-lock job reads.
+func TestNoteRepo_Update_RefusedEditPreservesUpdatedAt(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Locked", "body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+	before, err := repo.Get(ctx, note.ID, userID)
+	if err != nil {
+		t.Fatalf("Get before: %v", err)
+	}
+
+	if _, err := repo.Update(ctx, note.ID, userID, strPtr("hacked"), nil); !errors.Is(err, notes.ErrLocked) {
+		t.Fatalf("expected ErrLocked, got %v", err)
+	}
+
+	after, err := repo.Get(ctx, note.ID, userID)
+	if err != nil {
+		t.Fatalf("Get after: %v", err)
+	}
+	if !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Fatalf("refused update moved updated_at: %v -> %v", before.UpdatedAt, after.UpdatedAt)
+	}
+}
+
+// A zero-row write must still tell 404 from 423: another user's note is
+// missing, not locked.
+func TestNoteRepo_Update_OtherUserIsNotFoundNotLocked(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Mine", "body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+
+	if _, err := repo.Update(ctx, note.ID, userID+999, strPtr("hacked"), nil); !errors.Is(err, notes.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for another user, got %v", err)
+	}
+}
+
+func TestNoteRepo_SoftDelete_RefusesLockedNoteAndWritesNoTrashRow(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Locked", "body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+
+	if err := repo.SoftDelete(ctx, note.ID, userID); !errors.Is(err, notes.ErrLocked) {
+		t.Fatalf("expected ErrLocked from the write itself, got %v", err)
+	}
+	if n := trashCount(t, database, note.ID); n != 0 {
+		t.Fatalf("locked note produced %d trash rows, want 0", n)
+	}
+}
+
+func TestNoteRepo_SoftDelete_OtherUserIsNotFoundNotLocked(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Mine", "body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+
+	if err := repo.SoftDelete(ctx, note.ID, userID+999); !errors.Is(err, notes.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for another user, got %v", err)
+	}
+	if n := trashCount(t, database, note.ID); n != 0 {
+		t.Fatalf("another user's delete produced %d trash rows, want 0", n)
+	}
+}
+
+// Deleting an already-trashed note stays a no-op rather than becoming a 404.
+func TestNoteRepo_SoftDelete_Idempotent(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Bye", "body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SoftDelete(ctx, note.ID, userID); err != nil {
+		t.Fatalf("first SoftDelete: %v", err)
+	}
+	if err := repo.SoftDelete(ctx, note.ID, userID); err != nil {
+		t.Fatalf("second SoftDelete should be a no-op, got %v", err)
+	}
+	if n := trashCount(t, database, note.ID); n != 1 {
+		t.Fatalf("expected exactly 1 trash row, got %d", n)
+	}
+}
+
+// The race, played out in order: the service's lock check passes, the note is
+// locked by another writer, then the write lands.
+func TestService_Update_LockLandingAfterTheCheckStillRefuses(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Racy", "original body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// 1. What Service.Update's ensureUnlocked sees.
+	locked, err := repo.IsLocked(ctx, note.ID, userID)
+	if err != nil {
+		t.Fatalf("IsLocked: %v", err)
+	}
+	if locked {
+		t.Fatal("precondition: note should start unlocked")
+	}
+
+	// 2. ToggleLock (or AutoLockStale) lands in the gap.
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+
+	// 3. The write must refuse on its own.
+	if _, err := repo.Update(ctx, note.ID, userID, strPtr("hacked"), nil); !errors.Is(err, notes.ErrLocked) {
+		t.Fatalf("expected ErrLocked, got %v", err)
+	}
+	got, err := repo.Get(ctx, note.ID, userID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Title != "Racy" || got.Body != "original body" {
+		t.Fatalf("racing edit landed on a locked note: %+v", got)
+	}
+}
+
+// Same race, with the real-world concurrent writer: the daily auto-lock job.
+func TestService_Delete_AutoLockLandingAfterTheCheckStillRefuses(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Stale", "body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	backdateNote(t, database, note.ID, 8*24*time.Hour)
+
+	// The service's ensureUnlocked would pass here.
+	if locked, err := repo.IsLocked(ctx, note.ID, userID); err != nil || locked {
+		t.Fatalf("precondition: IsLocked = %v, %v", locked, err)
+	}
+
+	if n, err := repo.AutoLockStale(ctx, 7*24*time.Hour); err != nil || n != 1 {
+		t.Fatalf("AutoLockStale = %d, %v", n, err)
+	}
+
+	if err := repo.SoftDelete(ctx, note.ID, userID); !errors.Is(err, notes.ErrLocked) {
+		t.Fatalf("expected ErrLocked, got %v", err)
+	}
+	if n := trashCount(t, database, note.ID); n != 0 {
+		t.Fatalf("racing delete trashed an auto-locked note: %d trash rows", n)
+	}
+}
