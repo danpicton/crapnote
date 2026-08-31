@@ -74,7 +74,7 @@ func TestRequireAuth_ContextUserPassesThrough(t *testing.T) {
 func TestRequireAuth_ValidSession_InjectsUser(t *testing.T) {
 	h, svc := newMiddlewareFixture(t)
 	svc.SeedAdmin(t.Context(), "alice", "pass") //nolint:errcheck
-	sess, err := svc.Login(t.Context(), "alice", "pass")
+	sess, err := svc.Login(t.Context(), "alice", "pass", testIP)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestRequireAuth_LockedUser_SessionRejected(t *testing.T) {
 	h := auth.NewHandler(svc)
 
 	svc.SeedAdmin(t.Context(), "alice", "pass") //nolint:errcheck
-	sess, err := svc.Login(t.Context(), "alice", "pass")
+	sess, err := svc.Login(t.Context(), "alice", "pass", testIP)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}

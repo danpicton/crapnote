@@ -143,7 +143,7 @@ func TestHandler_Login_Cookie_IgnoresForwardedProtoWithoutTrust(t *testing.T) {
 func TestHandler_Logout_Cookie_MatchesTransport(t *testing.T) {
 	h, svc := newTestHandler(t)
 	svc.SeedAdmin(t.Context(), "admin", "pass") //nolint:errcheck
-	sess, _ := svc.Login(t.Context(), "admin", "pass")
+	sess, _ := svc.Login(t.Context(), "admin", "pass", testIP)
 
 	// Over plain HTTP the cleared cookie should also not be Secure
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
@@ -190,7 +190,7 @@ func TestHandler_Login_LockedAccount_Returns403(t *testing.T) {
 
 	// Enough failed attempts → locked.
 	for i := 0; i < auth.DefaultMaxFailedLoginAttempts; i++ {
-		svc.Login(t.Context(), "alice", "wrong") //nolint:errcheck
+		svc.Login(t.Context(), "alice", "wrong", testIP) //nolint:errcheck
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
@@ -208,7 +208,7 @@ func TestHandler_Me(t *testing.T) {
 	h, svc := newTestHandler(t)
 	svc.SeedAdmin(t.Context(), "admin", "pass") //nolint:errcheck
 
-	sess, _ := svc.Login(t.Context(), "admin", "pass")
+	sess, _ := svc.Login(t.Context(), "admin", "pass", testIP)
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	req.AddCookie(&http.Cookie{Name: "session", Value: sess.ID})
 
@@ -252,11 +252,11 @@ func TestHandler_ChangePassword_Success(t *testing.T) {
 	}
 
 	// New password works.
-	if _, err := svc.Login(t.Context(), "alice", "brandnewpass456"); err != nil {
+	if _, err := svc.Login(t.Context(), "alice", "brandnewpass456", testIP); err != nil {
 		t.Fatalf("new password should work: %v", err)
 	}
 	// Old password no longer works.
-	if _, err := svc.Login(t.Context(), "alice", "currentpass123"); err != auth.ErrInvalidCredentials {
+	if _, err := svc.Login(t.Context(), "alice", "currentpass123", testIP); err != auth.ErrInvalidCredentials {
 		t.Fatalf("old password should fail, got %v", err)
 	}
 }
@@ -278,7 +278,7 @@ func TestHandler_ChangePassword_NoCurrent_Succeeds(t *testing.T) {
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
 	}
-	if _, err := svc.Login(t.Context(), "alice", "brandnewpass456"); err != nil {
+	if _, err := svc.Login(t.Context(), "alice", "brandnewpass456", testIP); err != nil {
 		t.Fatalf("new password should work: %v", err)
 	}
 }
@@ -314,7 +314,7 @@ func TestHandler_ChangePassword_Unauthenticated_Returns401(t *testing.T) {
 func TestHandler_Logout(t *testing.T) {
 	h, svc := newTestHandler(t)
 	svc.SeedAdmin(t.Context(), "admin", "pass") //nolint:errcheck
-	sess, _ := svc.Login(t.Context(), "admin", "pass")
+	sess, _ := svc.Login(t.Context(), "admin", "pass", testIP)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	req.AddCookie(&http.Cookie{Name: "session", Value: sess.ID})
@@ -400,5 +400,75 @@ func TestHandler_Login_AdminLocked_CorrectPassword_Returns403WithCode(t *testing
 	// from a self-clearing cool-down.
 	if body["code"] != "account_locked" {
 		t.Fatalf(`expected code "account_locked", got %q (body=%s)`, body["code"], w.Body.String())
+	}
+}
+
+func TestHandler_Login_LockoutFollowsTheRequestClientIP(t *testing.T) {
+	h, _, users := newTestHandlerWithRepo(t)
+	createUser(t, users, "alice", "correctpass", false)
+
+	post := func(remoteAddr, password string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+			bytes.NewBufferString(`{"username":"alice","password":"`+password+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = remoteAddr
+		w := httptest.NewRecorder()
+		h.Login(w, req)
+		return w
+	}
+
+	// Burn the threshold from one address.
+	for i := 0; i < auth.DefaultMaxFailedLoginAttempts; i++ {
+		if code := post("198.51.100.7:5555", "wrong").Code; code != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: expected 401, got %d", i+1, code)
+		}
+	}
+
+	// That address is now in cool-down, and says so.
+	w := post("198.51.100.7:5555", "correctpass")
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for the guessing address, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["code"] != "login_cooldown" {
+		t.Fatalf(`expected code "login_cooldown", got %q (body=%s)`, body["code"], w.Body.String())
+	}
+
+	// The real owner, on a different connection, is untouched.
+	if got := post("203.0.113.4:5555", "correctpass").Code; got != http.StatusOK {
+		t.Fatalf("expected 200 for the owner's address, got %d", got)
+	}
+}
+
+func TestHandler_Login_LockoutUsesTheProxyResolvedIP(t *testing.T) {
+	h, _, users := newTestHandlerWithRepo(t)
+	createUser(t, users, "alice", "correctpass", false)
+
+	// Behind a trusted proxy every request shares one RemoteAddr, so keying on
+	// it would put the whole internet in a single bucket. The lockout has to
+	// use the address httpx resolved, exactly as the rate limiter and the
+	// audit log do.
+	post := func(forwarded, password string) int {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+			bytes.NewBufferString(`{"username":"alice","password":"`+password+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", forwarded)
+		req.RemoteAddr = "10.0.0.1:5555"
+		w := httptest.NewRecorder()
+		httpx.TrustProxy()(http.HandlerFunc(h.Login)).ServeHTTP(w, req)
+		return w.Code
+	}
+
+	for i := 0; i < auth.DefaultMaxFailedLoginAttempts; i++ {
+		post("198.51.100.7", "wrong")
+	}
+	if got := post("198.51.100.7", "correctpass"); got != http.StatusForbidden {
+		t.Fatalf("expected 403 for the guessing client, got %d", got)
+	}
+	if got := post("203.0.113.4", "correctpass"); got != http.StatusOK {
+		t.Fatalf("expected 200 for a different client behind the same proxy, got %d", got)
 	}
 }

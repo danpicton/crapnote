@@ -46,7 +46,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sess, err := h.svc.Login(r.Context(), req.Username, req.Password)
+	sess, err := h.svc.Login(r.Context(), req.Username, req.Password, httpx.ClientIP(r))
 	if errors.Is(err, ErrInvalidCredentials) {
 		slog.Warn("audit: login failed",
 			"event", "login_failed",

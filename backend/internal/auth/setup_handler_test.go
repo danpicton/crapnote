@@ -101,7 +101,7 @@ func TestSetupHandler_Complete_SetsPasswordAndConsumesToken(t *testing.T) {
 	}
 
 	// New password must work.
-	if _, err := svc.Login(ctx, "alice", "brand-new-password-abc"); err != nil {
+	if _, err := svc.Login(ctx, "alice", "brand-new-password-abc", testIP); err != nil {
 		t.Fatalf("expected new password to work, got %v", err)
 	}
 

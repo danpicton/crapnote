@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -246,7 +247,7 @@ func TestAdminHandler_SetUserPassword_UpdatesHashAndUnlocks(t *testing.T) {
 	}
 
 	// The new password must work.
-	if _, err := svc.Login(ctx, "erin", "new-strong-pass-1234"); err != nil {
+	if _, err := svc.Login(ctx, "erin", "new-strong-pass-1234", testIP); err != nil {
 		t.Fatalf("expected login with new password to succeed, got %v", err)
 	}
 }
@@ -265,7 +266,7 @@ func TestAdminHandler_SetUserPassword_RevokesSessions(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
 	erinID := int64(created["id"].(float64))
 
-	sess, err := svc.Login(ctx, "erin", "correct-horse-battery")
+	sess, err := svc.Login(ctx, "erin", "correct-horse-battery", testIP)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -359,7 +360,7 @@ func TestAdminHandler_LockUser_RevokesSessions(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
 	bobID := int64(created["id"].(float64))
 
-	sess, err := svc.Login(ctx, "bob", "correct-horse-battery")
+	sess, err := svc.Login(ctx, "bob", "correct-horse-battery", testIP)
 	if err != nil {
 		t.Fatalf("login: %v", err)
 	}
@@ -420,7 +421,7 @@ func TestAdminHandler_UnlockUser_ClearsLockAndAttempts(t *testing.T) {
 	graceID := int64(created["id"].(float64))
 
 	for i := 0; i < 3; i++ {
-		svc.Login(ctx, "grace", "wrong") //nolint:errcheck
+		svc.Login(ctx, "grace", "wrong", testIP) //nolint:errcheck
 	}
 
 	// Unlock via admin endpoint.
@@ -441,7 +442,7 @@ func TestAdminHandler_UnlockUser_ClearsLockAndAttempts(t *testing.T) {
 	}
 
 	// Correct login must now succeed.
-	if _, err := svc.Login(ctx, "grace", "correct-horse-battery"); err != nil {
+	if _, err := svc.Login(ctx, "grace", "correct-horse-battery", testIP); err != nil {
 		t.Fatalf("expected login to succeed after unlock, got %v", err)
 	}
 }
@@ -529,5 +530,50 @@ func TestAdminHandler_DeleteUser_CannotDeleteSelf(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for self-delete, got %d", w.Code)
+	}
+}
+
+func TestAdminHandler_UnlockUser_ClearsAutomaticPerIPLockouts(t *testing.T) {
+	// The invite fixture shares one Service between login and the admin
+	// handler, as main.go does — the per-(IP, username) state lives on that
+	// Service, so the two have to be the same one.
+	h, admin, svc := newAdminInviteFixture(t)
+	ctx := context.Background()
+
+	body := `{"username":"grace","password":"correct-horse-battery","is_admin":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.CreateUser(w, req)
+	if w.Code != http.StatusCreated && w.Code != http.StatusOK {
+		t.Fatalf("create user: %d %s", w.Code, w.Body.String())
+	}
+	var created map[string]any
+	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
+	graceID := int64(created["id"].(float64))
+
+	// cooldown <= 0 makes the automatic lock indefinite for the pair, so
+	// admin unlock is the only way back short of restarting the process.
+	svc.SetLockoutPolicy(3, 0)
+	for i := 0; i < 3; i++ {
+		svc.Login(ctx, "grace", "wrong", "198.51.100.7") //nolint:errcheck
+	}
+	if _, err := svc.Login(ctx, "grace", "correct-horse-battery", "198.51.100.7"); !errors.Is(err, auth.ErrAccountCooldown) {
+		t.Fatalf("expected the address to be in cool-down, got %v", err)
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost,
+		fmt.Sprintf("/api/admin/users/%d/unlock", graceID), nil)
+	req2.SetPathValue("id", fmt.Sprintf("%d", graceID))
+	req2 = adminRequest(req2, admin)
+	w2 := httptest.NewRecorder()
+	h.UnlockUser(w2, req2)
+
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w2.Code, w2.Body.String())
+	}
+	if _, err := svc.Login(ctx, "grace", "correct-horse-battery", "198.51.100.7"); err != nil {
+		t.Fatalf("admin unlock must release the automatic per-address lockout, got %v", err)
 	}
 }

@@ -16,10 +16,16 @@ type User struct {
 }
 
 // Locked reports whether the account's lock is active at the given time.
-// Manual admin locks have no LockedUntil and are indefinite; automatic
-// failed-login locks carry a LockedUntil and lapse once it passes. Callers
-// that can write (e.g. Login) should also clear a lapsed lock via
-// UserRepo.Unlock so the stored state catches up.
+// Manual admin locks have no LockedUntil and are indefinite; a LockedUntil
+// marks a time-limited lock, which lapses once it passes. Callers that can
+// write (e.g. Login) should also clear a lapsed lock via UserRepo.Unlock so
+// the stored state catches up.
+//
+// Automatic failed-login lockout no longer writes here — it is scoped to a
+// (client IP, username) pair in memory, see lockout.go — so a LockedUntil on
+// the row is either an operator's doing or a leftover from the account-scoped
+// scheme that shipped in #60. FailedLoginAttempts is likewise legacy: nothing
+// increments it any more, and a successful login zeroes it.
 func (u *User) Locked(now time.Time) bool {
 	if u.LockedAt == nil {
 		return false

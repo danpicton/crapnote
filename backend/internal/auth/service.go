@@ -69,36 +69,54 @@ type Service struct {
 	ttl               time.Duration
 	maxFailedAttempts int
 	lockoutCooldown   time.Duration
+	// attempts holds automatic failed-login state per (client IP, username);
+	// see lockout.go for why it is scoped that way and why it is in memory.
+	attempts *lockoutTracker
 }
 
 // NewService creates a new auth Service without invite support (legacy
 // callers). CreateInvite and CompleteSetup will return an error if invoked.
 func NewService(users *UserRepo, sessions *SessionRepo, sessionTTL time.Duration) *Service {
-	return &Service{
-		users: users, sessions: sessions, ttl: sessionTTL,
-		maxFailedAttempts: DefaultMaxFailedLoginAttempts,
-		lockoutCooldown:   DefaultLockoutCooldown,
-	}
+	return newService(users, sessions, nil, sessionTTL)
 }
 
 // NewServiceWithInvites creates a new auth Service that supports the admin
 // invite / first-login password setup flow.
 func NewServiceWithInvites(users *UserRepo, sessions *SessionRepo, invites *InviteRepo, sessionTTL time.Duration) *Service {
+	return newService(users, sessions, invites, sessionTTL)
+}
+
+func newService(users *UserRepo, sessions *SessionRepo, invites *InviteRepo, sessionTTL time.Duration) *Service {
 	return &Service{
 		users: users, sessions: sessions, invites: invites, ttl: sessionTTL,
 		maxFailedAttempts: DefaultMaxFailedLoginAttempts,
 		lockoutCooldown:   DefaultLockoutCooldown,
+		attempts:          newLockoutTracker(),
 	}
 }
 
 // SetLockoutPolicy overrides the automatic-lockout tuning. maxAttempts < 1
-// keeps the current threshold; cooldown <= 0 makes automatic locks indefinite
-// (pre-cool-down behaviour, admin unlock required).
+// keeps the current threshold.
+//
+// cooldown <= 0 keeps the pre-#60 semantic that automatic locks do not lapse.
+// Scoped to a (client IP, username) pair rather than to the account, that
+// means the pair stays locked until an admin unlocks the account
+// (ClearAutomaticLockouts), the process restarts, or the entry is evicted
+// under the tracker's capacity limit — see lockout.go.
 func (s *Service) SetLockoutPolicy(maxAttempts int, cooldown time.Duration) {
 	if maxAttempts >= 1 {
 		s.maxFailedAttempts = maxAttempts
 	}
 	s.lockoutCooldown = cooldown
+}
+
+// ClearAutomaticLockouts releases every automatic (client IP, username)
+// lockout held against a username, across all addresses. Admin unlock calls
+// it so an operator can free a user without restarting the process — which
+// matters most when the policy's cool-down is <= 0 and the locks never lapse
+// on their own. It does not touch the user row; UserRepo.Unlock does that.
+func (s *Service) ClearAutomaticLockouts(username string) {
+	s.attempts.clearUsername(username)
 }
 
 // SeedAdmin creates the initial admin user if no users exist yet.
@@ -131,7 +149,13 @@ func (s *Service) SeedAdmin(ctx context.Context, username, password string) erro
 // for an indefinite admin lock, ErrAccountCooldown (which wraps it) for a
 // self-clearing failed-attempt cool-down. Returns ErrLoginNotConfigured if
 // the Service was constructed with a zero session TTL.
-func (s *Service) Login(ctx context.Context, username, password string) (*Session, error) {
+//
+// clientIP is the caller's proxy-resolved address (httpx.ClientIP) and scopes
+// the automatic failed-attempt lockout, so guessing at a username locks only
+// the address doing the guessing. Pass it explicitly rather than through the
+// context so the scoping is visible at every call site and testable without
+// a request.
+func (s *Service) Login(ctx context.Context, username, password, clientIP string) (*Session, error) {
 	// Checked before the user lookup and before any password comparison. The
 	// outcome depends only on how this Service was constructed, never on the
 	// supplied credentials, so failing first leaks nothing an attacker could
@@ -167,23 +191,26 @@ func (s *Service) Login(ctx context.Context, username, password string) (*Sessio
 		u.FailedLoginAttempts = 0
 	}
 
+	// Automatic lockout is counted per (client IP, username), never per
+	// account — see lockout.go. Keyed on the stored spelling so case or
+	// whitespace variants of the username cannot each get a fresh budget.
+	attemptKey := lockoutKey{ip: clientIP, username: u.Username}
+
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
 		// Only non-admin accounts are subject to automatic lockout. Admins are
 		// exempt so a brute-force attempt cannot strand the system with no one
 		// able to unlock anyone.
+		//
+		// Note what is deliberately absent: no lock is written to the user
+		// row, and the user's sessions are NOT revoked. Both were global
+		// effects reachable by an unauthenticated stranger who only had to
+		// guess a username — revocation in particular let an attacker log the
+		// owner out of every device on demand, which is the same denial of
+		// service in a different coat. Failing to guess a password is no
+		// evidence that an established session is compromised; an admin lock
+		// still revokes, and ValidateSession still rejects a locked user.
 		if !u.IsAdmin {
-			n, incErr := s.users.IncrementFailedAttempts(ctx, u.ID)
-			if incErr == nil && n >= s.maxFailedAttempts {
-				if s.lockoutCooldown > 0 {
-					s.users.LockUntil(ctx, u.ID, time.Now().Add(s.lockoutCooldown)) //nolint:errcheck
-				} else {
-					s.users.Lock(ctx, u.ID) //nolint:errcheck
-				}
-				// Lockout implies the account may be under attack — evict any
-				// established sessions rather than leaving them live, via the
-				// revocation choke-point so audit hooks cover this path too.
-				s.RevokeUserSessions(ctx, u.ID) //nolint:errcheck
-			}
+			s.attempts.recordFailure(attemptKey, s.maxFailedAttempts, s.lockoutCooldown)
 		}
 		// Deliberately the same answer whether or not the account is locked.
 		// The lock is only disclosed to a caller who proved they hold the
@@ -195,14 +222,23 @@ func (s *Service) Login(ctx context.Context, username, password string) (*Sessio
 	// The password checked out, so the caller is the account owner (or already
 	// holds their credential) and the lock state can safely be disclosed.
 	// Still no session: a locked account grants nothing.
+	//
+	// The user row first — an admin lock, or a lock left on the row by the
+	// account-scoped scheme that shipped in #60.
 	if u.LockedAt != nil {
 		if u.LockedUntil != nil {
 			return nil, ErrAccountCooldown
 		}
 		return nil, ErrAccountLocked
 	}
+	// Then this address's own failed-attempt cool-down.
+	if s.attempts.locked(attemptKey) {
+		return nil, ErrAccountCooldown
+	}
 
-	// Successful login — clear the failed-attempt counter.
+	// Successful login — clear this address's counter, and zero the row's
+	// legacy counter so pre-#62 state heals on first use.
+	s.attempts.clear(attemptKey)
 	s.users.ResetFailedAttempts(ctx, u.ID) //nolint:errcheck
 
 	exp := time.Now().Add(s.ttl).UTC()
