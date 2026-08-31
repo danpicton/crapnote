@@ -30,12 +30,24 @@
 
 	let globalThemeError = $state('');
 
+	// The value the global-theme <select> shows. It has to be state this
+	// component owns rather than `theme.globalTheme` read straight into the
+	// markup: a one-way `value` prop is re-applied to the DOM only when the
+	// expression behind it changes, and a failed save leaves theme.globalTheme
+	// exactly as it was — so nothing would push the select off the admin's
+	// rejected pick. Recording the pick here makes the revert a real change.
+	// It stays a $derived so it keeps following the store: the async init()
+	// load and every successful save drop the override and flow through.
+	let globalThemeSelection = $derived(theme.globalTheme ?? '');
+
 	async function saveGlobalTheme(value: string) {
 		globalThemeError = '';
+		globalThemeSelection = value;
 		try {
 			await theme.setGlobal(value as (typeof theme.themes)[number]['id']);
 		} catch {
 			globalThemeError = 'Failed to save the global theme.';
+			globalThemeSelection = theme.globalTheme ?? '';
 		}
 	}
 
@@ -235,7 +247,7 @@
 						<select
 							class="theme-select"
 							aria-label="Global theme"
-							value={theme.globalTheme ?? ''}
+							value={globalThemeSelection}
 							onchange={(e) => saveGlobalTheme(e.currentTarget.value)}
 						>
 							<option value="" disabled>Not set</option>

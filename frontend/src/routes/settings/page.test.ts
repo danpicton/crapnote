@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { SvelteMap } from 'svelte/reactivity';
 import SettingsPage from './+page.svelte';
 
 const mockApi = vi.hoisted(() => ({
@@ -33,6 +34,12 @@ vi.mock('$lib/components/MobileTabBar.svelte', () => ({
 	default: (anchor: unknown, props: unknown) => { void anchor; void props; },
 }));
 
+// globalTheme is backed by a SvelteMap so the mock is reactive the way the
+// real rune-based store is: theme.init() resolves its GET after mount, so a
+// component reading globalTheme has to keep following it, not snapshot it.
+// (A plain property would be read once and never invalidate anything.)
+const themeSignals = new SvelteMap<string, string | null>();
+
 // vi.mock is hoisted; use vi.hoisted so mockTheme is available inside the factory.
 const mockTheme = vi.hoisted(() => ({
 	current: 'light' as string,
@@ -45,7 +52,12 @@ const mockTheme = vi.hoisted(() => ({
 		{ id: 'rawblock', label: 'Rawblock' },
 		{ id: 'verdana', label: 'Verdana' },
 	],
-	globalTheme: null as string | null,
+	get globalTheme(): string | null {
+		return themeSignals.get('globalTheme') ?? null;
+	},
+	set globalTheme(value: string | null) {
+		themeSignals.set('globalTheme', value);
+	},
 	set: vi.fn(),
 	setGlobal: vi.fn(),
 	toggle: vi.fn(),
@@ -173,6 +185,98 @@ describe('Settings — Global theme (admin)', () => {
 		await fireEvent.change(select, { target: { value: 'bianco' } });
 		await waitFor(() => {
 			expect(mockTheme.setGlobal).toHaveBeenCalledWith('bianco');
+		});
+	});
+
+	// A failed save must not leave the select showing a value the server does
+	// not hold: the DOM is the admin's only signal of what the global theme is.
+	it('reverts the select to the stored global theme when the save fails', async () => {
+		mockTheme.globalTheme = 'rosso';
+		mockTheme.setGlobal = vi.fn().mockRejectedValue(new Error('boom'));
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+
+		await fireEvent.change(select, { target: { value: 'bianco' } });
+
+		await waitFor(() => {
+			expect(screen.getByText('Failed to save the global theme.')).toBeInTheDocument();
+		});
+		expect(select.value).toBe('rosso');
+	});
+
+	it('reverts the select to "Not set" when the save fails and no global theme is stored', async () => {
+		mockTheme.globalTheme = null;
+		mockTheme.setGlobal = vi.fn().mockRejectedValue(new Error('boom'));
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+
+		await fireEvent.change(select, { target: { value: 'bianco' } });
+
+		await waitFor(() => {
+			expect(screen.getByText('Failed to save the global theme.')).toBeInTheDocument();
+		});
+		expect(select.value).toBe('');
+		expect(select.selectedOptions[0]?.textContent).toBe('Not set');
+	});
+
+	// Guards against a revert that wedges the select: the reverting assignment
+	// must not stop a later pick from sticking.
+	it('lets a later successful save update the select and clear the error', async () => {
+		mockTheme.globalTheme = 'rosso';
+		mockTheme.setGlobal = vi.fn().mockRejectedValue(new Error('boom'));
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+
+		await fireEvent.change(select, { target: { value: 'bianco' } });
+		await waitFor(() => {
+			expect(screen.getByText('Failed to save the global theme.')).toBeInTheDocument();
+		});
+
+		// Mirrors the real store, which updates globalTheme once the PUT lands.
+		mockTheme.setGlobal = vi.fn().mockImplementation(async (id: string) => {
+			mockTheme.globalTheme = id;
+		});
+		await fireEvent.change(select, { target: { value: 'verdana' } });
+
+		await waitFor(() => {
+			expect(screen.queryByText('Failed to save the global theme.')).toBeNull();
+		});
+		expect(mockTheme.setGlobal).toHaveBeenCalledWith('verdana');
+		expect(select.value).toBe('verdana');
+	});
+
+	// theme.init() resolves its GET after mount, so the select has to keep
+	// tracking the store rather than snapshotting it at mount — including
+	// after a failed save has pushed a reverted value into it.
+	it('follows a global theme that lands after the page has mounted', async () => {
+		mockTheme.globalTheme = null;
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+		expect(select.value).toBe('');
+
+		mockTheme.globalTheme = 'rawblock';
+
+		await waitFor(() => {
+			expect(select.value).toBe('rawblock');
+		});
+	});
+
+	it('still follows the store after a failed save has reverted the select', async () => {
+		mockTheme.globalTheme = 'rosso';
+		mockTheme.setGlobal = vi.fn().mockRejectedValue(new Error('boom'));
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+
+		await fireEvent.change(select, { target: { value: 'bianco' } });
+		await waitFor(() => {
+			expect(select.value).toBe('rosso');
+		});
+
+		// Another admin's change arrives (or init() finally resolves).
+		mockTheme.globalTheme = 'verdana';
+
+		await waitFor(() => {
+			expect(select.value).toBe('verdana');
 		});
 	});
 });
