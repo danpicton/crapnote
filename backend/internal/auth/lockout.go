@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"crypto/sha256"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -34,8 +36,14 @@ import (
 // internal/ratelimit already makes; a multi-replica deployment would need a
 // shared store for both.
 const (
-	// maxLockoutEntries caps the table. Entries are ~100 bytes, so the
-	// ceiling is a megabyte or so of attacker-controlled memory.
+	// maxLockoutEntries caps how many pairs are tracked. On its own that is a
+	// cap on entry count only, which is worthless if an entry can be any
+	// size; combined with the fixed-size key below it becomes a cap on bytes.
+	// A key is exactly 64 bytes and an entry 64 more whatever was submitted,
+	// so a saturated table is 1.86 MiB — measured at this cap with 1 MiB
+	// usernames on every request, 195 bytes per entry including Go's map
+	// overhead, and identical to three significant figures when the
+	// usernames are short. No client can move that number.
 	maxLockoutEntries = 10000
 
 	// lockoutIdleTTL is how long a pair's state survives with no activity
@@ -52,15 +60,41 @@ const (
 	lockoutEvictFraction = 4
 )
 
-// lockoutKey identifies one (client IP, username) pair. The username is the
-// string the client submitted, lower-cased — not an account's stored spelling
-// — because the lockout is consulted before any lookup happens, and because
-// usernames that match no account have to accumulate failures exactly like
-// real ones. If they did not, the cool-down response would only ever be shown
-// for accounts that exist, and would itself become the username oracle.
+// lockoutKey identifies one (client IP, username) pair.
+//
+// The username half is derived from the string the client submitted — not an
+// account's stored spelling — because the lockout is consulted before any
+// lookup happens, and because usernames matching no account have to
+// accumulate failures exactly like real ones. If they did not, the cool-down
+// response would only ever appear for accounts that exist, and would itself
+// become the username oracle.
+//
+// Both halves are stored as SHA-256 digests rather than as the strings
+// themselves, which makes the key a fixed 64 bytes no matter what arrived on
+// the wire. That is a memory-safety property, not a secrecy one: these are
+// live map keys built from an unauthenticated request body, so retaining the
+// raw text let a caller park arbitrary megabytes in the table and keep them
+// resident — maxLockoutEntries caps the number of entries but could never cap
+// their size. Hashing also means the tracker holds no submitted credentials
+// material at all. Digests are unsalted and never exposed; a collision would
+// merely make two usernames share one address's cool-down budget, which is
+// not something an attacker gains by.
 type lockoutKey struct {
-	ip       string
-	username string
+	ip       [sha256.Size]byte
+	username [sha256.Size]byte
+}
+
+// newLockoutKey builds the key for one login attempt.
+func newLockoutKey(ip, username string) lockoutKey {
+	return lockoutKey{ip: sha256.Sum256([]byte(ip)), username: lockoutUsername(username)}
+}
+
+// lockoutUsername derives the username half of a key on its own, for lookups
+// that span every address. Case is folded before hashing, so the spellings of
+// one name cannot each claim their own budget — and cannot each claim their
+// own table entry either.
+func lockoutUsername(username string) [sha256.Size]byte {
+	return sha256.Sum256([]byte(strings.ToLower(username)))
 }
 
 type lockoutEntry struct {
@@ -95,8 +129,16 @@ func newLockoutTracker() *lockoutTracker {
 func (t *lockoutTracker) locked(k lockoutKey) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	now := t.now()
+	// Sweep here too, not only when recording a failure. Login consults this
+	// on every attempt, so reclamation no longer depends on the attacker
+	// coming back: pruning solely from recordFailure meant a process that had
+	// been flooded held its peak footprint for as long as it stayed up.
+	t.gcLocked(now)
+
 	e, ok := t.entries[k]
-	return ok && e.isLocked(t.now())
+	return ok && e.isLocked(now)
 }
 
 // recordFailure counts one wrong password for the pair, locking it once
@@ -158,8 +200,9 @@ func (t *lockoutTracker) clear(k lockoutKey) {
 func (t *lockoutTracker) clearUsername(username string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	want := lockoutUsername(username)
 	for k := range t.entries {
-		if k.username == username {
+		if k.username == want {
 			delete(t.entries, k)
 		}
 	}

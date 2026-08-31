@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -117,7 +116,7 @@ func (s *Service) SetLockoutPolicy(maxAttempts int, cooldown time.Duration) {
 // matters most when the policy's cool-down is <= 0 and the locks never lapse
 // on their own. It does not touch the user row; UserRepo.Unlock does that.
 func (s *Service) ClearAutomaticLockouts(username string) {
-	s.attempts.clearUsername(strings.ToLower(username))
+	s.attempts.clearUsername(username)
 }
 
 // SeedAdmin creates the initial admin user if no users exist yet.
@@ -174,7 +173,7 @@ func (s *Service) Login(ctx context.Context, username, password, clientIP string
 	// lower-cased, because this decision is made before we know whether an
 	// account exists; folding case also stops one address multiplying its
 	// share of the table by cycling spellings.
-	attemptKey := lockoutKey{ip: clientIP, username: strings.ToLower(username)}
+	attemptKey := newLockoutKey(clientIP, username)
 
 	// The cool-down answers first: before the user lookup, before bcrypt,
 	// before the account's own lock state is read. That is what makes the

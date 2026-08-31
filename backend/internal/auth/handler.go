@@ -9,6 +9,10 @@ import (
 	"github.com/danpicton/crapnote/internal/httpx"
 )
 
+// maxLoginBodyBytes caps the login request body. Usernames and passwords are
+// small; anything larger is not a login attempt.
+const maxLoginBodyBytes = 4 << 10
+
 // Handler holds HTTP handlers for auth endpoints.
 type Handler struct {
 	svc    *Service
@@ -37,11 +41,29 @@ func isHTTPS(r *http.Request) bool {
 // Body: {"username": "...", "password": "..."}
 // Sets an HttpOnly session cookie on success.
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
+	// Cap the body before decoding anything. This is an unauthenticated
+	// endpoint whose payload feeds the automatic-lockout key, so an
+	// uncapped body let a caller push arbitrary megabytes into the request
+	// path. lockout.go bounds what is *retained*; this bounds what is read at
+	// all. Credentials are small — 4 KiB is generous — and the pattern
+	// follows internal/images and internal/mcp.
+	r.Body = http.MaxBytesReader(w, r.Body, maxLoginBodyBytes)
+
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			slog.Warn("audit: login body rejected — too large",
+				"event", "login_body_too_large",
+				"limit", tooLarge.Limit,
+				"ip", httpx.ClientIP(r),
+			)
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
