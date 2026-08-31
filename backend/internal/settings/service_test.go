@@ -83,3 +83,27 @@ func TestService_SetGlobalThemeRejectsInvalidIDs(t *testing.T) {
 		}
 	}
 }
+
+// ValidateThemeID is the shape check SetGlobalTheme applies, exported so that
+// callers holding a theme id from outside the service (startup reading
+// DEFAULT_THEME) can report a malformed one without having to attempt a write.
+func TestValidateThemeID(t *testing.T) {
+	for _, good := range []string{"light", "console-2001", "rosso", "a", "a1-b2"} {
+		if err := settings.ValidateThemeID(good); err != nil {
+			t.Errorf("expected %q valid, got %v", good, err)
+		}
+	}
+	for _, bad := range []string{
+		"",
+		"-leading-dash",
+		"Console-2001",
+		"UPPER",
+		"has space",
+		"emoji-💥",
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", // 65 chars
+	} {
+		if err := settings.ValidateThemeID(bad); !errors.Is(err, settings.ErrInvalidTheme) {
+			t.Errorf("expected ErrInvalidTheme for %q, got %v", bad, err)
+		}
+	}
+}

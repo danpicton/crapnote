@@ -95,14 +95,7 @@ func main() {
 	// Global-theme setting (admin-set default theme for all clients).
 	settingsSvc := settings.NewService(settings.NewRepo(database))
 	settingsHandler := settings.NewHandler(settingsSvc)
-	// DEFAULT_THEME seeds the global theme on first run only — once an admin
-	// picks a theme in the UI, the stored value wins over the env var.
-	if v := os.Getenv("DEFAULT_THEME"); v != "" {
-		if err := settingsSvc.SeedGlobalTheme(context.Background(), v); err != nil {
-			logger.Error("seed default theme", "error", err, "theme", v)
-			os.Exit(1)
-		}
-	}
+	seedDefaultTheme(context.Background(), settingsSvc, os.Getenv("DEFAULT_THEME"), logger)
 
 	// Seed initial admin if no users exist.
 	adminUser := os.Getenv("ADMIN_USERNAME")
@@ -255,6 +248,60 @@ func main() {
 	if err := http.ListenAndServe(addr, handler); err != nil {
 		logger.Error("server error", "error", err)
 		os.Exit(1)
+	}
+}
+
+// themeSeeder is the slice of the settings service that startup needs, so the
+// DEFAULT_THEME step can be exercised without standing up a server.
+type themeSeeder interface {
+	SeedGlobalTheme(ctx context.Context, theme string) error
+}
+
+// seedDefaultTheme applies DEFAULT_THEME to the global theme on first run only:
+// once an admin picks a theme in the UI, the stored value wins over the env var.
+//
+// Seeding is never fatal (issue #68). The global theme is cosmetic — the client
+// falls back to its own default when none is stored — so no failure here
+// justifies taking the instance down, least of all one that would recur on
+// every restart until an operator edits the environment. The two failure modes
+// are logged differently so the logs say who has to act:
+//
+//   - an invalid theme id is operator config (e.g. the UI label "Console-2001"
+//     rather than the id "console-2001"), so it warns, names the offending
+//     value, and startup continues unseeded;
+//   - anything else is the settings store failing, which is infrastructure and
+//     not something the operator can fix in the environment, so it is logged at
+//     error level to reach alerting — but it still does not abort startup, and
+//     a genuinely broken database will surface loudly on the first request.
+//
+// The value is validated here rather than inferred from the seeder's error,
+// because SeedGlobalTheme returns nil without looking at the id once a theme is
+// stored — the short-circuit that makes seeding first-run-only. Judging the
+// warning on the seeder's result would therefore silence it on every instance
+// whose admin has ever picked a theme, which is the steady state after day one,
+// leaving the operator's typo with no signal at all.
+func seedDefaultTheme(ctx context.Context, seeder themeSeeder, theme string, logger *slog.Logger) {
+	if theme == "" {
+		return
+	}
+	if err := settings.ValidateThemeID(theme); err != nil {
+		logger.Warn("ignoring invalid DEFAULT_THEME, starting without seeding the global theme",
+			"theme", theme,
+			"expected", "lowercase theme id, e.g. console-2001")
+		return
+	}
+	err := seeder.SeedGlobalTheme(ctx, theme)
+	switch {
+	case err == nil:
+	case errors.Is(err, settings.ErrInvalidTheme):
+		// Not reachable through the shape check above; kept so that validation
+		// the service may add beyond shape is still reported as config rather
+		// than as an infrastructure failure.
+		logger.Warn("ignoring invalid DEFAULT_THEME, starting without seeding the global theme",
+			"theme", theme,
+			"expected", "lowercase theme id, e.g. console-2001")
+	default:
+		logger.Error("seed default theme", "error", err, "theme", theme)
 	}
 }
 

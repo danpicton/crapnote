@@ -100,9 +100,15 @@ npm run lint      # eslint
 | `ADMIN_USERNAME` | — | Seeded on first run if no users exist |
 | `ADMIN_PASSWORD` | — | Seeded on first run if no users exist. **Set a strong value before first run** — the seeded credential persists in the database, and the deploy tooling (`deploy/docker-compose.yml`, `make run`) refuses to start without it |
 | `SESSION_TTL_DAYS` | `7` | Session lifetime in days; refreshed on activity |
+| `DEFAULT_THEME` | — | Global theme seeded on first run only; once an admin picks a theme in the UI, that stored choice wins on every later restart. Takes the lowercase theme **id** (e.g. `console-2001`), not the display label shown in the settings UI. A malformed value is always logged as a warning and ignored, whether or not a theme is already stored, and the server starts rather than failing |
 | `METRICS_ADDR` | — | Address for the Prometheus `/metrics` listener, e.g. `:9090` or `127.0.0.1:9090`. Unset (the default) means metrics are not exposed at all; `/metrics` on the main port always returns 404. Bind it to a private interface — the exposition enumerates exercised routes, traffic and error rates, and Go runtime details. A value that cannot be bound aborts startup |
 | `MAX_FAILED_LOGIN_ATTEMPTS` | `5` | Consecutive failed passwords, from one client IP against one username, before that pair is locked out |
 | `LOCKOUT_COOLDOWN_MINUTES` | `15` | How long an automatic lockout lasts before clearing itself; manual admin locks never expire |
+| `LOGIN_RATE_PER_MINUTE` | `5` | Per-IP rate limit on `POST /api/auth/login` |
+| `LOGIN_RATE_BURST` | `5` | Burst allowance for the login limiter |
+| `BEARER_RATE_PER_MINUTE` | `600` | Per-IP rate limit applied only to requests carrying an `Authorization` header |
+| `BEARER_RATE_BURST` | `300` | Burst allowance for the bearer-auth limiter |
+| `TRUST_PROXY` | `false` | Set to `1` only when the app sits behind exactly one trusted reverse proxy. When on, the client IP for rate limiting and audit logs is taken from the rightmost `X-Forwarded-For` entry (appended by the proxy; `X-Real-IP` as fallback) and `X-Forwarded-Proto: https` marks session cookies `Secure`. When off (the default), these headers are ignored — they are client-controlled — and the TCP peer address is used. |
 
 Automatic lockout is counted per (client IP, submitted username) pair, not per
 account, so guessing at a username locks out only the address doing the
@@ -117,11 +123,6 @@ Administrators are subject to the per-address cool-down like everyone else —
 exempting them would leak which usernames are administrators — but since the
 cool-down only ever binds one address, an admin is never locked out of their
 own system.
-| `LOGIN_RATE_PER_MINUTE` | `5` | Per-IP rate limit on `POST /api/auth/login` |
-| `LOGIN_RATE_BURST` | `5` | Burst allowance for the login limiter |
-| `BEARER_RATE_PER_MINUTE` | `600` | Per-IP rate limit applied only to requests carrying an `Authorization` header |
-| `BEARER_RATE_BURST` | `300` | Burst allowance for the bearer-auth limiter |
-| `TRUST_PROXY` | `false` | Set to `1` only when the app sits behind exactly one trusted reverse proxy. When on, the client IP for rate limiting and audit logs is taken from the rightmost `X-Forwarded-For` entry (appended by the proxy; `X-Real-IP` as fallback) and `X-Forwarded-Proto: https` marks session cookies `Secure`. When off (the default), these headers are ignored — they are client-controlled — and the TCP peer address is used. |
 
 ### Frontend build-time variables
 
