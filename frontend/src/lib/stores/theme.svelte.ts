@@ -23,6 +23,29 @@ function isThemeId(value: unknown): value is ThemeId {
 	return THEMES.some((t) => t.id === value);
 }
 
+// Storage access can throw outright — Safari private browsing and
+// policy-disabled storage raise instead of returning null, and on locked-down
+// browsers even reaching window.localStorage throws. Persisting the theme is
+// best-effort, so every access goes through these two guards.
+
+function readStored(): string | null {
+	try {
+		return window.localStorage.getItem(STORAGE_KEY);
+	} catch {
+		// localStorage unavailable — treated as "nothing stored".
+		return null;
+	}
+}
+
+function writeStored(t: ThemeId) {
+	try {
+		window.localStorage.setItem(STORAGE_KEY, t);
+	} catch {
+		// localStorage unavailable — the theme still applies for this session,
+		// it just won't survive a reload.
+	}
+}
+
 function createThemeStore() {
 	let current = $state<ThemeId>('light');
 	let globalTheme = $state<ThemeId | null>(null);
@@ -59,9 +82,12 @@ function createThemeStore() {
 
 	// A user-level preference exists only when the user has explicitly picked
 	// a theme on this device (set() writes it). Without one, the admin-chosen
-	// global theme applies.
+	// global theme applies. Unreadable storage counts as "no preference": a
+	// device that cannot read one can never have written one either, so the
+	// global theme stays reachable instead of the device being pinned to the
+	// OS-preference fallback for good.
 	function hasUserPreference(): boolean {
-		return isThemeId(localStorage.getItem(STORAGE_KEY));
+		return isThemeId(readStored());
 	}
 
 	/**
@@ -73,10 +99,11 @@ function createThemeStore() {
 	 *   4. Default: light
 	 *
 	 * Local sources apply synchronously so first paint never waits on the
-	 * network; the global theme lands when the fetch resolves.
+	 * network; the global theme lands when the fetch resolves. A storage read
+	 * that throws simply drops to step 2.
 	 */
 	async function init() {
-		const stored = localStorage.getItem(STORAGE_KEY);
+		const stored = readStored();
 		if (isThemeId(stored)) {
 			current = stored;
 		} else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
@@ -106,8 +133,10 @@ function createThemeStore() {
 	function set(id: ThemeId) {
 		if (!isThemeId(id)) return;
 		current = id;
-		localStorage.setItem(STORAGE_KEY, current);
+		// Apply before persisting. The visible change is the thing the user
+		// asked for; it must not sit behind a best-effort write that can fail.
 		applyToDOM(current);
+		writeStored(current);
 	}
 
 	/** Persist the global default (admin only) and apply it locally unless

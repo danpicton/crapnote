@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Import AFTER stubbing globals so the module picks up the stubs.
 // Each test re-initialises the store because Svelte runes are module-level state.
@@ -416,3 +416,120 @@ describe('browser theme-color', () => {
 		expect(document.querySelector('meta[name="theme-color"]')).toBeNull();
 	});
 })
+
+// Safari private browsing and policy-disabled storage both make localStorage
+// throw rather than return null. Persistence is best-effort; the theme itself
+// must still apply for the session.
+describe('theme store — storage unavailable', () => {
+	const realStorage = Object.getOwnPropertyDescriptor(window, 'localStorage');
+
+	/** localStorage is present but every read/write throws (Safari private browsing). */
+	function breakStorageMethods() {
+		const boom = () => {
+			throw new Error('SecurityError: the operation is insecure');
+		};
+		Object.defineProperty(window, 'localStorage', {
+			configurable: true,
+			get: () => ({ getItem: boom, setItem: boom, removeItem: boom, clear: boom }),
+		});
+	}
+
+	/** Reaching the property at all throws (storage disabled by policy). */
+	function breakStorageProperty() {
+		Object.defineProperty(window, 'localStorage', {
+			configurable: true,
+			get() {
+				throw new Error('SecurityError: access to storage is denied');
+			},
+		});
+	}
+
+	beforeEach(() => {
+		localStorage.clear();
+		document.documentElement.removeAttribute('data-theme');
+		vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: false }));
+		mockApi.theme.get.mockReset().mockResolvedValue({ theme: '' });
+		mockApi.theme.setGlobal.mockReset().mockResolvedValue(undefined);
+	});
+
+	afterEach(() => {
+		if (realStorage) Object.defineProperty(window, 'localStorage', realStorage);
+		localStorage.clear();
+	});
+
+	it('set() still applies the theme when persisting throws', async () => {
+		const theme = await freshTheme();
+		await theme.init();
+
+		breakStorageMethods();
+		theme.set('rosso');
+
+		expect(theme.current).toBe('rosso');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('rosso');
+	});
+
+	it('set() does not throw when persisting throws', async () => {
+		const theme = await freshTheme();
+		await theme.init();
+
+		breakStorageMethods();
+		expect(() => theme.set('dark')).not.toThrow();
+	});
+
+	it('set() still applies the theme when touching localStorage throws', async () => {
+		const theme = await freshTheme();
+		await theme.init();
+
+		breakStorageProperty();
+		theme.set('rosso');
+
+		expect(theme.current).toBe('rosso');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('rosso');
+	});
+
+	it('init() falls back to the OS preference when reads throw', async () => {
+		vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }));
+		breakStorageMethods();
+
+		const theme = await freshTheme();
+		await expect(theme.init()).resolves.toBeUndefined();
+
+		expect(theme.current).toBe('dark');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+	});
+
+	it('init() falls back to the OS preference when touching localStorage throws', async () => {
+		vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({ matches: true }));
+		breakStorageProperty();
+
+		const theme = await freshTheme();
+		await expect(theme.init()).resolves.toBeUndefined();
+
+		expect(theme.current).toBe('dark');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
+	});
+
+	// Unreadable storage means no user preference can exist on this device, so
+	// the admin's global theme is still the right thing to apply.
+	it('init() still applies the global theme when reads throw', async () => {
+		mockApi.theme.get.mockResolvedValue({ theme: 'rosso' });
+		breakStorageMethods();
+
+		const theme = await freshTheme();
+		await theme.init();
+
+		expect(theme.current).toBe('rosso');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('rosso');
+	});
+
+	it('setGlobal() still applies the saved theme when reads throw', async () => {
+		breakStorageMethods();
+
+		const theme = await freshTheme();
+		await theme.init();
+		await theme.setGlobal('bianco');
+
+		expect(theme.current).toBe('bianco');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('bianco');
+	});
+});
