@@ -253,30 +253,37 @@ test.describe('Shared browser: cached notes need the password, not just a matchi
     const failedApi = await cutApi(contextB, pageB);
 
     // The notes list: locked, nothing read, nothing rendered.
+    //
+    // The leak assertions come FIRST and are not gated behind the unlock
+    // screen appearing. Against a leaking build the UI assertion fails with
+    // "element(s) not found" and the latches are never evaluated, so a real
+    // leak would be reported as a missing element.
     await pageB.goto('/');
-    await expect(pageB.getByLabel(/^password for/i)).toBeVisible({ timeout: 15_000 });
-    expect(failedApi, 'the offline path must really have been taken').toContain('/api/auth/me');
+    await pageB.waitForTimeout(3000);
     expect(await everLeaked(pageB), 'A’s note must never reach the DOM').toBe(false);
     expect(await everReadNotes(pageB), 'A’s cached rows must not even be read').toBe(false);
+    expect(failedApi, 'the offline path must really have been taken').toContain('/api/auth/me');
     await expect(pageB.getByText(TITLE)).toHaveCount(0);
+    await expect(pageB.getByLabel(/^password for this account/i)).toBeVisible({ timeout: 15_000 });
 
     // A guarded list is worthless if note ids can be typed in directly.
     await pageB.goto(`/notes/${noteId}`);
-    await expect(pageB.getByLabel(/^password for/i)).toBeVisible({ timeout: 15_000 });
+    await pageB.waitForTimeout(3000);
     expect(await everLeaked(pageB), 'A’s note body must not open by id either').toBe(false);
     expect(await everReadNotes(pageB), 'the note route must not read the cached row').toBe(false);
+    await expect(pageB.getByLabel(/^password for this account/i)).toBeVisible({ timeout: 15_000 });
 
     // A wrong password changes nothing.
     await pageB.goto('/');
-    await expect(pageB.getByLabel(/^password for/i)).toBeVisible({ timeout: 15_000 });
-    await pageB.getByLabel(/^password for/i).fill('not-the-password');
+    await expect(pageB.getByLabel(/^password for this account/i)).toBeVisible({ timeout: 15_000 });
+    await pageB.getByLabel(/^password for this account/i).fill('not-the-password');
     await pageB.getByRole('button', { name: /^unlock/i }).click();
     await expect(pageB.getByRole('alert')).toContainText(/incorrect|too many/i);
     expect(await everLeaked(pageB)).toBe(false);
     expect(await everReadNotes(pageB)).toBe(false);
 
     // ── The legitimate owner, same browser, still no server ──────────────
-    await pageB.getByLabel(/^password for/i).fill(PASSWORD);
+    await pageB.getByLabel(/^password for this account/i).fill(PASSWORD);
     await pageB.getByRole('button', { name: /^unlock/i }).click();
     await expect(pageB.getByText(TITLE).first()).toBeVisible({ timeout: 20_000 });
 
@@ -285,7 +292,7 @@ test.describe('Shared browser: cached notes need the password, not just a matchi
     await pageB.goto('/login');
     await login(pageB);
     await expect(pageB.getByText(TITLE).first()).toBeVisible();
-    await expect(pageB.getByLabel(/^password for/i)).toHaveCount(0);
+    await expect(pageB.getByLabel(/^password for this account/i)).toHaveCount(0);
 
     await contextB.close();
   });
@@ -312,10 +319,11 @@ test.describe('Shared browser: cached notes need the password, not just a matchi
     const failedApi = await cutApi(contextB, pageB);
 
     await pageB.goto('/');
-    await expect(pageB).toHaveURL(/\/login/, { timeout: 15_000 });
-    expect(failedApi).toContain('/api/auth/me');
+    await pageB.waitForTimeout(3000);
     expect(await everLeaked(pageB), 'no cached content without proof of ownership').toBe(false);
     expect(await everReadNotes(pageB)).toBe(false);
+    expect(failedApi).toContain('/api/auth/me');
+    await expect(pageB).toHaveURL(/\/login/, { timeout: 15_000 });
 
     await contextB.close();
   });

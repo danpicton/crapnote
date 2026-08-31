@@ -13,17 +13,22 @@ import {
 	recordFailedUnlock,
 	resetUnlockAttempts,
 	unlockLockoutRemainingMs,
+	markIdentityProved,
+	identityProvedInThisSession,
 } from '$lib/offlineUnlock';
 
 let user = $state<User | null>(null);
 let loading = $state(true);
 /**
- * True when an identity was restored from local storage but no server has
- * confirmed it this session. The identity marker and the offline note store
- * sit in the same browser profile and survive a browser close together, so
- * one matching the other proves only that this is the same *machine* — not
+ * True when an identity was restored from local storage and nothing in this
+ * browsing session has proved it. The identity marker and the offline note
+ * store sit in the same browser profile and survive a browser close together,
+ * so one matching the other proves only that this is the same *machine* — not
  * the same *person*. Until the password is re-entered, nothing cached may be
  * read or rendered.
+ *
+ * A reload in the same tab is not a fresh start, so it is not re-prompted:
+ * see `identityProvedInThisSession`.
  */
 let locked = $state(false);
 /** Milliseconds left on the failed-attempt cooldown, for the unlock screen. */
@@ -58,8 +63,11 @@ async function loadSession(): Promise<void> {
 	loading = true;
 	try {
 		user = await api.auth.me();
-		// The server vouched for this session, so there is nothing to unlock.
+		// The server vouched for this session, so there is nothing to unlock —
+		// and this browsing session now has a proof that spares the next
+		// offline reload in this tab a password prompt.
 		locked = false;
+		markIdentityProved(user.id);
 		persistSessionUser(user);
 		await ensureOfflineOwner(user.id);
 	} catch (err) {
@@ -69,15 +77,27 @@ async function loadSession(): Promise<void> {
 			// check. Without this the PWA bounces to /login in airplane
 			// mode even though the user's notes are cached locally.
 			//
-			// Restoring it does NOT mean trusting it: nobody has proved who
-			// they are, so the session comes back locked and the password
-			// has to be re-entered before any cached row is read. And if
-			// this browser holds no unlock material — an install from
-			// before unlock shipped, or no WebCrypto — there is no way to
-			// prove ownership at all, so the identity is not restored
-			// either. Fail closed; never "no passcode, therefore let them in".
+			// Restoring it does NOT automatically mean trusting it. Three
+			// cases, in order:
+			//
+			//  1. This identity was already proved in THIS browsing session —
+			//     a server-confirmed session, a login, or an unlock, in this
+			//     tab. sessionStorage carries that and dies with the tab, so
+			//     it separates "the same person reloaded" from "someone
+			//     opened the app afresh", which is the exact line #61 draws.
+			//     No prompt, and no unlock record needed: a cookie-restored
+			//     session never gave the app a password to store.
+			//  2. Otherwise, if this browser holds unlock material, come back
+			//     locked and make them re-enter the password.
+			//  3. Otherwise there is no way to prove ownership at all, so the
+			//     identity is not restored. Fail closed; never "no passcode,
+			//     therefore let them in".
 			const remembered = readSessionUser();
-			if (remembered && hasUnlockPasscode()) {
+			if (remembered && identityProvedInThisSession(remembered.id)) {
+				user = remembered;
+				locked = false;
+				await ensureOfflineOwner(user.id);
+			} else if (remembered && hasUnlockPasscode(remembered.id)) {
 				user = remembered;
 				locked = true;
 				lockoutMs = unlockLockoutRemainingMs();
@@ -151,10 +171,13 @@ export const auth = {
 			lockoutMs = remaining;
 			return false;
 		}
-		if (await verifyUnlockPasscode(password)) {
+		if (user && (await verifyUnlockPasscode(user.id, password))) {
 			resetUnlockAttempts();
 			lockoutMs = 0;
 			locked = false;
+			// Proved for the rest of this browsing session, so reloading
+			// while still offline doesn't ask again.
+			if (user) markIdentityProved(user.id);
 			return true;
 		}
 		recordFailedUnlock();
@@ -165,10 +188,11 @@ export const auth = {
 	async login(username: string, password: string) {
 		user = await api.auth.login(username, password);
 		locked = false;
+		markIdentityProved(user.id);
 		// The one moment the app legitimately holds the password: derive and
 		// keep the material that lets this browser be unlocked offline later.
 		// Only the salt, the KDF parameters and the derived bytes are stored.
-		await storeUnlockPasscode(password);
+		await storeUnlockPasscode(user.id, password);
 		resetUnlockAttempts();
 		lockoutMs = 0;
 		// A successful login IS a settled session check, so ready() must not

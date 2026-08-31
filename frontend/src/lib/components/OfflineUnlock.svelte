@@ -38,6 +38,12 @@
 						: 'Incorrect password.';
 			}
 			password = '';
+		} catch {
+			// Never leave the form silent: an unlock that throws instead of
+			// returning false would otherwise look like a dead button, and
+			// the only other control here erases the device's copy.
+			error = 'Unlock failed on this device. Reconnect and log in again to restore access.';
+			password = '';
 		} finally {
 			submitting = false;
 		}
@@ -72,7 +78,11 @@
 			{/if}
 
 			<div class="field">
-				<label for="unlock-password">Password for {auth.user?.username ?? 'this account'}</label>
+				<!-- Deliberately not the username: before the password is
+				     verified the person at the keyboard has not been shown to
+				     be the account holder, and naming them would hand the next
+				     person half a credential they did not have before. -->
+				<label for="unlock-password">Password for this account</label>
 				<PasswordInput
 					id="unlock-password"
 					autocomplete="current-password"

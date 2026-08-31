@@ -23,7 +23,14 @@
 			if (err instanceof OfflineError) {
 				// OfflineError extends ApiError, so this check must come first
 				// or an offline attempt reads as "invalid credentials".
-				error = "You're offline. Reconnect to log in.";
+				//
+				// Landing here offline usually means this browser holds cached
+				// notes but no way to prove they are yours — a session that
+				// was restored from a cookie never gave the app a password to
+				// remember. Say so, rather than leaving someone staring at a
+				// login form they cannot submit and notes they cannot reach.
+				error =
+					"You're offline. Reconnect to log in — logging in once while online lets this device unlock your saved notes offline from then on.";
 			} else if (err instanceof ApiError) {
 				if (err.status === 403) {
 					error = 'This account has been locked. Contact an administrator.';

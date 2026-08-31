@@ -50,6 +50,7 @@ beforeEach(() => {
 	vi.clearAllMocks();
 	mockAuth.user = null;
 	mockAuth.locked = false;
+	mockAuth.loading = false;
 	mockAuth.unlockLockoutMs = 0;
 	mockAuth.init.mockResolvedValue(undefined);
 	mockAuth.unlock.mockResolvedValue(true);
@@ -149,5 +150,55 @@ describe('Layout offline unlock gate', () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		expect(queryByLabelText(/^password for/i)).not.toBeInTheDocument();
+	});
+});
+
+
+/**
+ * MEDIUM 1 from the security re-review: `auth.locked` is false until the
+ * session check resolves, so the {:else} branch used to render first and the
+ * notes route mounted on a locked cold start — firing /api/notes and
+ * /api/tags. Nothing leaked (the route-level check held), but the layout gate
+ * has to actually be a gate, or a later change will drop the route check
+ * "because the layout handles it".
+ */
+describe('Layout withholds the app until the session is settled', () => {
+	it('renders no children while the session check is still in flight', async () => {
+		mockAuth.loading = true;
+		mockAuth.user = null;
+		setPath('/');
+		mockAuth.init.mockReturnValue(new Promise<void>(() => {}));
+
+		const { container, queryByLabelText } = render(Layout, { children: markerSnippet });
+		await new Promise((r) => setTimeout(r, 30));
+
+		// Neither the app nor the unlock screen: which of the two it will be
+		// is not known until the session check resolves.
+		expect(container.querySelector('[data-testid="app-loading"]')).not.toBeNull();
+		expect(queryByLabelText(/^password for/i)).not.toBeInTheDocument();
+	});
+
+	it('renders the app once the session has settled', async () => {
+		mockAuth.loading = false;
+		mockAuth.user = { id: 1, username: 'alice', is_admin: false };
+		setPath('/');
+
+		const { container } = render(Layout, { children: markerSnippet });
+		await new Promise((r) => setTimeout(r, 30));
+
+		expect(container.querySelector('[data-testid="app-loading"]')).toBeNull();
+	});
+
+	it('does not withhold the login screen while auth settles', async () => {
+		// Public routes render nothing cached, and blocking them would put a
+		// spinner in front of the only way back in.
+		mockAuth.loading = true;
+		mockAuth.user = null;
+		setPath('/login');
+
+		const { container } = render(Layout, { children: markerSnippet });
+		await new Promise((r) => setTimeout(r, 30));
+
+		expect(container.querySelector('[data-testid="app-loading"]')).toBeNull();
 	});
 });

@@ -9,12 +9,17 @@ import {
 	resetUnlockAttempts,
 	unlockLockoutRemainingMs,
 	UNLOCK_FREE_ATTEMPTS,
+	UNLOCK_PROOF_MAX_AGE_MS,
+	markIdentityProved,
+	identityProvedInThisSession,
+	clearIdentityProof,
 } from './offlineUnlock';
 
 const RECORD_KEY = 'crapnote:offline-unlock';
 
 beforeEach(() => {
 	localStorage.clear();
+	sessionStorage.clear();
 	vi.unstubAllGlobals();
 });
 
@@ -24,7 +29,7 @@ describe('offline unlock passcode', () => {
 	});
 
 	it('stores no trace of the password itself', async () => {
-		await storeUnlockPasscode('correct horse battery staple');
+		await storeUnlockPasscode(7, 'correct horse battery staple');
 
 		const raw = localStorage.getItem(RECORD_KEY)!;
 		expect(raw).not.toContain('correct horse battery staple');
@@ -35,10 +40,10 @@ describe('offline unlock passcode', () => {
 	});
 
 	it('salts per install, so two identical passwords hash differently', async () => {
-		await storeUnlockPasscode('same-password');
+		await storeUnlockPasscode(7, 'same-password');
 		const first = JSON.parse(localStorage.getItem(RECORD_KEY)!);
 		localStorage.clear();
-		await storeUnlockPasscode('same-password');
+		await storeUnlockPasscode(7, 'same-password');
 		const second = JSON.parse(localStorage.getItem(RECORD_KEY)!);
 
 		expect(second.salt).not.toBe(first.salt);
@@ -46,43 +51,85 @@ describe('offline unlock passcode', () => {
 	});
 
 	it('accepts the right password and rejects a wrong one', async () => {
-		await storeUnlockPasscode('s3cret-pw');
+		await storeUnlockPasscode(7, 's3cret-pw');
 
-		expect(await verifyUnlockPasscode('s3cret-pw')).toBe(true);
-		expect(await verifyUnlockPasscode('s3cret-pW')).toBe(false);
-		expect(await verifyUnlockPasscode('')).toBe(false);
+		expect(await verifyUnlockPasscode(7, 's3cret-pw')).toBe(true);
+		expect(await verifyUnlockPasscode(7, 's3cret-pW')).toBe(false);
+		expect(await verifyUnlockPasscode(7, '')).toBe(false);
 	});
 
 	it('reports whether unlock material exists', async () => {
-		expect(hasUnlockPasscode()).toBe(false);
-		await storeUnlockPasscode('pw');
-		expect(hasUnlockPasscode()).toBe(true);
+		expect(hasUnlockPasscode(7)).toBe(false);
+		await storeUnlockPasscode(7, 'pw');
+		expect(hasUnlockPasscode(7)).toBe(true);
 		clearUnlockPasscode();
-		expect(hasUnlockPasscode()).toBe(false);
+		expect(hasUnlockPasscode(7)).toBe(false);
 	});
 
 	it('fails closed when the stored record is corrupt or truncated', async () => {
 		localStorage.setItem(RECORD_KEY, 'not json');
-		expect(hasUnlockPasscode()).toBe(false);
-		expect(await verifyUnlockPasscode('anything')).toBe(false);
+		expect(hasUnlockPasscode(7)).toBe(false);
+		expect(await verifyUnlockPasscode(7, 'anything')).toBe(false);
 
-		localStorage.setItem(RECORD_KEY, JSON.stringify({ v: 1, iterations: 600000, salt: 'AAAA' }));
-		expect(hasUnlockPasscode()).toBe(false);
-		expect(await verifyUnlockPasscode('anything')).toBe(false);
+		localStorage.setItem(RECORD_KEY, JSON.stringify({ v: 2, userId: 7, iterations: 600000, salt: 'AAAA' }));
+		expect(hasUnlockPasscode(7)).toBe(false);
+		expect(await verifyUnlockPasscode(7, 'anything')).toBe(false);
+	});
+
+	it('rejects, rather than throws, when the stored salt is not decodable', async () => {
+		// A record that parses but cannot be decoded used to leave the owner
+		// with a lock that could never open and no message — the promise
+		// rejected out of a handler that had no catch.
+		localStorage.setItem(
+			RECORD_KEY,
+			JSON.stringify({ v: 2, userId: 7, iterations: 1000, salt: '!!!not base64!!!', hash: 'AAAA' })
+		);
+
+		expect(hasUnlockPasscode(7)).toBe(false);
+		await expect(verifyUnlockPasscode(7, 'anything')).resolves.toBe(false);
+	});
+
+	it('rejects an unreadable hash the same way', async () => {
+		await storeUnlockPasscode(7, 'pw');
+		const rec = JSON.parse(localStorage.getItem(RECORD_KEY)!);
+		localStorage.setItem(RECORD_KEY, JSON.stringify({ ...rec, hash: '@@@' }));
+
+		expect(hasUnlockPasscode(7)).toBe(false);
+		await expect(verifyUnlockPasscode(7, 'pw')).resolves.toBe(false);
+	});
+
+	it('binds the record to one account', async () => {
+		// Otherwise a record left by any account unlocks any store: the id is
+		// both recorded and mixed into the derived key.
+		await storeUnlockPasscode(7, 'pw');
+
+		expect(hasUnlockPasscode(8)).toBe(false);
+		expect(await verifyUnlockPasscode(8, 'pw')).toBe(false);
+		expect(await verifyUnlockPasscode(7, 'pw')).toBe(true);
+	});
+
+	it('refuses a record written for an older, unbound format', async () => {
+		await storeUnlockPasscode(7, 'pw');
+		const rec = JSON.parse(localStorage.getItem(RECORD_KEY)!);
+		localStorage.setItem(RECORD_KEY, JSON.stringify({ ...rec, v: 1, userId: undefined }));
+
+		expect(hasUnlockPasscode(7)).toBe(false);
+		expect(await verifyUnlockPasscode(7, 'pw')).toBe(false);
 	});
 
 	it('verifies nothing when no record was ever stored', async () => {
-		expect(await verifyUnlockPasscode('pw')).toBe(false);
+		expect(await verifyUnlockPasscode(7, 'pw')).toBe(false);
 	});
 
 	it('fails closed, and stores nothing, when WebCrypto is unavailable', async () => {
 		vi.stubGlobal('crypto', { getRandomValues: undefined, subtle: undefined });
 
-		await storeUnlockPasscode('pw');
+		await storeUnlockPasscode(7, 'pw');
+		expect(hasUnlockPasscode(7)).toBe(false);
 
 		expect(localStorage.getItem(RECORD_KEY)).toBeNull();
-		expect(hasUnlockPasscode()).toBe(false);
-		expect(await verifyUnlockPasscode('pw')).toBe(false);
+		expect(hasUnlockPasscode(7)).toBe(false);
+		expect(await verifyUnlockPasscode(7, 'pw')).toBe(false);
 	});
 });
 
@@ -133,5 +180,65 @@ describe('offline unlock throttle', () => {
 		// mistyped password would silently lose the owner's work.
 		const mod = await import('./offlineUnlock');
 		expect(Object.keys(mod).some((k) => /wipe|clearLocalData|deleteOfflineDB/i.test(k))).toBe(false);
+	});
+});
+
+
+/**
+ * Continuity of the browsing session. sessionStorage survives a reload and
+ * same-tab navigation but is gone once the tab or PWA window is closed —
+ * which is exactly the line issue #61 draws ("closes the browser without
+ * logging out"). So it can distinguish "the same person is still here" from
+ * "someone opened this app afresh" without a wall-clock guess.
+ */
+describe('identity proof for the current browsing session', () => {
+	it('remembers a proof taken in this browsing session', () => {
+		markIdentityProved(7, 1_000);
+		expect(identityProvedInThisSession(7, 1_000)).toBe(true);
+	});
+
+	it('is not a proof for a different account', () => {
+		markIdentityProved(7, 1_000);
+		expect(identityProvedInThisSession(8, 1_000)).toBe(false);
+	});
+
+	it('has none when nothing was ever proved', () => {
+		expect(identityProvedInThisSession(7, 1_000)).toBe(false);
+	});
+
+	it('expires, so a browser left open unattended re-locks', () => {
+		markIdentityProved(7, 1_000);
+		expect(identityProvedInThisSession(7, 1_000 + UNLOCK_PROOF_MAX_AGE_MS - 1)).toBe(true);
+		expect(identityProvedInThisSession(7, 1_000 + UNLOCK_PROOF_MAX_AGE_MS + 1)).toBe(false);
+	});
+
+	it('does not outlive the browsing session it was taken in', () => {
+		markIdentityProved(7, 1_000);
+		// Closing the tab/window is what clears sessionStorage; nothing else
+		// in the profile does. localStorage explicitly must NOT carry it.
+		expect(localStorage.getItem('crapnote:offline-unlock-session')).toBeNull();
+		sessionStorage.clear();
+		expect(identityProvedInThisSession(7, 1_000)).toBe(false);
+	});
+
+	it('is dropped explicitly at logout', () => {
+		markIdentityProved(7, 1_000);
+		clearIdentityProof();
+		expect(identityProvedInThisSession(7, 1_000)).toBe(false);
+	});
+
+	it('fails closed on a corrupt record', () => {
+		sessionStorage.setItem('crapnote:offline-unlock-session', 'not json');
+		expect(identityProvedInThisSession(7, 1_000)).toBe(false);
+	});
+
+	it('fails closed when sessionStorage is unavailable', () => {
+		vi.stubGlobal('sessionStorage', {
+			getItem: () => { throw new Error('blocked'); },
+			setItem: () => { throw new Error('blocked'); },
+			removeItem: () => { throw new Error('blocked'); },
+		});
+		expect(() => markIdentityProved(7, 1_000)).not.toThrow();
+		expect(identityProvedInThisSession(7, 1_000)).toBe(false);
 	});
 });

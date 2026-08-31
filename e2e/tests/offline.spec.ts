@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 
 /**
  * Offline-first behaviour: cold start in airplane mode must render cached
@@ -6,6 +6,40 @@ import { test, expect, type Page } from '@playwright/test';
  * archives made offline must apply optimistically and replay against the
  * server on reconnect.
  */
+
+/**
+ * Cut the network deterministically.
+ *
+ * `context.setOffline(true)` alone is not enough: it flips `navigator.onLine`
+ * and blocks the page's own requests, but a service-worker-initiated `fetch`
+ * still reaches the local server after a subsequent navigation. That made
+ * `/api/auth/me` return a real 200 offline, which silently changed what these
+ * tests exercised — locally the app never took its offline path at all, while
+ * CI (different timing) did. Aborting `/api/**` at the route level is
+ * honoured for the service worker's fetches too, so the SW falls back to its
+ * marked 503 exactly as it would with the backend down. Service workers stay
+ * ENABLED: these tests are about the SW serving the cached shell.
+ */
+async function goOffline(context: BrowserContext, page: Page) {
+  await context.route('**/api/**', (route) => route.abort());
+  await context.setOffline(true);
+  // Prove the app really is taking the offline path rather than trusting the
+  // emulation: the SW must answer /api/auth/me with its offline marker.
+  const seen = await page.evaluate(async () => {
+    try {
+      const res = await fetch('/api/auth/me');
+      return { status: res.status, marker: res.headers.get('X-Crapnote-Offline') };
+    } catch {
+      return { status: 0, marker: 'network-failure' };
+    }
+  });
+  expect(seen.marker, `expected an offline /api/auth/me, got ${JSON.stringify(seen)}`).not.toBeNull();
+}
+
+async function goOnline(context: BrowserContext) {
+  await context.unroute('**/api/**');
+  await context.setOffline(false);
+}
 
 async function login(page: Page) {
   await page.goto('/login');
@@ -48,7 +82,7 @@ async function offlineHasNotes(page: Page, ids: number[]): Promise<boolean> {
 test.describe('Offline mode', () => {
   test.afterEach(async ({ context }) => {
     // Never leak airplane mode into the next test.
-    await context.setOffline(false);
+    await goOnline(context);
   });
 
   test('cold offline start: cached list renders, unvisited routes open, offline delete/archive replay on reconnect', async ({
@@ -96,7 +130,7 @@ test.describe('Offline mode', () => {
       .toBe(true);
 
     // ── Airplane mode ────────────────────────────────────────────────────
-    await context.setOffline(true);
+    await goOffline(context, page);
 
     // Cold start: the SW serves the cached shell, the list paints from IDB.
     await page.reload();
@@ -132,7 +166,7 @@ test.describe('Offline mode', () => {
     await expect(page.getByText(ARC)).toHaveCount(0);
 
     // ── Reconnect: queued actions replay against the server ──────────────
-    await context.setOffline(false);
+    await goOnline(context);
 
     await expect
       .poll(
@@ -158,7 +192,7 @@ test.describe('Offline mode', () => {
 
 test.describe('Offline immediately after login (no reload, no prior clicks)', () => {
   test.afterEach(async ({ context }) => {
-    await context.setOffline(false);
+    await goOnline(context);
   });
 
   // The user's reported failure mode: log in, touch nothing, cut the
@@ -180,7 +214,7 @@ test.describe('Offline immediately after login (no reload, no prior clicks)', ()
     );
 
     // Airplane mode. Deliberately NO reload and NO prior navigation.
-    await context.setOffline(true);
+    await goOffline(context, page);
 
     // New note → /notes/[tempId] — the editor screen carries the heaviest
     // chunk graph (Milkdown). It was never visited online.
@@ -197,9 +231,8 @@ test.describe('Offline immediately after login (no reload, no prior clicks)', ()
     await tabs.getByRole('link', { name: /notes/i }).click();
     await tabs.getByRole('link', { name: /archive/i }).click();
     // The Archive SCREEN must render (no SvelteKit 500 page). Its data path
-    // is covered by the cold-start spec above — and under Playwright's
-    // offline emulation, service-worker-initiated fetches can still reach
-    // the local server, so the empty/offline notice isn't deterministic here.
+    // is covered by the cold-start spec above; what matters here is that the
+    // route's chunk was already in the module registry.
     await expect(page).toHaveURL(/\/archive$/);
     await expect(page.locator('.mob-wordmark, .page-title').first()).toBeVisible();
   });
@@ -207,7 +240,7 @@ test.describe('Offline immediately after login (no reload, no prior clicks)', ()
 
 test.describe('Offline edit and lock-toggle replay', () => {
   test.afterEach(async ({ context }) => {
-    await context.setOffline(false);
+    await goOnline(context);
   });
 
   // Together with the delete/archive spec above, this gives every sync verb
@@ -253,7 +286,7 @@ test.describe('Offline edit and lock-toggle replay', () => {
       .toBe(true);
 
     // ── Airplane mode ────────────────────────────────────────────────────
-    await context.setOffline(true);
+    await goOffline(context, page);
     await page.reload();
 
     // Unlock the locked note offline AND edit it in the same breath — the
@@ -307,7 +340,7 @@ test.describe('Offline edit and lock-toggle replay', () => {
     await page.locator('a.mob-topbar-btn').click(); // back to list (sync page)
 
     // ── Reconnect: both the edit and the unlock replay ───────────────────
-    await context.setOffline(false);
+    await goOnline(context);
 
     await expect
       .poll(
@@ -329,5 +362,66 @@ test.describe('Offline edit and lock-toggle replay', () => {
     // stuck on NOT SYNCED forever.
     await expect(page.locator('.mob-sync-row')).toContainText('SYNCED', { timeout: 45_000 });
     await expect(page.locator('.mob-sync-row')).not.toContainText('NOT SYNCED');
+  });
+});
+
+
+/**
+ * The other kind of cold start: not a reload, but the app opened afresh with
+ * no network at all — a closed-and-reopened PWA. sessionStorage is gone, so
+ * nothing in this browsing session has proved who is at the keyboard, and the
+ * unlock screen stands between the browser and the cached notes (issue #61).
+ * That is the real user journey now, so the spec performs the unlock.
+ */
+test.describe('Offline cold start in a fresh browsing session', () => {
+  test('asks for the password once, then opens the cached notes', async ({ browser }) => {
+    const runTag = Date.now().toString(36);
+    const TITLE = `Cold Start Note ${runTag}`;
+
+    // Session one: log in, get the note cached and the SW primed.
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await login(page);
+    const created = await context.request.post('/api/notes', {
+      data: { title: TITLE, body: `Body of ${TITLE}` },
+    });
+    expect(created.ok()).toBeTruthy();
+    const noteId = ((await created.json()) as { id: number }).id;
+
+    await page.evaluate(() => navigator.serviceWorker.ready);
+    await page.waitForFunction(() => navigator.serviceWorker.controller !== null);
+    await page.waitForFunction(() => caches.match('/').then((res) => !!res));
+    await page.reload();
+    await expect(page.getByText(TITLE).first()).toBeVisible();
+    await expect.poll(() => offlineHasNotes(page, [noteId]), { timeout: 15_000 }).toBe(true);
+
+    // A reload inside the SAME browsing session is not a fresh start, so it
+    // must NOT re-prompt — that is the offline-first promise.
+    await goOffline(context, page);
+    await page.reload();
+    await expect(page.getByText(TITLE).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByLabel(/^password for this account/i)).toHaveCount(0);
+
+    // Now close the browsing session. Everything on disk survives; only
+    // sessionStorage goes — which is exactly what closing a browser does.
+    await page.evaluate(() => sessionStorage.clear());
+    await page.reload();
+
+    // Cold start: locked, and nothing cached is shown.
+    await expect(page.getByLabel(/^password for this account/i)).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText(TITLE)).toHaveCount(0);
+
+    // The owner unlocks and gets their notes, still with no network.
+    await page.getByLabel(/^password for this account/i).fill('admin123');
+    await page.getByRole('button', { name: /^unlock/i }).click();
+    await expect(page.getByText(TITLE).first()).toBeVisible({ timeout: 20_000 });
+
+    // And the unlock holds for the rest of this browsing session.
+    await page.reload();
+    await expect(page.getByText(TITLE).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByLabel(/^password for this account/i)).toHaveCount(0);
+
+    await goOnline(context);
+    await context.close();
   });
 });
