@@ -86,6 +86,15 @@ function createThemeStore() {
 	// device that cannot read one can never have written one either, so the
 	// global theme stays reachable instead of the device being pinned to the
 	// OS-preference fallback for good.
+	//
+	// The cost, accepted because recording the pick in memory is the
+	// persistence shim this deliberately does not build: where storage is
+	// unreadable, nothing remembers that the user picked a theme, so the
+	// global theme can still land on top of their choice within the session —
+	// via a setGlobal(), or via this same init()'s own /api/theme fetch
+	// resolving after they picked. Their pick applies immediately either way,
+	// which is the bug this fixes; it is just not durable against a later
+	// global write.
 	function hasUserPreference(): boolean {
 		return isThemeId(readStored());
 	}
