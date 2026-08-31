@@ -250,19 +250,21 @@ func TestService_Login_Admin_NotLockedAfterFailures(t *testing.T) {
 	createUser(t, users, "admin", "adminpass", true)
 
 	for i := 0; i < 5; i++ {
-		if _, err := svc.Login(ctx, "admin", "wrong", testIP); err != auth.ErrInvalidCredentials {
-			t.Fatalf("attempt %d: expected ErrInvalidCredentials, got %v", i+1, err)
-		}
+		svc.Login(ctx, "admin", "wrong", attackerIP) //nolint:errcheck
 	}
 
-	// Admin must still be able to log in with correct password.
-	if _, err := svc.Login(ctx, "admin", "adminpass", testIP); err != nil {
-		t.Fatalf("admin login with correct password after failures: %v", err)
+	// Admins are no longer exempt from the per-address cool-down — see
+	// TestService_Login_Admin_CooledDownLikeAnyoneElse for why the exemption
+	// could not survive the short-circuit. What this test still guarantees is
+	// the part that actually mattered: the failures bind the guessing address
+	// and nothing else, so an admin is never locked out of their own system.
+	if _, err := svc.Login(ctx, "admin", "adminpass", victimIP); err != nil {
+		t.Fatalf("admin login with correct password from another address: %v", err)
 	}
 
 	got, _ := users.FindByID(ctx, 1)
 	if got.LockedAt != nil {
-		t.Fatal("admin must not be locked")
+		t.Fatal("admin account must never be locked by failed attempts")
 	}
 }
 
@@ -864,21 +866,132 @@ func TestService_Login_AdminLock_StaysGlobalAndIndefinite(t *testing.T) {
 	}
 }
 
-func TestService_Login_Admin_ExemptFromPerIPLockout(t *testing.T) {
+// ── The cool-down short-circuit ──────────────────────────────────────────────
+//
+// Gating the 403 on a correct password (the #62 oracle fix) meant Login had to
+// run bcrypt before it could answer, so a cooled-down attacker kept getting
+// told whether each guess was right — the lockout stopped session minting but
+// no longer stopped guessing. Answering the cool-down first restores the
+// throttle, and stays oracle-free because unknown usernames cool down too.
+
+func TestService_Login_Cooldown_AppliesToUnknownUsernames(t *testing.T) {
+	svc, users := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	createUser(t, users, "alice", "correctpass", false)
+	svc.SetLockoutPolicy(3, time.Hour)
+
+	for i := 0; i < 3; i++ {
+		if _, err := svc.Login(ctx, "ghost", "wrong", attackerIP); err != auth.ErrInvalidCredentials {
+			t.Fatalf("attempt %d: expected ErrInvalidCredentials, got %v", i+1, err)
+		}
+	}
+
+	// This is the property the short-circuit rests on: a username that has
+	// never existed reaches the cool-down on the same schedule as a real one.
+	if _, err := svc.Login(ctx, "ghost", "wrong", attackerIP); !errors.Is(err, auth.ErrAccountCooldown) {
+		t.Fatalf("an unknown username must cool down too, got %v", err)
+	}
+}
+
+func TestService_Login_Cooldown_ShortCircuitsBeforeThePasswordCheck(t *testing.T) {
+	svc, users := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	createUser(t, users, "alice", "correctpass", false)
+	svc.SetLockoutPolicy(3, time.Hour)
+
+	for i := 0; i < 3; i++ {
+		svc.Login(ctx, "alice", "wrong", attackerIP) //nolint:errcheck
+	}
+
+	// Both the right and the wrong password get the same answer, so the
+	// cooled-down client learns nothing from continuing to guess. That is the
+	// brute-force throttle the lockout is for.
+	sess, wrongErr := svc.Login(ctx, "alice", "wrong", attackerIP)
+	if !errors.Is(wrongErr, auth.ErrAccountCooldown) {
+		t.Fatalf("expected ErrAccountCooldown for a wrong guess in cool-down, got %v", wrongErr)
+	}
+	if sess != nil {
+		t.Fatal("no session may be minted during a cool-down")
+	}
+	sess, rightErr := svc.Login(ctx, "alice", "correctpass", attackerIP)
+	if !errors.Is(rightErr, auth.ErrAccountCooldown) {
+		t.Fatalf("expected ErrAccountCooldown for the right password in cool-down, got %v", rightErr)
+	}
+	if sess != nil {
+		t.Fatal("no session may be minted during a cool-down")
+	}
+}
+
+func TestService_Login_Cooldown_ShortCircuitsBeforeTheAdminLock(t *testing.T) {
+	svc, users := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	u := createUser(t, users, "alice", "correctpass", false)
+	svc.SetLockoutPolicy(3, time.Hour)
+
+	for i := 0; i < 3; i++ {
+		svc.Login(ctx, "alice", "wrong", attackerIP) //nolint:errcheck
+	}
+	if err := users.Lock(ctx, u.ID); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	// ErrAccountLocked here would say "this username exists and an operator
+	// has locked it" to a client that has proved nothing — the short-circuit
+	// has to come before the row is even consulted.
+	_, err := svc.Login(ctx, "alice", "correctpass", attackerIP)
+	if !errors.Is(err, auth.ErrAccountCooldown) {
+		t.Fatalf("the cool-down must answer before the account lock is read, got %v", err)
+	}
+}
+
+func TestService_Login_Cooldown_LapsesAndLetsTheOwnerBackIn(t *testing.T) {
+	svc, users := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	createUser(t, users, "alice", "correctpass", false)
+	svc.SetLockoutPolicy(3, 30*time.Millisecond)
+
+	for i := 0; i < 3; i++ {
+		svc.Login(ctx, "alice", "wrong", attackerIP) //nolint:errcheck
+	}
+	if _, err := svc.Login(ctx, "alice", "correctpass", attackerIP); !errors.Is(err, auth.ErrAccountCooldown) {
+		t.Fatalf("expected a cool-down, got %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// The short-circuit must not become a trap: once the window passes the
+	// attempt is judged normally again.
+	if _, err := svc.Login(ctx, "alice", "correctpass", attackerIP); err != nil {
+		t.Fatalf("login after the cool-down: %v", err)
+	}
+}
+
+func TestService_Login_Admin_CooledDownLikeAnyoneElse(t *testing.T) {
 	svc, users := newTestServiceWithRepo(t)
 	ctx := context.Background()
 	createUser(t, users, "root", "adminpass", true)
 	svc.SetLockoutPolicy(3, time.Hour)
 
-	for i := 0; i < 6; i++ {
-		if _, err := svc.Login(ctx, "root", "wrong", attackerIP); err != auth.ErrInvalidCredentials {
-			t.Fatalf("attempt %d: expected ErrInvalidCredentials, got %v", i+1, err)
-		}
+	// Admins used to be exempt from automatic lockout. That exemption cannot
+	// survive the short-circuit: skipping it would need the user row, and the
+	// row cannot be consulted before answering without leaking. An exempt
+	// admin would answer 401 where every other username answers 403, which is
+	// an oracle for "this username is an administrator" — a worse leak than
+	// the one being closed.
+	//
+	// The exemption's original job was making sure a brute-force attempt could
+	// not leave nobody able to unlock anyone. Scoping to (IP, username) does
+	// that job instead: the lockout only ever binds the address doing the
+	// guessing.
+	for i := 0; i < 3; i++ {
+		svc.Login(ctx, "root", "wrong", attackerIP) //nolint:errcheck
+	}
+	if _, err := svc.Login(ctx, "root", "adminpass", attackerIP); !errors.Is(err, auth.ErrAccountCooldown) {
+		t.Fatalf("expected the guessing address to be cooled down, got %v", err)
 	}
 
-	// Admins stay exempt so a brute-force attempt cannot leave the system with
-	// nobody able to unlock anyone.
-	if _, err := svc.Login(ctx, "root", "adminpass", attackerIP); err != nil {
-		t.Fatalf("admin must not be locked out by failed attempts, got %v", err)
+	// Never stranded: the admin gets straight in from anywhere else.
+	if _, err := svc.Login(ctx, "root", "adminpass", victimIP); err != nil {
+		t.Fatalf("an admin must never be locked out globally, got %v", err)
 	}
 }

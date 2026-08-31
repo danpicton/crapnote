@@ -53,8 +53,11 @@ const (
 )
 
 // lockoutKey identifies one (client IP, username) pair. The username is the
-// account's stored spelling, not the submitted one, so case or whitespace
-// variants cannot each get their own budget.
+// string the client submitted, lower-cased — not an account's stored spelling
+// — because the lockout is consulted before any lookup happens, and because
+// usernames that match no account have to accumulate failures exactly like
+// real ones. If they did not, the cool-down response would only ever be shown
+// for accounts that exist, and would itself become the username oracle.
 type lockoutKey struct {
 	ip       string
 	username string
@@ -117,12 +120,11 @@ func (t *lockoutTracker) recordFailure(k lockoutKey, maxAttempts int, cooldown t
 	e.lastSeen = now
 
 	if e.isLocked(now) {
-		// Already serving a cool-down, and deliberately not extended. Rolling
-		// the window forward buys nothing — Login answers these guesses with
-		// the generic invalid-credentials error whether the pair is locked or
-		// not, so the lock is not what is stopping them — while any client
-		// retrying on a stale saved password would otherwise lock its own
-		// address out permanently.
+		// Already serving a cool-down, and deliberately not extended. Login
+		// short-circuits before it reaches here, so in practice this guards
+		// the tracker's own invariant: a rolling window would let any client
+		// retrying on a stale saved password lock its own address out
+		// permanently.
 		return
 	}
 	if !e.lockedUntil.IsZero() {

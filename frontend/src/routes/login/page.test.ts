@@ -122,7 +122,9 @@ describe('Login page', () => {
 
 	// A failed-attempt cool-down clears itself in minutes, so telling the user
 	// to go and find an admin is wrong advice — the two 403s must read
-	// differently.
+	// differently. The cool-down is also reachable by mistyping a *username*
+	// five times, since unknown usernames cool down like real ones, so the
+	// wording cannot assume the password was the thing that was wrong.
 	it('shows a wait-and-retry message on a cool-down 403', async () => {
 		const { ApiError } = await import('$lib/api');
 		vi.mocked(api.auth.login).mockRejectedValueOnce(
@@ -138,6 +140,9 @@ describe('Login page', () => {
 		await waitFor(() => {
 			const text = screen.getByRole('alert').textContent ?? '';
 			expect(text).toMatch(/too many failed/i);
+			// Points at the username as well as the password, and at waiting.
+			expect(text).toMatch(/username/i);
+			expect(text).toMatch(/few minutes/i);
 			expect(text).not.toMatch(/administrator/i);
 		});
 	});

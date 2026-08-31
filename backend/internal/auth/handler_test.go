@@ -472,3 +472,69 @@ func TestHandler_Login_LockoutUsesTheProxyResolvedIP(t *testing.T) {
 		t.Fatalf("expected 200 for a different client behind the same proxy, got %d", got)
 	}
 }
+
+// TestHandler_Login_Cooldown_UnknownUsernameIsIndistinguishable is the test
+// that licences the whole cool-down short-circuit.
+//
+// Answering a cooled-down client with 403 before checking anything would be a
+// blatant username oracle IF only real accounts could reach that state. They
+// cannot: the attempt counter is keyed on the submitted username string, so a
+// username that does not exist accumulates failures and locks out on exactly
+// the same schedule. Every byte of both responses has to match, or the
+// oracle is back.
+func TestHandler_Login_Cooldown_UnknownUsernameIsIndistinguishable(t *testing.T) {
+	h, _, users := newTestHandlerWithRepo(t)
+	createUser(t, users, "alice", "correctpass", false)
+
+	post := func(remoteAddr, username, password string) (int, string) {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+			bytes.NewBufferString(`{"username":"`+username+`","password":"`+password+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = remoteAddr
+		w := httptest.NewRecorder()
+		h.Login(w, req)
+		return w.Code, w.Body.String()
+	}
+
+	const realIP, ghostIP = "198.51.100.7:5555", "198.51.100.8:5555"
+
+	// Burn the threshold against a real account and against one that has
+	// never existed, on separate addresses so the buckets are independent.
+	for i := 0; i < auth.DefaultMaxFailedLoginAttempts; i++ {
+		realCode, realBody := post(realIP, "alice", "wrong")
+		ghostCode, ghostBody := post(ghostIP, "ghost", "wrong")
+		if realCode != ghostCode || realBody != ghostBody {
+			t.Fatalf("attempt %d differs: real %d %s vs unknown %d %s",
+				i+1, realCode, realBody, ghostCode, ghostBody)
+		}
+	}
+
+	// Both pairs are now cooled down. A wrong password against each: identical.
+	realCode, realBody := post(realIP, "alice", "wrong")
+	ghostCode, ghostBody := post(ghostIP, "ghost", "wrong")
+	if realCode != ghostCode || realBody != ghostBody {
+		t.Fatalf("cooled-down wrong-password responses differ: real %d %s vs unknown %d %s",
+			realCode, realBody, ghostCode, ghostBody)
+	}
+	if realCode != http.StatusForbidden {
+		t.Fatalf("expected the cool-down to be in force (403), got %d %s — "+
+			"the comparison above is vacuous unless it is", realCode, realBody)
+	}
+	var decoded map[string]string
+	if err := json.Unmarshal([]byte(realBody), &decoded); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if decoded["code"] != "login_cooldown" {
+		t.Fatalf(`expected code "login_cooldown", got %q`, decoded["code"])
+	}
+
+	// And the sharpest case: the *correct* password for the real account,
+	// against the same string sent to the account that does not exist. The
+	// cool-down must not leak that one of them was right.
+	realCode, realBody = post(realIP, "alice", "correctpass")
+	ghostCode, ghostBody = post(ghostIP, "ghost", "correctpass")
+	if realCode != ghostCode || realBody != ghostBody {
+		t.Fatalf("cool-down leaks that the password was correct: real %d %s vs unknown %d %s",
+			realCode, realBody, ghostCode, ghostBody)
+	}
+}

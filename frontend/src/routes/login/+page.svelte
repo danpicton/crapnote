@@ -46,6 +46,11 @@
 	 * clears itself in minutes, and sending that user off to find an
 	 * administrator wastes everyone's time.
 	 *
+	 * The cool-down wording deliberately blames neither field. It is keyed on
+	 * the submitted username, so five goes at a username that does not exist
+	 * lands here too — the reader may have fumbled either half, or be an
+	 * attacker who is owed no detail at all.
+	 *
 	 * The reason travels as a machine-readable `code` in the JSON body, which
 	 * ApiError carries verbatim as its message. Anything unparseable or
 	 * unrecognised falls back to the locked wording — the conservative half,
@@ -60,7 +65,7 @@
 			// Non-JSON body (a proxy's own 403 page, say) — fall through.
 		}
 		return code === 'login_cooldown'
-			? 'Too many failed login attempts. Wait a few minutes and try again.'
+			? 'Too many failed login attempts. Check your username and password, then try again in a few minutes.'
 			: 'This account has been locked. Contact an administrator.';
 	}
 

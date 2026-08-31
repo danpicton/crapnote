@@ -104,12 +104,19 @@ npm run lint      # eslint
 | `MAX_FAILED_LOGIN_ATTEMPTS` | `5` | Consecutive failed passwords, from one client IP against one username, before that pair is locked out |
 | `LOCKOUT_COOLDOWN_MINUTES` | `15` | How long an automatic lockout lasts before clearing itself; manual admin locks never expire |
 
-Automatic lockout is counted per (client IP, username) pair, not per account, so
-guessing at a username locks out only the address doing the guessing — the real
-owner keeps logging in from anywhere else. Admin locks stay global and
-indefinite. The login response also refuses to name the lock unless the
-submitted password was correct, so the "account locked" reply cannot be used to
-confirm that a username exists.
+Automatic lockout is counted per (client IP, submitted username) pair, not per
+account, so guessing at a username locks out only the address doing the
+guessing — the real owner keeps logging in from anywhere else. Usernames that
+match no account are counted the same way, and a cooled-down client is turned
+away before its password is even checked; that is what stops the guessing, and
+it is not a way to enumerate accounts precisely because a name that does not
+exist gets the identical reply. Outside a cool-down the login response refuses
+to name a lock unless the submitted password was correct, so "account locked"
+cannot confirm a username either. Admin locks stay global and indefinite.
+Administrators are subject to the per-address cool-down like everyone else —
+exempting them would leak which usernames are administrators — but since the
+cool-down only ever binds one address, an admin is never locked out of their
+own system.
 | `LOGIN_RATE_PER_MINUTE` | `5` | Per-IP rate limit on `POST /api/auth/login` |
 | `LOGIN_RATE_BURST` | `5` | Burst allowance for the login limiter |
 | `BEARER_RATE_PER_MINUTE` | `600` | Per-IP rate limit applied only to requests carrying an `Authorization` header |

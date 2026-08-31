@@ -93,3 +93,44 @@ func TestLockoutTracker_EvictsUnlockedEntriesFirst(t *testing.T) {
 		t.Fatal("an attacker flooding the table must not be able to evict their own standing lock first")
 	}
 }
+
+func TestLockoutTracker_RecordFailureDoesNotExtendALiveLock(t *testing.T) {
+	tr := newLockoutTracker()
+	base := time.Now()
+	tr.now = func() time.Time { return base }
+
+	k := lockoutKey{ip: "10.0.0.1", username: "alice"}
+	for i := 0; i < 3; i++ {
+		tr.recordFailure(k, 3, time.Minute)
+	}
+
+	// Login short-circuits before it would reach here, so this invariant has
+	// no service-level test to lean on any more. A rolling window would turn
+	// a client retrying on a stale saved password into a permanent
+	// self-lockout of its own address.
+	tr.now = func() time.Time { return base.Add(30 * time.Second) }
+	tr.recordFailure(k, 3, time.Minute)
+
+	tr.now = func() time.Time { return base.Add(61 * time.Second) }
+	if tr.locked(k) {
+		t.Fatal("the cool-down must expire on its original schedule, not roll forward")
+	}
+}
+
+func TestLockoutTracker_IsBoundedAgainstUsernameCycling(t *testing.T) {
+	tr := newLockoutTracker()
+	base := time.Now()
+	tr.now = func() time.Time { return base }
+
+	// Unknown usernames are tracked too, so one address cycling random
+	// usernames now writes a fresh entry per guess rather than reusing a
+	// handful of real ones. Same instant throughout, so nothing is idle
+	// enough to prune — only the cap can hold this down.
+	for i := 0; i < maxLockoutEntries+5000; i++ {
+		tr.recordFailure(lockoutKey{ip: "198.51.100.7", username: fmt.Sprintf("ghost-%d", i)}, 5, time.Minute)
+	}
+
+	if got := tr.size(); got > maxLockoutEntries {
+		t.Fatalf("one address cycling usernames grew the table past its cap: %d > %d", got, maxLockoutEntries)
+	}
+}

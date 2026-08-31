@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -116,7 +117,7 @@ func (s *Service) SetLockoutPolicy(maxAttempts int, cooldown time.Duration) {
 // matters most when the policy's cool-down is <= 0 and the locks never lapse
 // on their own. It does not touch the user row; UserRepo.Unlock does that.
 func (s *Service) ClearAutomaticLockouts(username string) {
-	s.attempts.clearUsername(username)
+	s.attempts.clearUsername(strings.ToLower(username))
 }
 
 // SeedAdmin creates the initial admin user if no users exist yet.
@@ -143,11 +144,12 @@ func (s *Service) SeedAdmin(ctx context.Context, username, password string) erro
 
 // Login verifies credentials and returns a new Session on success.
 //
-// Returns ErrInvalidCredentials for unknown users and for wrong passwords —
-// including a wrong password against a locked account. Lock state is only
-// disclosed to a caller who supplied the correct password: ErrAccountLocked
-// for an indefinite admin lock, ErrAccountCooldown (which wraps it) for a
-// self-clearing failed-attempt cool-down. Returns ErrLoginNotConfigured if
+// A client whose (IP, username) pair is in a failed-attempt cool-down gets
+// ErrAccountCooldown before anything else is looked at, so it cannot keep
+// guessing through the window. Otherwise: ErrInvalidCredentials for unknown
+// users and for wrong passwords — including a wrong password against a locked
+// account — and ErrAccountLocked, only ever for a caller who supplied the
+// correct password, for an indefinite admin lock. Returns ErrLoginNotConfigured if
 // the Service was constructed with a zero session TTL.
 //
 // clientIP is the caller's proxy-resolved address (httpx.ClientIP) and scopes
@@ -167,10 +169,42 @@ func (s *Service) Login(ctx context.Context, username, password, clientIP string
 		return nil, ErrLoginNotConfigured
 	}
 
+	// Automatic lockout is counted per (client IP, submitted username), never
+	// per account — see lockout.go. The username is taken as submitted and
+	// lower-cased, because this decision is made before we know whether an
+	// account exists; folding case also stops one address multiplying its
+	// share of the table by cycling spellings.
+	attemptKey := lockoutKey{ip: clientIP, username: strings.ToLower(username)}
+
+	// The cool-down answers first: before the user lookup, before bcrypt,
+	// before the account's own lock state is read. That is what makes the
+	// lockout a brute-force throttle again rather than merely a bar on
+	// minting sessions — a cooled-down client learns nothing from continuing
+	// to guess, because every guess gets this same answer.
+	//
+	// It is not a username oracle, and the reason is the line above: the
+	// counter is keyed on the string that was submitted, so a username that
+	// has never existed reaches this state after exactly the same number of
+	// failures and is answered with exactly the same bytes. Nothing here is
+	// conditional on the account existing, on its lock state, or on the
+	// password — so nothing here can disclose them.
+	//
+	// This branch is fast where the paths below are slow, but that gap is a
+	// function of the caller's own failure history, which they already know.
+	// The paths below keep their existing uniformity.
+	if s.attempts.locked(attemptKey) {
+		return nil, ErrAccountCooldown
+	}
+
 	u, err := s.users.FindByUsername(ctx, username)
 	if errors.Is(err, ErrNotFound) {
 		// Perform a dummy comparison to avoid timing attacks.
 		bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password)) //nolint:errcheck
+		// Counted like any other miss. If unknown usernames were exempt they
+		// would never cool down, and the short-circuit above would answer 403
+		// only for accounts that exist — reinstating the oracle this whole
+		// change exists to remove.
+		s.attempts.recordFailure(attemptKey, s.maxFailedAttempts, s.lockoutCooldown)
 		return nil, ErrInvalidCredentials
 	}
 	if err != nil {
@@ -191,15 +225,16 @@ func (s *Service) Login(ctx context.Context, username, password, clientIP string
 		u.FailedLoginAttempts = 0
 	}
 
-	// Automatic lockout is counted per (client IP, username), never per
-	// account — see lockout.go. Keyed on the stored spelling so case or
-	// whitespace variants of the username cannot each get a fresh budget.
-	attemptKey := lockoutKey{ip: clientIP, username: u.Username}
-
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
-		// Only non-admin accounts are subject to automatic lockout. Admins are
-		// exempt so a brute-force attempt cannot strand the system with no one
-		// able to unlock anyone.
+		// Counted for admins too. The old exemption cannot survive the
+		// short-circuit above: honouring it would mean answering 401 for an
+		// administrator's username where every other username answers 403,
+		// which is an oracle for "this account is an admin" — a sharper leak
+		// than the one being closed. Its original job, keeping a brute-force
+		// attempt from leaving nobody able to unlock anyone, is done better by
+		// the (IP, username) scoping: the lockout only ever binds the address
+		// doing the guessing, so an admin is always one different network away
+		// from getting in.
 		//
 		// Note what is deliberately absent: no lock is written to the user
 		// row, and the user's sessions are NOT revoked. Both were global
@@ -209,9 +244,7 @@ func (s *Service) Login(ctx context.Context, username, password, clientIP string
 		// service in a different coat. Failing to guess a password is no
 		// evidence that an established session is compromised; an admin lock
 		// still revokes, and ValidateSession still rejects a locked user.
-		if !u.IsAdmin {
-			s.attempts.recordFailure(attemptKey, s.maxFailedAttempts, s.lockoutCooldown)
-		}
+		s.attempts.recordFailure(attemptKey, s.maxFailedAttempts, s.lockoutCooldown)
 		// Deliberately the same answer whether or not the account is locked.
 		// The lock is only disclosed to a caller who proved they hold the
 		// password; anyone else gets the generic failure an unknown username
@@ -231,11 +264,6 @@ func (s *Service) Login(ctx context.Context, username, password, clientIP string
 		}
 		return nil, ErrAccountLocked
 	}
-	// Then this address's own failed-attempt cool-down.
-	if s.attempts.locked(attemptKey) {
-		return nil, ErrAccountCooldown
-	}
-
 	// Successful login — clear this address's counter, and zero the row's
 	// legacy counter so pre-#62 state heals on first use.
 	s.attempts.clear(attemptKey)
