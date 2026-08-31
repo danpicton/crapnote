@@ -106,7 +106,7 @@ describe('Login page', () => {
 	it('shows a locked-account message on 403', async () => {
 		const { ApiError } = await import('$lib/api');
 		vi.mocked(api.auth.login).mockRejectedValueOnce(
-			new ApiError(403, '{"error":"account locked"}')
+			new ApiError(403, '{"error":"account locked","code":"account_locked"}')
 		);
 
 		render(LoginPage);
@@ -116,7 +116,46 @@ describe('Login page', () => {
 		await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
 
 		await waitFor(() => {
-			expect(screen.getByRole('alert').textContent).toMatch(/locked/i);
+			expect(screen.getByRole('alert').textContent).toMatch(/contact an administrator/i);
+		});
+	});
+
+	// A failed-attempt cool-down clears itself in minutes, so telling the user
+	// to go and find an admin is wrong advice — the two 403s must read
+	// differently.
+	it('shows a wait-and-retry message on a cool-down 403', async () => {
+		const { ApiError } = await import('$lib/api');
+		vi.mocked(api.auth.login).mockRejectedValueOnce(
+			new ApiError(403, '{"error":"too many failed login attempts","code":"login_cooldown"}')
+		);
+
+		render(LoginPage);
+
+		await fireEvent.input(screen.getByLabelText(/username/i), { target: { value: 'alice' } });
+		await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'right' } });
+		await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
+
+		await waitFor(() => {
+			const text = screen.getByRole('alert').textContent ?? '';
+			expect(text).toMatch(/too many failed/i);
+			expect(text).not.toMatch(/administrator/i);
+		});
+	});
+
+	// Any 403 without a recognisable code still has to say something useful,
+	// and must never fall through to "invalid username or password".
+	it('falls back to the locked message when the 403 body carries no code', async () => {
+		const { ApiError } = await import('$lib/api');
+		vi.mocked(api.auth.login).mockRejectedValueOnce(new ApiError(403, 'Forbidden'));
+
+		render(LoginPage);
+
+		await fireEvent.input(screen.getByLabelText(/username/i), { target: { value: 'alice' } });
+		await fireEvent.input(screen.getByLabelText('Password'), { target: { value: 'right' } });
+		await fireEvent.click(screen.getByRole('button', { name: /log in/i }));
+
+		await waitFor(() => {
+			expect(screen.getByRole('alert').textContent).toMatch(/contact an administrator/i);
 		});
 	});
 

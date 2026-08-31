@@ -325,3 +325,80 @@ func TestHandler_Logout(t *testing.T) {
 		t.Fatalf("expected 204, got %d", w.Code)
 	}
 }
+
+func TestHandler_Login_LockedAccount_WrongPassword_Returns401(t *testing.T) {
+	h, _, users := newTestHandlerWithRepo(t)
+	u := createUser(t, users, "alice", "correctpass", false)
+	if err := users.Lock(t.Context(), u.ID); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	// 403-vs-401 is observable to an unauthenticated client, so it must not
+	// depend on anything but the password being right.
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+		bytes.NewBufferString(`{"username":"alice","password":"wrong"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.Login(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for locked account + wrong password, got %d: %s", w.Code, w.Body.String())
+	}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == "session" && c.Value != "" {
+			t.Fatal("a rejected login must not set a session cookie")
+		}
+	}
+}
+
+func TestHandler_Login_UnknownUser_MatchesLockedAccountResponse(t *testing.T) {
+	h, _, users := newTestHandlerWithRepo(t)
+	u := createUser(t, users, "alice", "correctpass", false)
+	if err := users.Lock(t.Context(), u.ID); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	post := func(username string) (int, string) {
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+			bytes.NewBufferString(`{"username":"`+username+`","password":"wrong"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		h.Login(w, req)
+		return w.Code, w.Body.String()
+	}
+
+	lockedCode, lockedBody := post("alice")
+	unknownCode, unknownBody := post("ghost")
+	if lockedCode != unknownCode || lockedBody != unknownBody {
+		t.Fatalf("locked account must be indistinguishable from an unknown user: %d %s vs %d %s",
+			lockedCode, lockedBody, unknownCode, unknownBody)
+	}
+}
+
+func TestHandler_Login_AdminLocked_CorrectPassword_Returns403WithCode(t *testing.T) {
+	h, _, users := newTestHandlerWithRepo(t)
+	u := createUser(t, users, "alice", "correctpass", false)
+	if err := users.Lock(t.Context(), u.ID); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login",
+		bytes.NewBufferString(`{"username":"alice","password":"correctpass"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.Login(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	// An indefinite admin lock is the only case where "contact an
+	// administrator" is true advice, so the client needs to tell it apart
+	// from a self-clearing cool-down.
+	if body["code"] != "account_locked" {
+		t.Fatalf(`expected code "account_locked", got %q (body=%s)`, body["code"], w.Body.String())
+	}
+}

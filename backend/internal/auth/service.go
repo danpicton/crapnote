@@ -36,8 +36,19 @@ var dummyPasswordHash = []byte("$2a$12$.6Huiifna4soSOzjPCMbPuaSQLzCYttSFwT5OAZXD
 // ErrInvalidCredentials is returned when username/password don't match.
 var ErrInvalidCredentials = errors.New("invalid credentials")
 
-// ErrAccountLocked is returned when a locked user attempts to authenticate.
+// ErrAccountLocked is returned when an authenticated-but-locked user attempts
+// to log in. It is only ever returned once the submitted password has been
+// verified: returning it for a wrong guess would turn the distinct "locked"
+// response into a username oracle (issue #62).
 var ErrAccountLocked = errors.New("account locked")
+
+// ErrAccountCooldown is the automatic-lockout flavour of ErrAccountLocked —
+// a self-clearing failed-attempt cool-down rather than an indefinite admin
+// lock. It wraps ErrAccountLocked so callers that only care about "locked"
+// keep working with errors.Is; callers that render advice to the user can
+// tell the two apart, because "contact an administrator" is wrong for a lock
+// that lapses on its own.
+var ErrAccountCooldown = fmt.Errorf("%w: login cool-down active", ErrAccountLocked)
 
 // ErrLoginNotConfigured is returned by Login when the Service was built with
 // a zero session TTL. Such a service cannot mint a usable session — the
@@ -113,11 +124,13 @@ func (s *Service) SeedAdmin(ctx context.Context, username, password string) erro
 }
 
 // Login verifies credentials and returns a new Session on success.
-// Returns ErrInvalidCredentials for unknown users or wrong passwords, and
-// ErrAccountLocked for users whose accounts are locked (either by an admin,
-// or automatically after too many failed attempts — automatic locks lapse
-// after the configured cool-down). Returns ErrLoginNotConfigured if the
-// Service was constructed with a zero session TTL.
+//
+// Returns ErrInvalidCredentials for unknown users and for wrong passwords —
+// including a wrong password against a locked account. Lock state is only
+// disclosed to a caller who supplied the correct password: ErrAccountLocked
+// for an indefinite admin lock, ErrAccountCooldown (which wraps it) for a
+// self-clearing failed-attempt cool-down. Returns ErrLoginNotConfigured if
+// the Service was constructed with a zero session TTL.
 func (s *Service) Login(ctx context.Context, username, password string) (*Session, error) {
 	// Checked before the user lookup and before any password comparison. The
 	// outcome depends only on how this Service was constructed, never on the
@@ -140,17 +153,18 @@ func (s *Service) Login(ctx context.Context, username, password string) (*Sessio
 		return nil, fmt.Errorf("login: %w", err)
 	}
 
-	if u.LockedAt != nil {
-		if u.Locked(time.Now()) {
-			// Still perform a dummy comparison to keep timing uniform.
-			bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password)) //nolint:errcheck
-			return nil, ErrAccountLocked
-		}
-		// Automatic lock whose cool-down has lapsed — clear it (also resets
-		// the failed-attempt counter) and let this attempt proceed normally.
+	// A lock whose cool-down has already lapsed is stale state, not a
+	// decision: clear it (which also resets the failed-attempt counter) so
+	// this attempt is judged on its own merits. Doing it before the password
+	// check discloses nothing — the response is identical either way — and
+	// keeps the failure path below from counting a fresh miss on top of the
+	// counter that produced the expired lock.
+	if u.LockedAt != nil && !u.Locked(time.Now()) {
 		if err := s.users.Unlock(ctx, u.ID); err != nil {
 			return nil, fmt.Errorf("login: clear lapsed lock: %w", err)
 		}
+		u.LockedAt, u.LockedUntil = nil, nil
+		u.FailedLoginAttempts = 0
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
@@ -171,7 +185,21 @@ func (s *Service) Login(ctx context.Context, username, password string) (*Sessio
 				s.RevokeUserSessions(ctx, u.ID) //nolint:errcheck
 			}
 		}
+		// Deliberately the same answer whether or not the account is locked.
+		// The lock is only disclosed to a caller who proved they hold the
+		// password; anyone else gets the generic failure an unknown username
+		// would get, so the response cannot be used to enumerate accounts.
 		return nil, ErrInvalidCredentials
+	}
+
+	// The password checked out, so the caller is the account owner (or already
+	// holds their credential) and the lock state can safely be disclosed.
+	// Still no session: a locked account grants nothing.
+	if u.LockedAt != nil {
+		if u.LockedUntil != nil {
+			return nil, ErrAccountCooldown
+		}
+		return nil, ErrAccountLocked
 	}
 
 	// Successful login — clear the failed-attempt counter.

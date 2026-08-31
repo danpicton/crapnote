@@ -56,13 +56,27 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
+	// Cool-down first: ErrAccountCooldown wraps ErrAccountLocked, so the
+	// broader check below would otherwise swallow it. Both are 403 — only the
+	// advice differs, and "contact an administrator" is wrong for a lock that
+	// clears itself. Reaching either branch means the password was correct,
+	// so naming the reason discloses nothing to an unauthenticated guesser.
+	if errors.Is(err, ErrAccountCooldown) {
+		slog.Warn("audit: login blocked — failed-attempt cool-down",
+			"event", "login_cooldown",
+			"username", req.Username,
+			"ip", httpx.ClientIP(r),
+		)
+		writeCodedError(w, http.StatusForbidden, "too many failed login attempts", "login_cooldown")
+		return
+	}
 	if errors.Is(err, ErrAccountLocked) {
 		slog.Warn("audit: login blocked — account locked",
 			"event", "login_locked",
 			"username", req.Username,
 			"ip", httpx.ClientIP(r),
 		)
-		writeError(w, http.StatusForbidden, "account locked")
+		writeCodedError(w, http.StatusForbidden, "account locked", "account_locked")
 		return
 	}
 	if err != nil {
@@ -211,7 +225,19 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 
 // writeError writes a JSON error response.
 func writeError(w http.ResponseWriter, code int, msg string) {
+	writeCodedError(w, code, msg, "")
+}
+
+// writeCodedError writes a JSON error response carrying a stable machine
+// readable `code` alongside the human-readable message, so clients can branch
+// on the reason without string-matching prose. An empty errCode omits the
+// field, keeping the shape of every existing error response unchanged.
+func writeCodedError(w http.ResponseWriter, code int, msg, errCode string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{"error": msg}) //nolint:errcheck
+	body := map[string]string{"error": msg}
+	if errCode != "" {
+		body["code"] = errCode
+	}
+	json.NewEncoder(w).Encode(body) //nolint:errcheck
 }

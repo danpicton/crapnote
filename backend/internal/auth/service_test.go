@@ -164,9 +164,10 @@ func TestService_Login_NonAdmin_LocksAfterMaxFailures(t *testing.T) {
 		t.Fatalf("third attempt: expected ErrInvalidCredentials, got %v", err)
 	}
 
-	// Further attempts — even with the right password — must return ErrAccountLocked.
-	if _, err := svc.Login(ctx, "alice", "correctpass"); err != auth.ErrAccountLocked {
-		t.Fatalf("after 3 failures expected ErrAccountLocked, got %v", err)
+	// Further attempts — with the right password, the only credential allowed
+	// to learn the lock state — must report the automatic cool-down flavour.
+	if _, err := svc.Login(ctx, "alice", "correctpass"); !errors.Is(err, auth.ErrAccountCooldown) {
+		t.Fatalf("after 3 failures expected ErrAccountCooldown, got %v", err)
 	}
 
 	got, _ := users.FindByID(ctx, 1)
@@ -187,8 +188,8 @@ func TestService_Login_AutoLock_ExpiresAfterCooldown(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		svc.Login(ctx, "alice", "wrong") //nolint:errcheck
 	}
-	if _, err := svc.Login(ctx, "alice", "correctpass"); err != auth.ErrAccountLocked {
-		t.Fatalf("expected ErrAccountLocked during cool-down, got %v", err)
+	if _, err := svc.Login(ctx, "alice", "correctpass"); !errors.Is(err, auth.ErrAccountCooldown) {
+		t.Fatalf("expected ErrAccountCooldown during cool-down, got %v", err)
 	}
 
 	time.Sleep(50 * time.Millisecond)
@@ -580,5 +581,58 @@ func TestService_ValidateSession_Expired(t *testing.T) {
 	_, err := svc.ValidateSession(ctx, "doesnotexist")
 	if err != auth.ErrNotFound {
 		t.Fatalf("expected ErrNotFound for missing session, got %v", err)
+	}
+}
+
+// ── Lock disclosure: only a correct password may learn the account is locked ──
+
+func TestService_Login_LockedAccount_WrongPassword_LooksLikeBadCredentials(t *testing.T) {
+	svc, users := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	u := createUser(t, users, "alice", "correctpass", false)
+	if err := users.Lock(ctx, u.ID); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	// The distinct "locked" signal is a username oracle unless it is gated on
+	// the password: an attacker who can drive an account into a lock and then
+	// read the lock back has confirmed the username exists. A wrong guess must
+	// be indistinguishable from a guess at a username that does not exist.
+	sess, err := svc.Login(ctx, "alice", "wrong")
+	if err != auth.ErrInvalidCredentials {
+		t.Fatalf("expected ErrInvalidCredentials for locked account + wrong password, got %v", err)
+	}
+	if sess != nil {
+		t.Fatalf("expected no session for a locked account, got %+v", sess)
+	}
+}
+
+func TestService_Login_UnknownUser_MatchesLockedAccountOutcome(t *testing.T) {
+	svc, users := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	u := createUser(t, users, "alice", "correctpass", false)
+	if err := users.Lock(ctx, u.ID); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	_, lockedErr := svc.Login(ctx, "alice", "wrong")
+	_, unknownErr := svc.Login(ctx, "ghost", "wrong")
+	if lockedErr != unknownErr {
+		t.Fatalf("locked-account and unknown-user outcomes must be identical: %v vs %v", lockedErr, unknownErr)
+	}
+}
+
+func TestService_Login_LockedAccount_CorrectPassword_StillDisclosesLock(t *testing.T) {
+	svc, users := newTestServiceWithRepo(t)
+	ctx := context.Background()
+	u := createUser(t, users, "alice", "correctpass", false)
+	if err := users.Lock(ctx, u.ID); err != nil {
+		t.Fatalf("Lock: %v", err)
+	}
+
+	// The legitimate owner of the account proves who they are with the
+	// password, so telling them why they cannot get in leaks nothing.
+	if _, err := svc.Login(ctx, "alice", "correctpass"); !errors.Is(err, auth.ErrAccountLocked) {
+		t.Fatalf("expected ErrAccountLocked, got %v", err)
 	}
 }
