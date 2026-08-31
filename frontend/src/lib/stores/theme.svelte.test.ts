@@ -277,6 +277,90 @@ describe('theme store — global (admin-set) theme', () => {
 		await theme.setGlobal('rosso');
 		expect(theme.current).toBe('bianco');
 	});
+
+	// A GET that was already in flight when the admin saved carries a value the
+	// admin has just replaced; letting it land makes the save look like it
+	// silently failed even though the server stored the new theme.
+	it('a slow init() fetch does not revert a global theme saved while it was in flight', async () => {
+		let resolveGet!: (value: { theme: string }) => void;
+		mockApi.theme.get.mockReturnValue(
+			new Promise<{ theme: string }>((resolve) => {
+				resolveGet = resolve;
+			}),
+		);
+
+		const theme = await freshTheme();
+		const initDone = theme.init();
+
+		await theme.setGlobal('rosso');
+		expect(theme.current).toBe('rosso');
+
+		resolveGet({ theme: 'bianco' });
+		await initDone;
+
+		expect(theme.globalTheme).toBe('rosso');
+		expect(theme.current).toBe('rosso');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('rosso');
+	});
+
+	// Same race, but on a device that has its own theme: globalTheme must still
+	// be protected even though `current` was never the global theme's to change.
+	it('a slow init() fetch does not revert globalTheme when the user has a preference', async () => {
+		localStorage.setItem(STORAGE_KEY, 'bianco');
+		let resolveGet!: (value: { theme: string }) => void;
+		mockApi.theme.get.mockReturnValue(
+			new Promise<{ theme: string }>((resolve) => {
+				resolveGet = resolve;
+			}),
+		);
+
+		const theme = await freshTheme();
+		const initDone = theme.init();
+
+		await theme.setGlobal('rosso');
+
+		resolveGet({ theme: 'verdana' });
+		await initDone;
+
+		expect(theme.globalTheme).toBe('rosso');
+		expect(theme.current).toBe('bianco');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('bianco');
+	});
+
+	// The guard keys on the fetch being older than the write, not on a write
+	// having ever happened — a fetch started afterwards is the fresher source.
+	it('an init() started after setGlobal() still applies the fetched global theme', async () => {
+		const theme = await freshTheme();
+		await theme.init();
+		await theme.setGlobal('rosso');
+
+		mockApi.theme.get.mockResolvedValue({ theme: 'bianco' });
+		await theme.init();
+
+		expect(theme.globalTheme).toBe('bianco');
+		expect(theme.current).toBe('bianco');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('bianco');
+	});
+
+	it('an in-flight fetch that rejects after setGlobal() leaves the saved theme alone', async () => {
+		let rejectGet!: (reason: Error) => void;
+		mockApi.theme.get.mockReturnValue(
+			new Promise<{ theme: string }>((_resolve, reject) => {
+				rejectGet = reject;
+			}),
+		);
+
+		const theme = await freshTheme();
+		const initDone = theme.init();
+
+		await theme.setGlobal('rosso');
+
+		rejectGet(new Error('network down'));
+		await initDone;
+
+		expect(theme.globalTheme).toBe('rosso');
+		expect(theme.current).toBe('rosso');
+	});
 });
 
 describe('browser theme-color', () => {
