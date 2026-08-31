@@ -55,11 +55,13 @@ func main() {
 		time.Duration(ttlDays)*24*time.Hour,
 	)
 	// Automatic-lockout policy: after MAX_FAILED_LOGIN_ATTEMPTS consecutive
-	// failures (default 5) a non-admin account is locked for
-	// LOCKOUT_COOLDOWN_MINUTES (default 15), then unlocks itself. This keeps
-	// brute-force protection without letting three bad requests per username
-	// create a standing, admin-only-recoverable outage. Manual admin locks
-	// remain indefinite.
+	// failures (default 5) from one client IP against one submitted username,
+	// that pair is turned away for LOCKOUT_COOLDOWN_MINUTES (default 15)
+	// before its credentials are even looked at, then releases itself.
+	// Scoping to the pair rather than to the account keeps the brute-force
+	// protection while denying an attacker any lever over an account they
+	// cannot log into (issue #62). Manual admin locks are separate: still on
+	// the user row, still global and indefinite.
 	lockoutAttempts := auth.DefaultMaxFailedLoginAttempts
 	lockoutCooldown := auth.DefaultLockoutCooldown
 	if v, err := strconv.Atoi(os.Getenv("MAX_FAILED_LOGIN_ATTEMPTS")); err == nil && v > 0 {

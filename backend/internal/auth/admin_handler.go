@@ -31,6 +31,11 @@ const adminServiceSessionTTL time.Duration = 0
 
 // NewAdminHandler creates a new AdminHandler for the admin CRUD endpoints.
 // Invite-based endpoints are unavailable; use NewAdminHandlerWithInvites.
+// NewAdminHandler builds a handler with its own internal Service. That
+// Service carries its own automatic-lockout state, so an unlock issued
+// through this handler cannot release lockouts recorded by a different
+// Service instance. Production wires NewAdminHandlerWithInvites with the same
+// Service the login handler uses; prefer that.
 func NewAdminHandler(users *UserRepo, sessions *SessionRepo) *AdminHandler {
 	return &AdminHandler{users: users, svc: NewService(users, sessions, adminServiceSessionTTL)}
 }
@@ -474,6 +479,11 @@ func (h *AdminHandler) UnlockUser(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
+	// The row lock is only half the story: automatic lockout is held per
+	// (client IP, username) in memory, and with LOCKOUT_COOLDOWN_MINUTES <= 0
+	// those never lapse. Releasing them here is what makes admin unlock a
+	// complete unlock rather than a partial one.
+	h.svc.ClearAutomaticLockouts(u.Username)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(toUserResponse(u))
 }

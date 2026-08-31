@@ -36,6 +36,39 @@
 		}
 	});
 
+	/**
+	 * Word the 403 for the kind of lock that produced it.
+	 *
+	 * The server only answers 403 once the password has checked out, so both
+	 * variants are safe to name here — an attacker guessing at usernames never
+	 * sees either (issue #62). What differs is the advice: an admin lock is
+	 * indefinite and really does need a human, while a failed-attempt cool-down
+	 * clears itself in minutes, and sending that user off to find an
+	 * administrator wastes everyone's time.
+	 *
+	 * The cool-down wording deliberately blames neither field. It is keyed on
+	 * the submitted username, so five goes at a username that does not exist
+	 * lands here too — the reader may have fumbled either half, or be an
+	 * attacker who is owed no detail at all.
+	 *
+	 * The reason travels as a machine-readable `code` in the JSON body, which
+	 * ApiError carries verbatim as its message. Anything unparseable or
+	 * unrecognised falls back to the locked wording — the conservative half,
+	 * since it never tells someone to sit and wait for a lock that will not
+	 * lift.
+	 */
+	function lockedMessage(err: ApiError): string {
+		let code = '';
+		try {
+			code = (JSON.parse(err.message) as { code?: string }).code ?? '';
+		} catch {
+			// Non-JSON body (a proxy's own 403 page, say) — fall through.
+		}
+		return code === 'login_cooldown'
+			? 'Too many failed login attempts. Check your username and password, then try again in a few minutes.'
+			: 'This account has been locked. Contact an administrator.';
+	}
+
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
 		error = '';
@@ -55,7 +88,7 @@
 				error = "You're offline. Reconnect to log in.";
 			} else if (err instanceof ApiError) {
 				if (err.status === 403) {
-					error = 'This account has been locked. Contact an administrator.';
+					error = lockedMessage(err);
 				} else {
 					error = 'Invalid username or password.';
 				}
