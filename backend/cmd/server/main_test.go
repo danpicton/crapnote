@@ -220,3 +220,67 @@ func TestSeedDefaultTheme_UnsetIsNoOp(t *testing.T) {
 		t.Fatalf("expected no log output when DEFAULT_THEME is unset, got: %q", buf.String())
 	}
 }
+
+// An invalid DEFAULT_THEME must be reported on the strength of the value being
+// malformed, not on whether seeding would have proceeded. SeedGlobalTheme
+// short-circuits to nil once a theme is stored — correctly, that is what makes
+// seeding first-run-only — so an instance whose admin has ever picked a theme
+// would otherwise never surface the operator's typo.
+func TestSeedDefaultTheme_InvalidValueWarnsEvenWhenThemeAlreadyStored(t *testing.T) {
+	svc := newSettingsService(t)
+	ctx := context.Background()
+	if err := svc.SetGlobalTheme(ctx, "bianco"); err != nil {
+		t.Fatalf("admin set theme: %v", err)
+	}
+	var buf bytes.Buffer
+
+	seedDefaultTheme(ctx, svc, "Console-2001", newBufferLogger(&buf))
+
+	out := buf.String()
+	if !strings.Contains(out, "level=WARN") {
+		t.Fatalf("expected a warning even with a theme stored, got log: %q", out)
+	}
+	if !strings.Contains(out, "Console-2001") {
+		t.Fatalf("expected the offending value in the log, got: %q", out)
+	}
+	if theme, _ := svc.GlobalTheme(ctx); theme != "bianco" {
+		t.Fatalf("expected the stored admin choice preserved, got %q", theme)
+	}
+}
+
+// The mirror case: a valid DEFAULT_THEME with a theme already stored is the
+// ordinary steady state, and must stay silent as well as non-destructive.
+func TestSeedDefaultTheme_ValidValueWithThemeStoredIsSilent(t *testing.T) {
+	svc := newSettingsService(t)
+	ctx := context.Background()
+	if err := svc.SetGlobalTheme(ctx, "bianco"); err != nil {
+		t.Fatalf("admin set theme: %v", err)
+	}
+	var buf bytes.Buffer
+
+	seedDefaultTheme(ctx, svc, "rosso", newBufferLogger(&buf))
+
+	if out := buf.String(); strings.Contains(out, "level=WARN") || strings.Contains(out, "level=ERROR") {
+		t.Fatalf("expected no warning for a valid value, got log: %q", out)
+	}
+	if theme, _ := svc.GlobalTheme(ctx); theme != "bianco" {
+		t.Fatalf("expected the stored admin choice preserved, got %q", theme)
+	}
+}
+
+// A value already known to be malformed must not be handed to the seeder at
+// all: no pointless write attempt, and exactly one warning rather than one from
+// the pre-check plus another from the rejected write.
+func TestSeedDefaultTheme_InvalidValueSkipsTheSeedAttempt(t *testing.T) {
+	seeder := &fakeThemeSeeder{}
+	var buf bytes.Buffer
+
+	seedDefaultTheme(context.Background(), seeder, "Console-2001", newBufferLogger(&buf))
+
+	if len(seeder.called) != 0 {
+		t.Fatalf("expected no seed attempt for a malformed value, got %v", seeder.called)
+	}
+	if n := strings.Count(buf.String(), "level=WARN"); n != 1 {
+		t.Fatalf("expected exactly one warning, got %d: %q", n, buf.String())
+	}
+}

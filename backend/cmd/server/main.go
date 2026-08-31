@@ -273,14 +273,30 @@ type themeSeeder interface {
 //     not something the operator can fix in the environment, so it is logged at
 //     error level to reach alerting — but it still does not abort startup, and
 //     a genuinely broken database will surface loudly on the first request.
+//
+// The value is validated here rather than inferred from the seeder's error,
+// because SeedGlobalTheme returns nil without looking at the id once a theme is
+// stored — the short-circuit that makes seeding first-run-only. Judging the
+// warning on the seeder's result would therefore silence it on every instance
+// whose admin has ever picked a theme, which is the steady state after day one,
+// leaving the operator's typo with no signal at all.
 func seedDefaultTheme(ctx context.Context, seeder themeSeeder, theme string, logger *slog.Logger) {
 	if theme == "" {
+		return
+	}
+	if err := settings.ValidateThemeID(theme); err != nil {
+		logger.Warn("ignoring invalid DEFAULT_THEME, starting without seeding the global theme",
+			"theme", theme,
+			"expected", "lowercase theme id, e.g. console-2001")
 		return
 	}
 	err := seeder.SeedGlobalTheme(ctx, theme)
 	switch {
 	case err == nil:
 	case errors.Is(err, settings.ErrInvalidTheme):
+		// Not reachable through the shape check above; kept so that validation
+		// the service may add beyond shape is still reported as config rather
+		// than as an infrastructure failure.
 		logger.Warn("ignoring invalid DEFAULT_THEME, starting without seeding the global theme",
 			"theme", theme,
 			"expected", "lowercase theme id, e.g. console-2001")

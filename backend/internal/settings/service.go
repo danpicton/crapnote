@@ -30,10 +30,22 @@ func (s *Service) GlobalTheme(ctx context.Context) (string, error) {
 	return v, err
 }
 
-// SetGlobalTheme stores the default theme id after validating its shape.
-func (s *Service) SetGlobalTheme(ctx context.Context, theme string) error {
+// ValidateThemeID reports whether a theme id is well-formed, returning
+// ErrInvalidTheme when it is not. It is the same shape check SetGlobalTheme
+// applies, exported for callers that hold a theme id from outside the service
+// — startup reading DEFAULT_THEME — and need to judge it without attempting a
+// write, since a write may legitimately be skipped (see SeedGlobalTheme).
+func ValidateThemeID(theme string) error {
 	if !themeIDPattern.MatchString(theme) {
 		return ErrInvalidTheme
+	}
+	return nil
+}
+
+// SetGlobalTheme stores the default theme id after validating its shape.
+func (s *Service) SetGlobalTheme(ctx context.Context, theme string) error {
+	if err := ValidateThemeID(theme); err != nil {
+		return err
 	}
 	return s.repo.Set(ctx, KeyGlobalTheme, theme)
 }
