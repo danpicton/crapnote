@@ -4,13 +4,13 @@ description: >-
   How to develop features, fix bugs, and make changes in the CrapNote PWA project — a SvelteKit 5 + Go + SQLite note-taking application.
   Use this skill whenever working on the crapnote codebase, including adding features, fixing bugs, writing tests, refactoring,
   database migrations, API endpoints, frontend components, or any code changes in this repo.
-  Trigger on any task that touches Go backend code, SvelteKit frontend code, SQLite/PostgreSQL schemas, or the E2E test suite.
+  Trigger on any task that touches Go backend code, SvelteKit frontend code, SQLite schemas, or the E2E test suite.
   For editor/Milkdown work see the crapnote-editor skill; for deployment/infra see crapnote-deploy.
 ---
 
 # CrapNote Development Skill
 
-CrapNote is a PWA note-taking application. The Go backend serves a REST API and embeds the SvelteKit frontend via `go:embed`. SQLite is the default database (PostgreSQL optional via `DATABASE_URL`).
+CrapNote is a PWA note-taking application. The Go backend serves a REST API and embeds the SvelteKit frontend via `go:embed`. SQLite is the database — see [Database Notes](#database-notes).
 
 ## TDD
 
@@ -266,7 +266,8 @@ For significant user-facing features, add a Playwright spec in `e2e/tests/`. E2E
 
 ## Database Notes
 
-- SQLite is default. PostgreSQL is opt-in via `DATABASE_URL` env var.
+- **SQLite is the only database.** `db.Open` opens the `sqlite3` driver and nothing else, `db.Config` has one field (`SQLitePath`), `backend/go.mod` requires a single driver (`github.com/mattn/go-sqlite3`), and `backend/internal/db/migrations/` is one SQLite-dialect migration set. There is no `DATABASE_URL` handling anywhere in the tree.
+- Write SQL for SQLite, not for a portable subset: the existing queries use `?` placeholders, `INSERT OR IGNORE`, `AUTOINCREMENT` and `DATETIME` columns. Don't add abstraction for a second engine that isn't there.
 - FTS5 virtual table (`notes_fts`) syncs automatically via triggers on the `notes` table.
 - The `-tags sqlite_fts5` build tag is mandatory — without it, FTS5 migrations fail at runtime.
 - In-memory SQLite DBs use a unique random name per `db.Open` call to prevent cross-test contamination.
@@ -284,7 +285,6 @@ For significant user-facing features, add a Playwright spec in `e2e/tests/`. E2E
 
 ```
 DATABASE_PATH       # SQLite file path (default: /data/notes.db)
-DATABASE_URL        # PostgreSQL connection string (overrides SQLite if set)
 ADMIN_USERNAME      # Seeded on first run if no users exist
 ADMIN_PASSWORD      # Seeded on first run if no users exist
 SESSION_TTL_DAYS    # Session lifetime (default: 7)
