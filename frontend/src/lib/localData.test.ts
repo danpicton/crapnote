@@ -6,6 +6,7 @@ import {
 	persistSessionUser,
 	readSessionUser,
 	clearSessionUser,
+	openOwnedOfflineDB,
 } from './localData';
 import { openOfflineDB, upsertNote, getAllNotes, getOfflineOwner, setOfflineOwner, deleteOfflineDB } from './offlineDB';
 
@@ -135,6 +136,61 @@ describe('ensureOfflineOwner', () => {
 		expect(await getAllNotes(db)).toEqual([]);
 		expect(await getOfflineOwner(db)).toBe(8);
 		expect(deleted).toEqual(['crapnote-v1']);
+		db.close();
+	});
+});
+
+describe('openOwnedOfflineDB', () => {
+	it('returns null when no user is known (nobody is or was logged in here)', async () => {
+		const db = await openOfflineDB();
+		await setOfflineOwner(db, 7);
+		await upsertNote(db, makeNote(1));
+		db.close();
+
+		expect(await openOwnedOfflineDB(null)).toBeNull();
+	});
+
+	it('returns null when the store belongs to a different user', async () => {
+		const db = await openOfflineDB();
+		await setOfflineOwner(db, 7);
+		await upsertNote(db, makeNote(1));
+		db.close();
+
+		expect(await openOwnedOfflineDB(8)).toBeNull();
+	});
+
+	it('returns null for an unowned store rather than adopting it', async () => {
+		const db = await openOfflineDB();
+		await upsertNote(db, makeNote(1));
+		db.close();
+
+		expect(await openOwnedOfflineDB(7)).toBeNull();
+	});
+
+	it('returns an open handle when the store belongs to the given user', async () => {
+		const db = await openOfflineDB();
+		await setOfflineOwner(db, 7);
+		await upsertNote(db, makeNote(1));
+		db.close();
+
+		const owned = await openOwnedOfflineDB(7);
+		expect(owned).not.toBeNull();
+		expect((await getAllNotes(owned!)).map((n) => n.id)).toEqual([1]);
+		owned!.close();
+	});
+
+	it('does not leave the refused connection open (a later delete is not blocked)', async () => {
+		let db = await openOfflineDB();
+		await setOfflineOwner(db, 7);
+		db.close();
+
+		expect(await openOwnedOfflineDB(8)).toBeNull();
+
+		// deleteOfflineDB resolves on `blocked` too, so prove the store really
+		// went away rather than trusting the promise.
+		await deleteOfflineDB();
+		db = await openOfflineDB();
+		expect(await getOfflineOwner(db)).toBeNull();
 		db.close();
 	});
 });

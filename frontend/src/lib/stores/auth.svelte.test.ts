@@ -227,6 +227,21 @@ describe('auth readiness', () => {
 		expect(auth.user).toEqual(fakeUser);
 	});
 
+	it('a fresh login settles readiness without another /api/auth/me', async () => {
+		// The notes page awaits ready() before it will touch the offline
+		// store. Straight after a login the session is already known, so
+		// making that await cost a redundant round-trip would delay the
+		// first paint for nothing.
+		const auth = await freshAuth();
+		vi.mocked(api.auth.login).mockResolvedValue(fakeUser);
+
+		await auth.login('alice', 'pw');
+		await auth.ready();
+
+		expect(api.auth.me).not.toHaveBeenCalled();
+		expect(auth.user).toEqual(fakeUser);
+	});
+
 	it('an explicit init() after settling still re-checks the session', async () => {
 		const auth = await freshAuth();
 		vi.mocked(api.auth.me).mockResolvedValue(fakeUser);

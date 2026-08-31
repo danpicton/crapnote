@@ -92,8 +92,23 @@ vi.mock('$lib/offlineDB', async (importOriginal) => ({
 	deleteNote: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('$lib/stores/auth.svelte', () => ({
+	auth: {
+		user: { id: 1, username: 'alice', is_admin: false, created_at: '' },
+		loading: false,
+		ready: vi.fn().mockResolvedValue(undefined),
+	},
+}));
+
+// The offline-store ownership gate. A handle means "this browser's cache
+// belongs to the signed-in user", which is what every other test assumes.
+vi.mock('$lib/localData', () => ({
+	openOwnedOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
+}));
+
 import { api } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
+import { openOwnedOfflineDB } from '$lib/localData';
 import { goto } from '$app/navigation';
 
 const mockNote = (overrides = {}) => ({
@@ -661,5 +676,67 @@ describe('Offline lock toggle', () => {
 				expect.objectContaining({ id: 42, locked: false, flags_dirty: true })
 			)
 		);
+	});
+});
+
+
+/**
+ * Read-path ownership gate (issue #61). A guarded notes list is worthless if
+ * the note ids — small consecutive integers — can be typed into the URL bar
+ * to read the same cached bodies one at a time.
+ */
+describe('/notes/[id] offline cache ownership guard', () => {
+	const foreign = {
+		id: 42, title: "Previous user's title", body: "Previous user's body",
+		starred: false, pinned: false, tags: [{ id: 3, name: 'private-tag' }],
+		server_updated_at: '2024-01-01T00:00:00Z',
+		local_updated_at: '2024-01-01T00:00:00Z',
+		is_dirty: false, is_new: false,
+	};
+
+	beforeEach(() => {
+		vi.mocked(api.tags.listForNote).mockResolvedValue([]);
+		vi.mocked(api.tags.list).mockResolvedValue([]);
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue(null);
+		vi.mocked(offlineDB.getNote).mockResolvedValue(foreign);
+	});
+
+	it('renders nothing cached when offline and the store belongs to someone else', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(api.notes.get).mockRejectedValue(new Error('offline'));
+
+		render(NotePage);
+		await waitFor(() => expect(api.notes.get).toHaveBeenCalled());
+		await new Promise((r) => setTimeout(r, 20));
+
+		expect(screen.queryByDisplayValue("Previous user's title")).not.toBeInTheDocument();
+		expect(offlineDB.getNote).not.toHaveBeenCalled();
+	});
+
+	it('does not overlay a foreign cached edit onto the server copy', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ title: 'Server Title' }));
+		vi.mocked(offlineDB.getNote).mockResolvedValue({ ...foreign, is_dirty: true });
+
+		render(NotePage);
+		await waitFor(() => expect(screen.getByDisplayValue('Server Title')).toBeInTheDocument());
+
+		expect(screen.queryByDisplayValue("Previous user's title")).not.toBeInTheDocument();
+		expect(offlineDB.getNote).not.toHaveBeenCalled();
+	});
+
+	it('does not open an offline-created note out of a foreign store', async () => {
+		// Negative ids never reach the server, so the cache read is the only
+		// thing standing between the URL and the previous user's note.
+		routeState.params.id = '-7';
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(api.notes.get).mockRejectedValue(new Error('offline'));
+		vi.mocked(offlineDB.getNote).mockResolvedValue({ ...foreign, id: -7, is_new: true });
+
+		render(NotePage);
+		await new Promise((r) => setTimeout(r, 20));
+
+		expect(screen.queryByDisplayValue("Previous user's title")).not.toBeInTheDocument();
+		expect(offlineDB.getNote).not.toHaveBeenCalled();
 	});
 });

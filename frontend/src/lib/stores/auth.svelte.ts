@@ -88,6 +88,11 @@ export const auth = {
 
 	async login(username: string, password: string) {
 		user = await api.auth.login(username, password);
+		// A successful login IS a settled session check, so ready() must not
+		// go fetch /api/auth/me again: the notes page awaits it before it
+		// will read the offline store, and an extra round-trip there would
+		// delay the first paint after every login for no new information.
+		checked = true;
 		persistSessionUser(user);
 		await ensureOfflineOwner(user.id);
 	},
