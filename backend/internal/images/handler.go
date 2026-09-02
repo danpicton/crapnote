@@ -226,7 +226,17 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", mimeType)
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	// Never stored by the browser's HTTP cache. `private, max-age=1y,
+	// immutable` used to let it keep note images on disk for a year, keyed by
+	// URL alone: no Vary, so the session cookie did not enter into it, and
+	// nothing the app can clear on logout. On a shared browser that is the
+	// #108 leak with the service worker bypassed — the next person requests
+	// the URL, the backend is never consulted, and the bytes come back.
+	//
+	// Costs nothing the app relies on: the SW keeps its own copy in Cache
+	// Storage (which ignores Cache-Control) and serves it cache-first once
+	// the session is unlocked, so repeat views still never reach the network.
+	w.Header().Set("Cache-Control", "private, no-store")
 	w.Write(data) //nolint:errcheck
 }
 

@@ -321,7 +321,20 @@ describe('gatedCacheFirst', () => {
 		// The server is the only authority while locked: it checks the session
 		// and ownership, which the cache cannot.
 		expect(await res.text()).toBe('from-server');
-		expect(mockFetch).toHaveBeenCalledWith(request);
+		expect(mockFetch).toHaveBeenCalledWith(request, { cache: 'no-store' });
+	});
+
+	it('bypasses the browser HTTP cache while the gate is shut', async () => {
+		mockFetch.mockResolvedValueOnce(new Response('from-server', { status: 200 }));
+
+		await gatedCacheFirst(req('/api/images/7'), CACHE_NAME, shut);
+
+		// The HTTP cache answers from URL alone, with no session and nothing
+		// the app can clear on logout. Installs that ran the old
+		// `max-age=1y, immutable` header still hold a year of the previous
+		// user's images there, so refusing to read it is what protects them
+		// until those entries age out.
+		expect(mockFetch).toHaveBeenCalledWith(expect.anything(), { cache: 'no-store' });
 	});
 
 	it('returns a bare 503 rather than cached bytes when locked and offline', async () => {

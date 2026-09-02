@@ -379,6 +379,73 @@ test.describe('Shared browser: cached notes need the password, not just a matchi
     await contextB.close();
   });
 
+  /**
+   * The other copy. `/api/images/*` used to be served
+   * `private, max-age=31536000, immutable`, so the browser's own HTTP cache
+   * kept note images on disk for a year — keyed by URL alone, with no Vary on
+   * the session cookie, surviving a browser close, and not reachable from
+   * `clearLocalData()`. That is the same #108 leak with the service worker
+   * bypassed, and the SW cache test above cannot see it: it seeds an id the
+   * API never serves, so nothing ever enters the HTTP cache.
+   *
+   * This one uses a real uploaded image in ONE browser profile, because a
+   * fresh Playwright context starts with an empty HTTP cache and could not
+   * reproduce it at all. Dropping the cookies models the session ending
+   * without a logout; the reload is what makes the app notice, and the app
+   * noticing is what shuts the gate.
+   */
+  test('a note image is not left in the browser HTTP cache for the next arrival', async ({
+    browser,
+  }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await login(page);
+    await waitForOfflineReadiness(page);
+
+    // A 1x1 PNG, uploaded and viewed from the page itself — the way the app
+    // does it — so it lands in every cache the browser has to offer.
+    const PIXEL_PNG_BASE64 =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const imageUrl = await page.evaluate(async (base64) => {
+      const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+      const form = new FormData();
+      form.append('image', new Blob([bytes], { type: 'image/png' }), 'pixel.png');
+      const res = await fetch('/api/images', { method: 'POST', body: form });
+      if (!res.ok) throw new Error(`upload failed: ${res.status}`);
+      return ((await res.json()) as { url: string }).url;
+    }, PIXEL_PNG_BASE64);
+    expect(imageUrl).toContain('/api/images/');
+
+    const served = await page.evaluate(async (url) => {
+      const res = await fetch(url);
+      return { status: res.status, bytes: (await res.arrayBuffer()).byteLength };
+    }, imageUrl);
+    expect(served.status, 'the owner can see their own image').toBe(200);
+    expect(served.bytes).toBeGreaterThan(0);
+
+    // The session ends the way #108 describes: not by logging out.
+    await context.clearCookies();
+    expect((await context.cookies()).length).toBe(0);
+
+    // Reload so the app re-checks the session and stops vouching. Until it
+    // does, the still-open tab is the accepted "unlocked session left on
+    // screen" case, not a leak.
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
+
+    const afterSession = await page.evaluate(async (url) => {
+      const res = await fetch(url);
+      return { status: res.status, bytes: (await res.arrayBuffer()).byteLength };
+    }, imageUrl);
+
+    // Under the old header this came back 200 from the disk cache with the
+    // backend never consulted.
+    expect(afterSession.status, 'no session, no image').not.toBe(200);
+    expect(afterSession.bytes, 'and none of the bytes either').not.toBe(served.bytes);
+
+    await context.close();
+  });
+
   test('an install with cached notes but no unlock material fails closed', async ({ browser }) => {
     const runTag = Date.now().toString(36);
     const TITLE = `Pre-Upgrade Secret ${runTag}`;

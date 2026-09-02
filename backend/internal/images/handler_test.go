@@ -170,6 +170,45 @@ func TestServe_Success(t *testing.T) {
 	}
 }
 
+// The browser's HTTP cache is not the app's cache: it is keyed by URL alone,
+// ignores the session cookie, survives a browser close and is not reachable
+// from clearLocalData(). Storing note images there hands the next person on a
+// shared browser a year's worth of the previous user's pictures for the price
+// of a URL — the #108 leak, one layer below the service worker. Offline
+// rendering does not depend on it: the SW keeps its own copy in Cache
+// Storage, which ignores Cache-Control entirely.
+func TestServe_IsNotStoredByTheBrowserCache(t *testing.T) {
+	h, user := newFixture(t)
+
+	req := multipartUpload(t, minimalPNG(), "")
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	h.Upload(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("upload failed: %d %s", w.Code, w.Body.String())
+	}
+	var uploadResp map[string]string
+	json.NewDecoder(w.Body).Decode(&uploadResp) //nolint:errcheck
+	imageID := strings.TrimPrefix(uploadResp["url"], "/api/images/")
+
+	req2 := httptest.NewRequest(http.MethodGet, "/api/images/"+imageID, nil)
+	req2.SetPathValue("id", imageID)
+	req2 = withUser(req2, user)
+	w2 := httptest.NewRecorder()
+	h.Serve(w2, req2)
+
+	cc := w2.Header().Get("Cache-Control")
+	if !strings.Contains(cc, "no-store") {
+		t.Fatalf("Cache-Control must forbid storing the image, got %q", cc)
+	}
+	if strings.Contains(cc, "max-age") || strings.Contains(cc, "immutable") {
+		t.Fatalf("Cache-Control must not license reuse without the server, got %q", cc)
+	}
+	if !strings.Contains(cc, "private") {
+		t.Fatalf("Cache-Control must stay private to this user, got %q", cc)
+	}
+}
+
 func TestServe_NotFound(t *testing.T) {
 	h, user := newFixture(t)
 

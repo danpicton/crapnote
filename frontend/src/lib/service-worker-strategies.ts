@@ -133,16 +133,29 @@ export async function gatedCacheFirst(
 	isGateOpen: () => Promise<boolean>
 ): Promise<Response> {
 	if (await isGateOpen()) return cacheFirst(request, cacheName);
-	return fetchAndCache(request, cacheName);
+	// `no-store` so the browser's own HTTP cache cannot answer this either.
+	// It is keyed by URL alone — no Vary on the session cookie — outlives a
+	// browser close and is not reachable from clearLocalData(), so a hit
+	// there would be the very leak this gate exists to close, just one layer
+	// down. The server no longer licenses that storage (images are served
+	// `private, no-store`), but installs that ran the old
+	// `max-age=1y, immutable` header still hold entries until they age out.
+	return fetchAndCache(request, cacheName, { bypassHttpCache: true });
 }
 
 /** Network fetch, caching an ok response under the request URL. A non-ok
  * response is returned but never cached (a 404 would otherwise become
  * permanent for the life of this build's cache); a network failure becomes a
  * bare 503. */
-async function fetchAndCache(request: Request, cacheName: string): Promise<Response> {
+async function fetchAndCache(
+	request: Request,
+	cacheName: string,
+	{ bypassHttpCache = false }: { bypassHttpCache?: boolean } = {}
+): Promise<Response> {
 	try {
-		const response = await fetch(request);
+		const response = bypassHttpCache
+			? await fetch(request, { cache: 'no-store' })
+			: await fetch(request);
 		if (response.ok) {
 			const cache = await caches.open(cacheName);
 			cache.put(request, response.clone());
