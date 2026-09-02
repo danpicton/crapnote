@@ -75,7 +75,8 @@ vi.mock('$lib/stores/auth.svelte', () => ({
 // The offline-store ownership gate. Resolving to a handle is the "this
 // browser's cache belongs to the signed-in user" case that every other test
 // assumes; the guard tests override it with null.
-vi.mock('$lib/localData', () => ({
+vi.mock('$lib/localData', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/localData')>()),
 	openOwnedOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
 }));
 
@@ -144,7 +145,7 @@ import * as offlineDB from '$lib/offlineDB';
 import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 import { syncOfflineChanges } from '$lib/offlineSync';
 import { auth } from '$lib/stores/auth.svelte';
-import { openOwnedOfflineDB } from '$lib/localData';
+import { openOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 
 // Helper: override matchMedia to simulate a mobile or desktop viewport for one test.
 function mockViewport(mobile: boolean) {
@@ -639,6 +640,7 @@ describe('Offline mode', () => {
 		await fireEvent.click(del);
 
 		await waitFor(() => expect(markNoteDeletedOffline).toHaveBeenCalledWith(
+			1,
 			expect.objectContaining({ id: 3 })
 		));
 		expect(api.notes.delete).not.toHaveBeenCalled();
@@ -660,6 +662,7 @@ describe('Offline mode', () => {
 		await fireEvent.click(archiveBtn);
 
 		await waitFor(() => expect(markNoteArchivedOffline).toHaveBeenCalledWith(
+			1,
 			expect.objectContaining({ id: 4 })
 		));
 		expect(api.notes.archive).not.toHaveBeenCalled();
@@ -702,6 +705,7 @@ describe('Offline mode', () => {
 		await fireEvent.click(item.querySelector('[aria-label="Star note"]') as HTMLElement);
 
 		await waitFor(() => expect(markNoteFlagsOffline).toHaveBeenCalledWith(
+			1,
 			expect.objectContaining({ id: 6, starred: true }),
 			'starred'
 		));
@@ -729,6 +733,7 @@ describe('Offline mode', () => {
 		// Without a locally-assigned slot it would keep pin_order 0 and sort
 		// below the note pinned earlier online.
 		await waitFor(() => expect(markNoteFlagsOffline).toHaveBeenCalledWith(
+			1,
 			expect.objectContaining({ id: 7, pinned: true, pin_order: -3 }),
 			'pinned'
 		));
@@ -1562,5 +1567,108 @@ describe('per-user keyboard shortcuts', () => {
 		await waitFor(() => expect(load).toHaveBeenCalledWith(1));
 		await new Promise((r) => setTimeout(r, 20));
 		expect(load).toHaveBeenCalledTimes(1);
+	});
+});
+
+
+/**
+ * The write half of the ownership guard (issue #107). `ensureOfflineOwner`
+ * swallows its own failures, so the store can still be stamped with another
+ * account when an offline edit lands. Those writes must be refused — and the
+ * refusal has to be visible, because a dropped save looks exactly like a
+ * successful one from the editor.
+ */
+describe('offline write ownership guard', () => {
+	const cachedNote = (id: number, title: string) => ({
+		id, title, body: 'Body', starred: false, pinned: false, tags: [],
+		server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+		is_dirty: false, is_new: false,
+	});
+
+	beforeEach(() => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(auth.ready).mockResolvedValue(undefined);
+		(auth as { canReadCache: boolean }).canReadCache = true;
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue({ close: vi.fn() } as unknown as IDBDatabase);
+		vi.mocked(markNoteFlagsOffline).mockResolvedValue(undefined);
+	});
+
+	it('refuses to create a note offline in a store owned by someone else', async () => {
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue(null);
+
+		render(Page);
+		await waitFor(() => expect(api.tags.list).toHaveBeenCalled());
+		await fireEvent.click(screen.getByTitle('New note'));
+
+		await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/could not be saved/i));
+		expect(offlineDB.upsertNote).not.toHaveBeenCalled();
+	});
+
+	it('still creates a note offline in the signed-in user\'s own store', async () => {
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([]);
+
+		render(Page);
+		await waitFor(() => expect(api.tags.list).toHaveBeenCalled());
+		await fireEvent.click(screen.getByTitle('New note'));
+
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalled());
+		expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+	});
+
+	it('refuses a debounced offline save into a store owned by someone else', async () => {
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([cachedNote(1, 'Test Note')]);
+
+		render(Page);
+		const label = await waitFor(() => screen.getByText('Test Note'));
+		await fireEvent.click(label.closest('.note-btn') ?? label);
+		const title = await waitFor(() => screen.getByPlaceholderText(/note title/i));
+
+		// The store turns out to belong to someone else by the time the
+		// debounce fires.
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue(null);
+		vi.useFakeTimers();
+		await fireEvent.input(title, { target: { value: 'Edited offline' } });
+		await vi.advanceTimersByTimeAsync(1000);
+		vi.useRealTimers();
+
+		expect(offlineDB.upsertNote).not.toHaveBeenCalled();
+		await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/could not be saved/i));
+	});
+
+	it('saves a debounced offline edit into the user\'s own store', async () => {
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([cachedNote(1, 'Test Note')]);
+		vi.mocked(offlineDB.getNote).mockResolvedValue(cachedNote(1, 'Test Note'));
+
+		render(Page);
+		const label = await waitFor(() => screen.getByText('Test Note'));
+		await fireEvent.click(label.closest('.note-btn') ?? label);
+		const title = await waitFor(() => screen.getByPlaceholderText(/note title/i));
+
+		vi.useFakeTimers();
+		await fireEvent.input(title, { target: { value: 'Edited offline' } });
+		await vi.advanceTimersByTimeAsync(1000);
+		vi.useRealTimers();
+
+		expect(offlineDB.upsertNote).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ id: 1, title: 'Edited offline', is_dirty: true })
+		);
+		expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+	});
+
+	it('surfaces a refused offline flag toggle instead of pretending it stuck', async () => {
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([cachedNote(6, 'Starrable Note')]);
+		vi.mocked(api.notes.toggleStar).mockRejectedValue(new OfflineError());
+		vi.mocked(markNoteFlagsOffline).mockRejectedValue(new OfflineOwnershipError());
+
+		render(Page);
+		await waitFor(() => screen.getByText('Starrable Note'));
+
+		const item = screen.getByText('Starrable Note').closest('.note-item') as HTMLElement;
+		await fireEvent.click(item.querySelector('[aria-label="Star note"]') as HTMLElement);
+
+		await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/could not be saved/i));
+		// The star must not appear applied when the desired state was never stored.
+		expect(item.querySelector('[aria-label="Unstar note"]')).toBeNull();
 	});
 });

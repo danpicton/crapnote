@@ -103,11 +103,10 @@ export async function ensureOfflineOwner(userId: number): Promise<void> {
  *
  * The store outlives a session — `clearLocalData()` runs on an explicit
  * logout and nothing else — so a browser that was merely closed still holds
- * the previous user's note titles and bodies. The list and note routes send
- * every cache read that can reach the DOM, and the bulk `cacheNotesForOffline`
- * write, through here. Single-note writes (the offline save/create/flag
- * paths in the routes and in `offlineActions.ts`) still open the store
- * directly — tracked in #107 — so this is not yet a complete chokepoint.
+ * the previous user's note titles and bodies. Every cache read that can reach
+ * the DOM goes through here, as does the bulk `cacheNotesForOffline` write;
+ * the single-note write paths use `requireOwnedOfflineDB` below, which is the
+ * same check with a throwing refusal.
  *
  * `userId` is the resolved session user online, or the identity remembered at
  * the last login when offline (see `readSessionUser`) — and offline that

@@ -24,8 +24,8 @@
 	import { shortcuts, matchShortcut, type ShortcutId } from '$lib/stores/shortcuts.svelte';
 	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
-	import { openOfflineDB, getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote, noteFlags } from '$lib/offlineDB';
-	import { openOwnedOfflineDB } from '$lib/localData';
+	import { getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote, noteFlags } from '$lib/offlineDB';
+	import { openOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 	import type { CachedNote } from '$lib/offlineDB';
 	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
@@ -66,6 +66,13 @@
 	let syncStatus = $state<'synced' | 'syncing' | 'unsynced' | 'unknown'>('synced');
 	let lastSyncAt = $state<Date | null>(null);
 	let lastSyncSummary = $state<string>('');
+	/**
+	 * Set when an offline write was refused because this browser's store is
+	 * stamped with a different account (#107). Shown rather than swallowed: a
+	 * dropped save is indistinguishable from a successful one on screen, so
+	 * silence here would be worse than the bug it replaces.
+	 */
+	let offlineWriteError = $state<string | null>(null);
 
 	let selectedId = $state<number | null>(null);
 	let search = $state('');
@@ -421,6 +428,16 @@
 		// app next. `canReadCache` is false until the password is re-entered.
 		if (!auth.canReadCache) return null;
 		return openOwnedOfflineDB(auth.user?.id ?? null);
+	}
+
+	/**
+	 * Report a refused offline write. Deliberately loud and sticky: the user
+	 * has to know the edit is only in the editor, and what to do about it.
+	 */
+	function reportOfflineWriteRefused() {
+		offlineWriteError =
+			"This change could not be saved offline: this browser's stored notes belong to a different account. "
+			+ 'Reconnect and sign in again to save it.';
 	}
 
 	function cachedToNote(c: CachedNote): Note {
@@ -916,6 +933,8 @@
 	}
 
 	async function createNoteOffline() {
+		const db = await openOwnedCache();
+		if (!db) { reportOfflineWriteRefused(); return; }
 		const tempId = -Date.now();
 		const now = new Date().toISOString();
 		const title = defaultNoteTitle();
@@ -925,7 +944,6 @@
 			server_updated_at: now, local_updated_at: now,
 			is_dirty: true, is_new: true,
 		};
-		const db = await openOfflineDB();
 		await upsertNote(db, cached);
 		db.close();
 		const offlineNote: Note = {
@@ -1096,7 +1114,8 @@
 			try {
 				if (!navigator.onLine) {
 					// Save to IndexedDB and mark dirty
-					const db = await openOfflineDB();
+					const db = await openOwnedCache();
+					if (!db) { reportOfflineWriteRefused(); return; }
 					const existing = await getNote(db, idAtSchedule);
 					if (existing) {
 						await upsertNote(db, {
@@ -1130,8 +1149,10 @@
 					try {
 						const updated = await api.notes.update(idAtSchedule, { [field]: value });
 						notes = notes.map((n) => (n.id === updated.id ? updated : n));
-						// Keep cache in sync
-						const db = await openOfflineDB();
+						// Keep cache in sync — a refresh of server state, so a
+						// foreign store is simply skipped rather than reported.
+						const db = await openOwnedCache();
+						if (!db) return;
 						const existing = await getNote(db, updated.id);
 						if (existing && !existing.is_dirty) {
 							await upsertNote(db, {
@@ -1145,7 +1166,8 @@
 						db.close();
 					} catch {
 						// Lost connectivity during save — fall back to offline save
-						const db = await openOfflineDB();
+						const db = await openOwnedCache();
+						if (!db) { reportOfflineWriteRefused(); return; }
 						const currentNote = notes.find(n => n.id === idAtSchedule);
 						if (currentNote) {
 							const existing = await getNote(db, idAtSchedule);
@@ -1193,7 +1215,13 @@
 			// would keep its stale 0 and sort below notes pinned earlier.
 			toggled.pin_order = toggled.pinned ? nextPinOrder(notes) : 0;
 		}
-		await markNoteFlagsOffline(toggled, flag);
+		try {
+			await markNoteFlagsOffline(auth.user?.id ?? null, toggled, flag);
+		} catch (e) {
+			if (!(e instanceof OfflineOwnershipError)) throw e;
+			reportOfflineWriteRefused();
+			return null;
+		}
 		syncStatus = 'unsynced';
 		return toggled;
 	}
@@ -1265,7 +1293,13 @@
 		}
 		// Offline — apply optimistically and queue the archive for replay.
 		if (!note) return;
-		await markNoteArchivedOffline(note);
+		try {
+			await markNoteArchivedOffline(auth.user?.id ?? null, note);
+		} catch (e) {
+			if (!(e instanceof OfflineOwnershipError)) throw e;
+			reportOfflineWriteRefused();
+			return;
+		}
 		syncStatus = 'unsynced';
 		removeNoteFromList(id);
 	}
@@ -1284,7 +1318,13 @@
 		}
 		// Offline — apply optimistically and queue the delete for replay.
 		if (!note) return;
-		await markNoteDeletedOffline(note);
+		try {
+			await markNoteDeletedOffline(auth.user?.id ?? null, note);
+		} catch (e) {
+			if (!(e instanceof OfflineOwnershipError)) throw e;
+			reportOfflineWriteRefused();
+			return;
+		}
 		syncStatus = 'unsynced';
 		removeNoteFromList(id);
 	}
@@ -1352,6 +1392,14 @@
 </svelte:head>
 
 <div class="app">
+	{#if offlineWriteError}
+		<div class="offline-write-error" role="alert">
+			<span>{offlineWriteError}</span>
+			<button onclick={() => (offlineWriteError = null)} aria-label="Dismiss">
+				<X size={14} />
+			</button>
+		</div>
+	{/if}
 	<!-- ── Sidebar ── -->
 	<aside class="sidebar">
 		<!-- Desktop header -->
@@ -1934,6 +1982,29 @@
 		background: #fef3c7;
 		color: #92400e;
 		border: 1px solid #fde68a;
+	}
+
+	/* Spans the whole app so a refused offline save cannot be missed. */
+	.offline-write-error {
+		grid-column: 1 / -1;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 0.75rem;
+		background: #fee2e2;
+		color: #991b1b;
+		border-bottom: 1px solid #fecaca;
+		font-size: 0.8rem;
+	}
+
+	.offline-write-error button {
+		margin-left: auto;
+		background: none;
+		border: none;
+		color: inherit;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
 	}
 
 	.hdr-btn {

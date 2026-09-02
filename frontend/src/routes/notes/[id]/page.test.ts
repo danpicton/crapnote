@@ -104,13 +104,17 @@ vi.mock('$lib/stores/auth.svelte', () => ({
 
 // The offline-store ownership gate. A handle means "this browser's cache
 // belongs to the signed-in user", which is what every other test assumes.
-vi.mock('$lib/localData', () => ({
+vi.mock('$lib/localData', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/localData')>()),
 	openOwnedOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
+	// The write-path gate used by $lib/offlineActions; a handle means the
+	// store belongs to the signed-in user.
+	requireOwnedOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
 }));
 
 import { api } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
-import { openOwnedOfflineDB } from '$lib/localData';
+import { openOwnedOfflineDB, requireOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 import { auth } from '$lib/stores/auth.svelte';
 import { goto } from '$app/navigation';
 
@@ -143,6 +147,7 @@ beforeEach(() => {
 	vi.mocked(api.notes.get).mockResolvedValue(mockNote());
 	vi.mocked(api.tags.listForNote).mockResolvedValue([]);
 	vi.mocked(api.tags.list).mockResolvedValue([]);
+	vi.mocked(requireOwnedOfflineDB).mockResolvedValue({ close: vi.fn() } as unknown as IDBDatabase);
 });
 
 describe('/notes/[id] page', () => {
@@ -758,5 +763,84 @@ describe('/notes/[id] offline cache ownership guard', () => {
 
 		expect(screen.queryByDisplayValue("Previous user's title")).not.toBeInTheDocument();
 		expect(offlineDB.getNote).not.toHaveBeenCalled();
+	});
+});
+
+
+/**
+ * Write-path ownership gate (issue #107). `ensureOfflineOwner` swallows its
+ * own failures, so an offline edit can arrive at a store still stamped with
+ * another account. It must be refused — visibly, since a dropped save looks
+ * identical to a successful one in the editor.
+ */
+describe('/notes/[id] offline write ownership guard', () => {
+	const cached = {
+		id: 42, title: 'My Note', body: 'Hello',
+		starred: false, pinned: false, tags: [],
+		server_updated_at: '2024-01-01T00:00:00Z',
+		local_updated_at: '2024-01-01T00:00:00Z',
+		is_dirty: false, is_new: false,
+	};
+
+	beforeEach(() => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		(auth as { canReadCache: boolean }).canReadCache = true;
+		vi.mocked(api.notes.get).mockRejectedValue(new Error('offline'));
+		vi.mocked(offlineDB.getNote).mockResolvedValue(cached);
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue({ close: vi.fn() } as unknown as IDBDatabase);
+		vi.mocked(requireOwnedOfflineDB).mockResolvedValue({ close: vi.fn() } as unknown as IDBDatabase);
+	});
+
+	it('refuses an offline edit into a store owned by someone else', async () => {
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		// The store turns out to belong to another account by save time.
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue(null);
+		vi.useFakeTimers();
+		await fireEvent.input(screen.getByDisplayValue('My Note'), {
+			target: { value: 'Edited Offline' },
+		});
+		await vi.advanceTimersByTimeAsync(1000);
+		vi.useRealTimers();
+
+		expect(offlineDB.upsertNote).not.toHaveBeenCalled();
+		await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/could not be saved/i));
+	});
+
+	it('still saves an offline edit into the signed-in user\'s own store', async () => {
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		vi.useFakeTimers();
+		await fireEvent.input(screen.getByDisplayValue('My Note'), {
+			target: { value: 'Edited Offline' },
+		});
+		await vi.advanceTimersByTimeAsync(1000);
+		vi.useRealTimers();
+
+		expect(offlineDB.upsertNote).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ id: 42, title: 'Edited Offline', is_dirty: true })
+		);
+		expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+	});
+
+	it('surfaces a refused offline flag toggle instead of pretending it stuck', async () => {
+		const { OfflineError } = await import('$lib/api');
+		// Online enough to load the note; only the toggle hits the network.
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ locked: true }));
+		vi.mocked(api.notes.toggleLock).mockRejectedValue(new OfflineError());
+		vi.mocked(requireOwnedOfflineDB).mockRejectedValue(new OfflineOwnershipError());
+
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.click(screen.getByTitle('Unlock note'));
+
+		await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/could not be saved/i));
+		// The unlock must not look applied when it was never recorded.
+		expect(screen.getByTitle('Unlock note')).toBeTruthy();
 	});
 });
