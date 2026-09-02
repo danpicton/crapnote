@@ -42,11 +42,9 @@ func (s *Service) List(ctx context.Context, userID int64, filter ListFilter) ([]
 
 // Update performs a partial update. Only non-nil fields are written.
 // If title is provided as an empty string it is replaced with a timestamp default.
-// Returns ErrLocked if the note is locked.
+// Returns ErrLocked if the note is locked — the repo's UPDATE enforces that in
+// the write itself, so there is no check-then-write gap to race.
 func (s *Service) Update(ctx context.Context, id, userID int64, title, body *string) (*Note, error) {
-	if err := s.ensureUnlocked(ctx, id, userID); err != nil {
-		return nil, err
-	}
 	if title != nil && *title == "" {
 		t := defaultTitle(time.Now().UTC())
 		title = &t
@@ -56,23 +54,7 @@ func (s *Service) Update(ctx context.Context, id, userID int64, title, body *str
 
 // Delete moves a note to the trash. Returns ErrLocked if the note is locked.
 func (s *Service) Delete(ctx context.Context, id, userID int64) error {
-	if err := s.ensureUnlocked(ctx, id, userID); err != nil {
-		return err
-	}
 	return s.repo.SoftDelete(ctx, id, userID)
-}
-
-// ensureUnlocked returns ErrLocked if the note is locked, ErrNotFound if it
-// does not belong to the user.
-func (s *Service) ensureUnlocked(ctx context.Context, id, userID int64) error {
-	locked, err := s.repo.IsLocked(ctx, id, userID)
-	if err != nil {
-		return err
-	}
-	if locked {
-		return ErrLocked
-	}
-	return nil
 }
 
 // ToggleStar flips the starred flag and returns the updated note.
