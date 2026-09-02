@@ -771,3 +771,172 @@ func TestService_Delete_AutoLockLandingAfterTheCheckStillRefuses(t *testing.T) {
 		t.Fatalf("racing delete trashed an auto-locked note: %d trash rows", n)
 	}
 }
+
+// ── the reporting path must be exact too ─────────────────────────────────────
+//
+// A guarded write that matches no rows has to say why. For Repo.Update the
+// WHERE has exactly three predicates (id, user_id, locked), so the follow-up
+// read is exact. Repo.SoftDelete has a fourth cause — the trash.note_id UNIQUE
+// conflict that INSERT OR IGNORE swallows — and resolving that with a second,
+// separate SELECT is check-then-act in the reporting path.
+//
+// These tests use SetZeroRowWindow to land a concurrent writer in the window
+// between the write and the explanation, in-goroutine and deterministically.
+
+// restoreFromTrash is what a concurrent "restore from trash" does.
+func restoreFromTrash(t *testing.T, database *db.DB, noteID int64) func() {
+	t.Helper()
+	return func() {
+		if _, err := database.Exec(`DELETE FROM trash WHERE note_id = ?`, noteID); err != nil {
+			t.Errorf("restoreFromTrash: %v", err)
+		}
+	}
+}
+
+// unlockNote is what a concurrent ToggleLock(unlock) does.
+func unlockNote(t *testing.T, database *db.DB, noteID int64) func() {
+	t.Helper()
+	return func() {
+		if _, err := database.Exec(`UPDATE notes SET locked = 0 WHERE id = ?`, noteID); err != nil {
+			t.Errorf("unlockNote: %v", err)
+		}
+	}
+}
+
+// A restore landing between the duplicate-delete and its explanation must not
+// turn a harmless repeat delete into "423 locked" — the note was never locked.
+func TestNoteRepo_SoftDelete_RestoreInTheWindowIsNotReportedAsLocked(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Bye", "body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SoftDelete(ctx, note.ID, userID); err != nil {
+		t.Fatalf("first SoftDelete: %v", err)
+	}
+
+	restore := notes.SetZeroRowWindow(restoreFromTrash(t, database, note.ID))
+	defer restore()
+
+	// The note is unlocked throughout; the repeat delete is a duplicate, which
+	// has always been a no-op.
+	if err := repo.SoftDelete(ctx, note.ID, userID); err != nil {
+		t.Fatalf("repeat SoftDelete on an unlocked note reported %v, want nil", err)
+	}
+}
+
+// The hazard in the other direction: an unlock landing in the window must never
+// turn a correctly refused delete into a reported success.
+func TestNoteRepo_SoftDelete_UnlockInTheWindowCannotReportSuccess(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Locked", "body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+
+	restore := notes.SetZeroRowWindow(unlockNote(t, database, note.ID))
+	defer restore()
+
+	if err := repo.SoftDelete(ctx, note.ID, userID); !errors.Is(err, notes.ErrLocked) {
+		t.Fatalf("refused delete reported %v, want ErrLocked — the write did not happen", err)
+	}
+	if n := trashCount(t, database, note.ID); n != 0 {
+		t.Fatalf("refused delete left %d trash rows, want 0", n)
+	}
+}
+
+// Same hazard for Update: an unlock in the window must not downgrade ErrLocked
+// to ErrNotFound (or to success).
+func TestNoteRepo_Update_UnlockInTheWindowStillReportsLocked(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Locked", "original body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+
+	restore := notes.SetZeroRowWindow(unlockNote(t, database, note.ID))
+	defer restore()
+
+	if _, err := repo.Update(ctx, note.ID, userID, strPtr("hacked"), nil); !errors.Is(err, notes.ErrLocked) {
+		t.Fatalf("refused update reported %v, want ErrLocked", err)
+	}
+	got, err := repo.Get(ctx, note.ID, userID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Title != "Locked" || got.Body != "original body" {
+		t.Fatalf("refused update still mutated the note: %+v", got)
+	}
+}
+
+// A hard delete landing in the window is a genuine disappearance: 404, not 423.
+func TestNoteRepo_SoftDelete_HardDeleteInTheWindowIsNotFound(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Locked", "body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+
+	restore := notes.SetZeroRowWindow(func() {
+		if _, err := database.Exec(`DELETE FROM notes WHERE id = ?`, note.ID); err != nil {
+			t.Errorf("hard delete in window: %v", err)
+		}
+	})
+	defer restore()
+
+	if err := repo.SoftDelete(ctx, note.ID, userID); !errors.Is(err, notes.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after the note vanished, got %v", err)
+	}
+}
+
+// An already-trashed note that is also locked still reports ErrLocked: the
+// delete is refused on the lock, not waved through as a duplicate.
+func TestNoteRepo_SoftDelete_TrashedAndLockedIsLocked(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Bye", "body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SoftDelete(ctx, note.ID, userID); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+
+	if err := repo.SoftDelete(ctx, note.ID, userID); !errors.Is(err, notes.ErrLocked) {
+		t.Fatalf("expected ErrLocked for a trashed+locked note, got %v", err)
+	}
+	if n := trashCount(t, database, note.ID); n != 1 {
+		t.Fatalf("expected the existing trash row untouched, got %d", n)
+	}
+}

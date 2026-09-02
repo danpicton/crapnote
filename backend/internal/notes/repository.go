@@ -165,10 +165,19 @@ func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string
 		return nil, fmt.Errorf("update note rows affected: %w", err)
 	}
 	if rows == 0 {
+		zeroRowWindow()
 		return nil, r.explainBlockedWrite(ctx, id, userID)
 	}
 	return r.Get(ctx, id, userID)
 }
+
+// zeroRowWindow runs between a guarded write that matched no rows and whatever
+// read explains why. It is a no-op in production and exists so tests can land a
+// concurrent writer in that window deterministically, in-goroutine, rather than
+// racing for it: the connection is back in the pool by then, so a hook can just
+// run SQL. Replaced only via export_test.go, and the package has no parallel
+// tests, so the shared var is safe.
+var zeroRowWindow = func() {}
 
 // explainBlockedWrite says why a write guarded by `locked = 0` matched no rows,
 // so the caller can still tell a 404 from a 423.
@@ -413,13 +422,32 @@ func (r *Repo) setBool(ctx context.Context, col string, id, userID int64, val bo
 // preceding SELECT, so a note locked between a caller's check and this write is
 // never trashed: a refused delete writes no trash row at all.
 // Deleting an already-trashed note remains a no-op.
+//
+// A write like this can decline for four reasons, and each is settled by the
+// statement itself rather than by a second, separately-timed read:
+//
+//   - already in the trash — trash.note_id is UNIQUE, so the INSERT reports the
+//     duplicate. Deliberately a plain INSERT: OR IGNORE would swallow that into
+//     the same zero-row count as every other cause, and telling it apart
+//     afterwards would need exactly the check-then-act this method exists to
+//     avoid.
+//   - missing, another user's, or locked — the SELECT matches nothing, and
+//     explainBlockedWrite tells those three apart exactly.
+//
+// Nothing after the write can turn a refusal into a success: the only nil
+// returns are the insert landing and the duplicate the statement itself
+// reported.
 func (r *Repo) SoftDelete(ctx context.Context, id, userID int64) error {
 	res, err := r.db.ExecContext(ctx, `
-		INSERT OR IGNORE INTO trash(note_id, user_id)
+		INSERT INTO trash(note_id, user_id)
 		SELECT id, user_id FROM notes
 		WHERE id = ? AND user_id = ? AND locked = 0`,
 		id, userID,
 	)
+	if db.IsUniqueViolation(err) {
+		// Already trashed. Deleting twice has always been a no-op.
+		return nil
+	}
 	if err != nil {
 		return fmt.Errorf("soft delete: %w", err)
 	}
@@ -427,22 +455,11 @@ func (r *Repo) SoftDelete(ctx context.Context, id, userID int64) error {
 	if err != nil {
 		return fmt.Errorf("soft delete rows affected: %w", err)
 	}
-	if rows > 0 {
-		return nil
+	if rows == 0 {
+		zeroRowWindow()
+		return r.explainBlockedWrite(ctx, id, userID)
 	}
-
-	// No row inserted: the note is already in the trash (OR IGNORE swallowed
-	// the duplicate), or the SELECT matched nothing.
-	var trashed int
-	if err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM trash WHERE note_id = ? AND user_id = ?`, id, userID,
-	).Scan(&trashed); err != nil {
-		return fmt.Errorf("soft delete trash check: %w", err)
-	}
-	if trashed > 0 {
-		return nil
-	}
-	return r.explainBlockedWrite(ctx, id, userID)
+	return nil
 }
 
 // Archive moves a note to the archive (hidden from normal list but not deleted).
