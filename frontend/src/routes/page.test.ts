@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Page from './+page.svelte';
+import { shortcuts } from '$lib/stores/shortcuts.svelte';
 
 // Stub all heavy Milkdown imports — they use browser APIs that hang in jsdom
 vi.mock('@milkdown/kit/preset/commonmark', () => ({
@@ -1498,5 +1499,68 @@ describe('offline cache unlock gate', () => {
 		expect(screen.queryByTitle(/all changes synced/i)).not.toBeInTheDocument();
 		expect(screen.queryByTitle(/^click to sync now$/i)).not.toBeInTheDocument();
 		expect(screen.getByTitle(/unknown/i)).toBeInTheDocument();
+	});
+});
+
+/**
+ * Per-user keyboard-shortcut overrides (issue #104). A child page's
+ * `onMount` runs before the root layout has resolved `/api/auth/me`, so a
+ * mount-time `auth.user` read is null on every full page load and the
+ * overrides silently never load.
+ */
+describe('per-user keyboard shortcuts', () => {
+	const defaultUser = { id: 1, username: 'alice', is_admin: false, created_at: '' };
+
+	beforeEach(() => {
+		vi.mocked(auth.ready).mockResolvedValue(undefined);
+		(auth as { user: unknown }).user = defaultUser;
+	});
+
+	afterEach(() => {
+		(auth as { user: unknown }).user = defaultUser;
+		vi.mocked(shortcuts.load).mockRestore?.();
+	});
+
+	it('loads the overrides for the user the session settles on', async () => {
+		const load = vi.spyOn(shortcuts, 'load').mockImplementation(() => {});
+		// A full page load: no user yet at mount, one once auth settles.
+		(auth as { user: unknown }).user = null;
+		let settleAuth!: () => void;
+		vi.mocked(auth.ready).mockReturnValue(
+			new Promise<void>((r) => {
+				settleAuth = () => {
+					(auth as { user: unknown }).user = { ...defaultUser, id: 7 };
+					r();
+				};
+			}),
+		);
+
+		render(Page);
+		await new Promise((r) => setTimeout(r, 20));
+		expect(load).not.toHaveBeenCalled();
+
+		settleAuth();
+		await waitFor(() => expect(load).toHaveBeenCalledWith(7));
+		expect(load).toHaveBeenCalledTimes(1);
+	});
+
+	it('loads nothing for a logged-out visitor', async () => {
+		const load = vi.spyOn(shortcuts, 'load').mockImplementation(() => {});
+		(auth as { user: unknown }).user = null;
+
+		render(Page);
+		await new Promise((r) => setTimeout(r, 20));
+
+		expect(load).not.toHaveBeenCalled();
+	});
+
+	it('loads them exactly once on a client-side navigation, where auth has already settled', async () => {
+		const load = vi.spyOn(shortcuts, 'load').mockImplementation(() => {});
+
+		render(Page);
+
+		await waitFor(() => expect(load).toHaveBeenCalledWith(1));
+		await new Promise((r) => setTimeout(r, 20));
+		expect(load).toHaveBeenCalledTimes(1);
 	});
 });
