@@ -5,6 +5,7 @@
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
 	import { registerSW } from '$lib/sw-register';
+	import { reportCacheGate, answerCacheGateQueries } from '$lib/sw-cache-gate';
 	import OfflineUnlock from '$lib/components/OfflineUnlock.svelte';
 
 	let { children } = $props();
@@ -45,6 +46,21 @@
 			(window as Window & { __crapnoteRoutesPreloaded?: boolean }).__crapnoteRoutesPreloaded = true;
 		}
 	}
+
+	/**
+	 * Keep the service worker's cache gate in step with the lock state. The
+	 * SW caches note images and cannot see the auth store, so without this
+	 * report a cached image URL is readable by whoever opens the browser next
+	 * (#108). Reported on every change, and answered again on request after
+	 * the SW restarts and loses it.
+	 */
+	$effect(() => {
+		void reportCacheGate(auth.canReadCache);
+	});
+
+	onMount(() => {
+		return answerCacheGateQueries(() => auth.canReadCache);
+	});
 
 	onMount(async () => {
 		registerSW();

@@ -4,6 +4,7 @@ import {
 	selectStrategy,
 	navigationCacheFirst,
 	cacheFirst,
+	gatedCacheFirst,
 	networkOnly,
 	type FetchStrategy,
 } from './service-worker-strategies';
@@ -294,6 +295,56 @@ describe('cacheFirst', () => {
 	});
 });
 
+// ─── gatedCacheFirst ─────────────────────────────────────────────────────────
+
+describe('gatedCacheFirst', () => {
+	const open = () => Promise.resolve(true);
+	const shut = () => Promise.resolve(false);
+
+	it('serves the cached response when the gate is open', async () => {
+		const request = req('/api/images/7');
+		await seed(request, new Response('cached-bytes', { status: 200 }));
+
+		const res = await gatedCacheFirst(request, CACHE_NAME, open);
+
+		expect(await res.text()).toBe('cached-bytes');
+		expect(mockFetch).not.toHaveBeenCalled();
+	});
+
+	it('never hands out the cached response when the gate is shut', async () => {
+		const request = req('/api/images/7');
+		await seed(request, new Response('previous-users-image', { status: 200 }));
+		mockFetch.mockResolvedValueOnce(new Response('from-server', { status: 200 }));
+
+		const res = await gatedCacheFirst(request, CACHE_NAME, shut);
+
+		// The server is the only authority while locked: it checks the session
+		// and ownership, which the cache cannot.
+		expect(await res.text()).toBe('from-server');
+		expect(mockFetch).toHaveBeenCalledWith(request);
+	});
+
+	it('returns a bare 503 rather than cached bytes when locked and offline', async () => {
+		const request = req('/api/images/7');
+		await seed(request, new Response('previous-users-image', { status: 200 }));
+		mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+		const res = await gatedCacheFirst(request, CACHE_NAME, shut);
+
+		expect(res.status).toBe(503);
+		expect(await res.text()).toBe('Offline');
+	});
+
+	it('does not consult the cache at all when the gate is shut', async () => {
+		const matchSpy = vi.spyOn(cacheStorage, 'match');
+		mockFetch.mockResolvedValueOnce(new Response('from-server', { status: 200 }));
+
+		await gatedCacheFirst(req('/api/images/7'), CACHE_NAME, shut);
+
+		expect(matchSpy).not.toHaveBeenCalled();
+	});
+});
+
 // ─── Fetch routing ───────────────────────────────────────────────────────────
 
 describe('selectStrategy', () => {
@@ -303,9 +354,10 @@ describe('selectStrategy', () => {
 		['cross-origin API', 'passthrough', req('https://api.example.com/api/notes')],
 		['cross-origin navigation', 'passthrough', req('https://example.com/', { mode: 'navigate' })],
 
-		// Images are immutable per id.
-		['GET /api/images/<id>', 'cache-first', req('/api/images/7')],
-		['GET /api/images/<id> with query', 'cache-first', req('/api/images/7?w=200')],
+		// Images are immutable per id, but their bytes are a previous user's
+		// note content — cache-first only behind the unlock gate (#108).
+		['GET /api/images/<id>', 'gated-cache-first', req('/api/images/7')],
+		['GET /api/images/<id> with query', 'gated-cache-first', req('/api/images/7?w=200')],
 
 		// Every other API call, read or write.
 		['GET /api/notes', 'network-only', req('/api/notes')],

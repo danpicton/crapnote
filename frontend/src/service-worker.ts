@@ -20,8 +20,10 @@ import {
 	selectStrategy,
 	navigationCacheFirst,
 	cacheFirst,
+	gatedCacheFirst,
 	networkOnly,
 } from '$lib/service-worker-strategies';
+import { CACHE_GATE_QUERY, CACHE_GATE_STATE, createCacheGate } from '$lib/sw-cache-gate';
 
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
@@ -33,6 +35,22 @@ const PRECACHE = [
 	...files,         // anything in /static (manifest.json, favicon, etc.)
 	...prerendered,   // any prerendered HTML routes (none today, but future-safe)
 ];
+
+// ─── Cache gate ──────────────────────────────────────────────────────────────
+// Whether cached note images may be served: the page reports its lock state
+// here, and a restarted SW asks for it again. See sw-cache-gate.ts.
+
+const cacheGate = createCacheGate(() => {
+	void (async () => {
+		const clients = await sw.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+		for (const client of clients) client.postMessage({ type: CACHE_GATE_QUERY });
+	})();
+});
+
+sw.addEventListener('message', (event) => {
+	const data = event.data as { type?: string; open?: unknown } | null;
+	if (data?.type === CACHE_GATE_STATE) cacheGate.report(data.open === true);
+});
 
 // ─── Install: precache the build manifest + the app shell ────────────────────
 sw.addEventListener('install', (event) => {
@@ -90,6 +108,9 @@ sw.addEventListener('fetch', (event) => {
 			return;
 		case 'cache-first':
 			event.respondWith(cacheFirst(request, CACHE_NAME));
+			return;
+		case 'gated-cache-first':
+			event.respondWith(gatedCacheFirst(request, CACHE_NAME, () => cacheGate.isOpen()));
 			return;
 		default: {
 			// Exhaustiveness guard. The listener callback returns void, so

@@ -9,7 +9,9 @@
 // Strategy summary:
 //   - Navigations: cache-first on the app shell, deliberately without
 //     background revalidation (see navigationCacheFirst).
-//   - /api/images/*: cache-first (image blobs are immutable per id).
+//   - /api/images/*: cache-first, but only while the cache gate is open
+//     (gated-cache-first) — cached image bytes are a previous user's note
+//     content, so they need the same unlock the cached note text does.
 //   - All other /api/*: network only, NEVER served from cache. Stale API
 //     JSON served on network failure used to make the app believe it was
 //     online and fully synced while in airplane mode. Offline data lives in
@@ -33,6 +35,7 @@ export type FetchStrategy =
 	| 'passthrough'
 	| 'navigation-cache-first'
 	| 'cache-first'
+	| 'gated-cache-first'
 	| 'network-only';
 
 /**
@@ -47,9 +50,11 @@ export function selectStrategy(request: Request, swOrigin: string): FetchStrateg
 
 	if (url.pathname.startsWith('/api/')) {
 		// Image blobs are immutable per id — cache-first so note images keep
-		// rendering offline and don't refetch on every list render.
+		// rendering offline and don't refetch on every list render. But those
+		// bytes ARE note content, so the cache half is gated on the same
+		// unlock the cached note text is (#108): see gatedCacheFirst.
 		if (request.method === 'GET' && url.pathname.startsWith('/api/images/')) {
-			return 'cache-first';
+			return 'gated-cache-first';
 		}
 		// Everything else on the API: network only, reads and writes alike.
 		// No SW-level cache or queue — the frontend owns offline note state in
@@ -99,6 +104,42 @@ export async function navigationCacheFirst(request: Request, cacheName: string):
 export async function cacheFirst(request: Request, cacheName: string): Promise<Response> {
 	const cached = await caches.match(request);
 	if (cached) return cached;
+	return fetchAndCache(request, cacheName);
+}
+
+/**
+ * Cache-first, but only while `isGateOpen()` says the cached copy may be
+ * handed out; otherwise the cache is not even read and the request goes to
+ * the network.
+ *
+ * Used for /api/images/*. Those blobs are a user's note content and the cache
+ * outlives their session — it is cleared on a deliberate logout and on
+ * nothing else — so on a browser someone walked away from, a cache-first
+ * response is a previous user's note image served with no session, no
+ * ownership check and no unlock (#108). Falling through to the network is the
+ * right shut-gate behaviour rather than a flat refusal: online, the server
+ * authorises the request as it always has, so nothing changes for a signed-in
+ * user whose gate has not been reported yet; offline, the fetch fails and the
+ * image simply does not render.
+ *
+ * The gate is open exactly when the page's `auth.canReadCache` is true, which
+ * the page reports to the SW (see sw-cache-gate.ts). Note the open path is
+ * byte-for-byte the old behaviour: no extra round-trip, no revalidation.
+ */
+export async function gatedCacheFirst(
+	request: Request,
+	cacheName: string,
+	isGateOpen: () => Promise<boolean>
+): Promise<Response> {
+	if (await isGateOpen()) return cacheFirst(request, cacheName);
+	return fetchAndCache(request, cacheName);
+}
+
+/** Network fetch, caching an ok response under the request URL. A non-ok
+ * response is returned but never cached (a 404 would otherwise become
+ * permanent for the life of this build's cache); a network failure becomes a
+ * bare 503. */
+async function fetchAndCache(request: Request, cacheName: string): Promise<Response> {
 	try {
 		const response = await fetch(request);
 		if (response.ok) {

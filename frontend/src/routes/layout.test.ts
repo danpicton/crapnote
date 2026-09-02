@@ -29,6 +29,7 @@ const mockAuth = vi.hoisted(() => ({
 	loading: false,
 	locked: false,
 	unlockLockoutMs: 0,
+	canReadCache: false,
 	init: vi.fn(),
 	unlock: vi.fn(),
 	logout: vi.fn(),
@@ -37,6 +38,15 @@ vi.mock('$lib/stores/auth.svelte', () => ({ auth: mockAuth }));
 
 vi.mock('$lib/stores/theme.svelte', () => ({ theme: { init: vi.fn(), current: 'light', toggle: vi.fn() } }));
 vi.mock('$lib/sw-register', () => ({ registerSW: vi.fn() }));
+
+const cacheGate = vi.hoisted(() => ({
+	reportCacheGate: vi.fn().mockResolvedValue(undefined),
+	answerCacheGateQueries: vi.fn((getOpen: () => boolean) => {
+		void getOpen;
+		return () => {};
+	}),
+}));
+vi.mock('$lib/sw-cache-gate', () => cacheGate);
 
 function setPath(pathname: string) {
 	pageStore.set({
@@ -52,6 +62,7 @@ beforeEach(() => {
 	mockAuth.locked = false;
 	mockAuth.loading = false;
 	mockAuth.unlockLockoutMs = 0;
+	mockAuth.canReadCache = false;
 	mockAuth.init.mockResolvedValue(undefined);
 	mockAuth.unlock.mockResolvedValue(true);
 	setPath('/');
@@ -200,5 +211,38 @@ describe('Layout withholds the app until the session is settled', () => {
 		await new Promise((r) => setTimeout(r, 30));
 
 		expect(container.querySelector('[data-testid="app-loading"]')).toBeNull();
+	});
+});
+
+
+describe('Service-worker cache gate', () => {
+	it('tells the service worker the gate is shut for a locked session', async () => {
+		mockAuth.user = { id: 1 };
+		mockAuth.locked = true;
+		render(Layout, { children: noopSnippet });
+
+		// The SW serves cached /api/images/* only on this report, so a locked
+		// arrival must never see one (#108).
+		await vi.waitFor(() => expect(cacheGate.reportCacheGate).toHaveBeenCalledWith(false));
+	});
+
+	it('tells the service worker the gate is open once the session may read the cache', async () => {
+		mockAuth.user = { id: 1 };
+		mockAuth.canReadCache = true;
+		render(Layout, { children: noopSnippet });
+
+		await vi.waitFor(() => expect(cacheGate.reportCacheGate).toHaveBeenCalledWith(true));
+	});
+
+	it('answers a restarted service worker with the current state', async () => {
+		mockAuth.user = { id: 1 };
+		mockAuth.canReadCache = true;
+		render(Layout, { children: noopSnippet });
+
+		await vi.waitFor(() => expect(cacheGate.answerCacheGateQueries).toHaveBeenCalled());
+		const getOpen = cacheGate.answerCacheGateQueries.mock.calls[0][0];
+		expect(getOpen()).toBe(true);
+		mockAuth.canReadCache = false;
+		expect(getOpen()).toBe(false);
 	});
 });
