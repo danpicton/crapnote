@@ -62,16 +62,20 @@ describe('createCacheGate (service-worker side)', () => {
 interface FakeSW {
 	posted: unknown[];
 	listeners: Array<(e: MessageEvent) => void>;
+	started: number;
 }
 
 function stubServiceWorker(): FakeSW {
-	const fake: FakeSW = { posted: [], listeners: [] };
+	const fake: FakeSW = { posted: [], listeners: [], started: 0 };
 	vi.stubGlobal('navigator', {
 		serviceWorker: {
 			ready: Promise.resolve({ active: { postMessage: (m: unknown) => fake.posted.push(m) } }),
 			addEventListener: (_: string, fn: (e: MessageEvent) => void) => fake.listeners.push(fn),
 			removeEventListener: (_: string, fn: (e: MessageEvent) => void) => {
 				fake.listeners = fake.listeners.filter((l) => l !== fn);
+			},
+			startMessages: () => {
+				fake.started += 1;
 			},
 		},
 	});
@@ -110,6 +114,17 @@ describe('answerCacheGateQueries (page side)', () => {
 		await Promise.resolve();
 
 		expect(fake.posted).toEqual([{ type: CACHE_GATE_STATE, open: true }]);
+	});
+
+	it('starts message delivery, which addEventListener alone does not', () => {
+		const fake = stubServiceWorker();
+
+		answerCacheGateQueries(() => true);
+
+		// Without startMessages() the spec queues SW→page messages for ever,
+		// so the query would never be answered and the owner's images would
+		// stay dark after a service-worker restart.
+		expect(fake.started).toBe(1);
 	});
 
 	it('ignores other service-worker messages', async () => {

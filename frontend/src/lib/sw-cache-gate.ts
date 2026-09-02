@@ -106,5 +106,9 @@ export function answerCacheGateQueries(getOpen: () => boolean): () => void {
 		}
 	};
 	navigator.serviceWorker.addEventListener('message', listener);
+	// addEventListener alone does not start delivery: without either an
+	// `onmessage` handler or this call, the spec queues SW→page messages
+	// indefinitely and the query is never answered.
+	navigator.serviceWorker.startMessages?.();
 	return () => navigator.serviceWorker.removeEventListener('message', listener);
 }
