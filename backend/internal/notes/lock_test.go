@@ -534,3 +534,84 @@ func lockNoteViaHandler(t *testing.T, h *notes.Handler, user *auth.User, id stri
 		t.Fatalf("lock note: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+// ── the write statements are themselves the enforcement point ────────────────
+//
+// The service checks locked before writing, but that check and the write are
+// two statements: a concurrent SetLocked or AutoLockStale can slip between
+// them. These tests bypass the service and call the repo directly, so they
+// only pass if the UPDATE/soft-delete refuse a locked note on their own.
+
+func TestNoteRepo_Update_RejectsLockedNote(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Locked", "original body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+
+	if _, err := repo.Update(ctx, note.ID, userID, strPtr("hacked"), strPtr("new body")); !errors.Is(err, notes.ErrLocked) {
+		t.Fatalf("expected ErrLocked, got %v", err)
+	}
+
+	got, err := repo.Get(ctx, note.ID, userID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Title != "Locked" || got.Body != "original body" {
+		t.Fatalf("locked note was modified: %+v", got)
+	}
+}
+
+func TestNoteRepo_Update_MissingNoteIsNotFound(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+
+	if _, err := repo.Update(context.Background(), 9999, userID, strPtr("x"), nil); !errors.Is(err, notes.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestNoteRepo_SoftDelete_RejectsLockedNote(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Locked", "body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+
+	if err := repo.SoftDelete(ctx, note.ID, userID); !errors.Is(err, notes.ErrLocked) {
+		t.Fatalf("expected ErrLocked, got %v", err)
+	}
+
+	var trashed int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM trash WHERE note_id = ?`, note.ID).Scan(&trashed); err != nil {
+		t.Fatalf("count trash: %v", err)
+	}
+	if trashed != 0 {
+		t.Fatalf("locked note was trashed: %d rows", trashed)
+	}
+}
+
+func TestNoteRepo_SoftDelete_MissingNoteIsNotFound(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+
+	if err := repo.SoftDelete(context.Background(), 9999, userID); !errors.Is(err, notes.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
