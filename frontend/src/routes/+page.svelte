@@ -1391,15 +1391,19 @@
 	<title>Crapnote</title>
 </svelte:head>
 
+{#if offlineWriteError}
+	<!-- Outside .app: that is a row flex container on desktop, where a banner
+	     child would render as a narrow full-height column beside the sidebar
+	     rather than a bar across the top. -->
+	<div class="offline-write-error" role="alert">
+		<span>{offlineWriteError}</span>
+		<button onclick={() => (offlineWriteError = null)} aria-label="Dismiss">
+			<X size={14} />
+		</button>
+	</div>
+{/if}
+
 <div class="app">
-	{#if offlineWriteError}
-		<div class="offline-write-error" role="alert">
-			<span>{offlineWriteError}</span>
-			<button onclick={() => (offlineWriteError = null)} aria-label="Dismiss">
-				<X size={14} />
-			</button>
-		</div>
-	{/if}
 	<!-- ── Sidebar ── -->
 	<aside class="sidebar">
 		<!-- Desktop header -->
@@ -1984,9 +1988,15 @@
 		border: 1px solid #fde68a;
 	}
 
-	/* Spans the whole app so a refused offline save cannot be missed. */
+	/* Pinned across the top of the window so a refused offline save cannot be
+	   missed, and so it does not have to fit either the desktop row layout or
+	   the mobile column one. */
 	.offline-write-error {
-		grid-column: 1 / -1;
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		z-index: 100;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;

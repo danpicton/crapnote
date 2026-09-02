@@ -1604,6 +1604,21 @@ describe('offline write ownership guard', () => {
 		expect(offlineDB.upsertNote).not.toHaveBeenCalled();
 	});
 
+	it('renders the refusal outside the sidebar/editor row so it spans the window', async () => {
+		// `.app` is a row flex container on desktop, so a banner placed inside
+		// it becomes a narrow full-height column beside the sidebar instead of
+		// a bar across the top. jsdom does no layout, hence the structural
+		// assertion.
+		vi.mocked(openOwnedOfflineDB).mockResolvedValue(null);
+
+		render(Page);
+		await waitFor(() => expect(api.tags.list).toHaveBeenCalled());
+		await fireEvent.click(screen.getByTitle('New note'));
+
+		const alert = await waitFor(() => screen.getByRole('alert'));
+		expect(alert.closest('.app')).toBeNull();
+	});
+
 	it('still creates a note offline in the signed-in user\'s own store', async () => {
 		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([]);
 
