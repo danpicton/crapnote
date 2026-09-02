@@ -7,6 +7,8 @@ import {
 	readSessionUser,
 	clearSessionUser,
 	openOwnedOfflineDB,
+	requireOwnedOfflineDB,
+	OfflineOwnershipError,
 } from './localData';
 import { openOfflineDB, upsertNote, getAllNotes, getOfflineOwner, setOfflineOwner, deleteOfflineDB } from './offlineDB';
 
@@ -203,5 +205,26 @@ describe('openOwnedOfflineDB', () => {
 		db = await openOfflineDB();
 		expect(await getOfflineOwner(db)).toBeNull();
 		db.close();
+	});
+});
+
+describe('requireOwnedOfflineDB', () => {
+	it('throws OfflineOwnershipError when the store belongs to a different user', async () => {
+		const db = await openOfflineDB();
+		await setOfflineOwner(db, 7);
+		db.close();
+
+		await expect(requireOwnedOfflineDB(8)).rejects.toBeInstanceOf(OfflineOwnershipError);
+	});
+
+	it('returns an open handle when the store belongs to the given user', async () => {
+		const db = await openOfflineDB();
+		await setOfflineOwner(db, 7);
+		await upsertNote(db, makeNote(1));
+		db.close();
+
+		const owned = await requireOwnedOfflineDB(7);
+		expect((await getAllNotes(owned)).map((n) => n.id)).toEqual([1]);
+		owned.close();
 	});
 });
