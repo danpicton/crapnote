@@ -74,22 +74,36 @@ export function createCacheGate(
 			settle?.(value);
 		},
 		isOpen(): Promise<boolean> {
-			asked ??= new Promise<boolean>((resolve) => {
-				// Boxed so `finish` can cancel a timer created after it — a
-				// client can answer synchronously, before there is one.
-				const deadline: { timer?: ReturnType<typeof setTimeout> } = {};
-				const finish = (value: boolean) => {
-					clearTimeout(deadline.timer);
-					settle = null;
-					asked = null;
-					resolve(value);
-				};
-				// No client answered: assume the worst and serve nothing.
-				deadline.timer = setTimeout(() => finish(false), timeoutMs);
-				settle = finish;
-				askClients();
+			if (asked) return asked;
+
+			let answer!: (value: boolean) => void;
+			const query = new Promise<boolean>((resolve) => {
+				answer = resolve;
 			});
-			return asked;
+			// Published BEFORE the clients are asked, and settled through
+			// `finish`, which only clears the state it owns. A client that
+			// answers synchronously would otherwise have its `asked = null`
+			// undone by the assignment that followed the executor, pinning
+			// this answer for every later request — the remembered `open`
+			// this module exists to prevent.
+			asked = query;
+
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const finish = (value: boolean) => {
+				clearTimeout(timer);
+				// Identity checks, so a late timer from a query that has
+				// already been answered cannot tear down its successor's
+				// state and drop that query's answer.
+				if (asked === query) asked = null;
+				if (settle === finish) settle = null;
+				answer(value);
+			};
+			settle = finish;
+			// No client answered: assume the worst and serve nothing.
+			timer = setTimeout(() => finish(false), timeoutMs);
+			askClients();
+
+			return query;
 		},
 	};
 }

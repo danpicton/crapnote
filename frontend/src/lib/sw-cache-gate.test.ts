@@ -3,6 +3,7 @@ import {
 	CACHE_GATE_QUERY,
 	CACHE_GATE_STATE,
 	createCacheGate,
+	type CacheGate,
 	reportCacheGate,
 	answerCacheGateQueries,
 } from './sw-cache-gate';
@@ -62,6 +63,48 @@ describe('createCacheGate (service-worker side)', () => {
 		// would hand them A's image (#108 all over again).
 		aPageIsListening = false;
 		expect(await gate.isOpen()).toBe(false);
+	});
+
+	it('does not pin a synchronous answer for later requests', async () => {
+		let aPageIsListening = true;
+		// A client that answers during askClients() rather than a tick later.
+		// The promise for a query must be published before the query goes
+		// out, or clearing it on settle is undone by the assignment that
+		// follows — pinning the answer for good, which is the remembered
+		// `open` this whole file exists to prevent.
+		const gate: CacheGate = createCacheGate(
+			() => {
+				if (aPageIsListening) gate.report(true);
+			},
+			{ timeoutMs: 20 }
+		);
+
+		expect(await gate.isOpen()).toBe(true);
+
+		aPageIsListening = false;
+		expect(await gate.isOpen()).toBe(false);
+	});
+
+	it('lets a settled query’s deadline expire without disturbing the next one', async () => {
+		const replyDelays: number[] = [];
+		const gate: CacheGate = createCacheGate(
+			() => {
+				const delay = replyDelays.shift() ?? 0;
+				if (delay === 0) gate.report(true);
+				else setTimeout(() => gate.report(true), delay);
+			},
+			{ timeoutMs: 50 }
+		);
+
+		// First query answers immediately; its 50ms deadline must be cancelled
+		// with it. Left running, that stale timer would fire mid-way through
+		// the second query and tear down ITS state, dropping the answer below
+		// and failing the owner closed.
+		replyDelays.push(0, 30);
+		expect(await gate.isOpen()).toBe(true);
+		await new Promise((r) => setTimeout(r, 40));
+
+		expect(await gate.isOpen()).toBe(true);
 	});
 
 	it('shares one query between decisions made at the same time', async () => {
