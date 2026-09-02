@@ -814,7 +814,33 @@ describe('syncOfflineChanges — locked-note wedges (regression: sync stuck on N
 		expect(offlineDB.upsertNote).toHaveBeenCalledWith(fakeDB, expect.objectContaining({
 			id: 5, is_dirty: false, title: 'Server', locked: true,
 		}));
-		expect(result.conflicts).toBe(1);
+		// Counted as `locked`, not `conflicts` — the sidebar must be able to
+		// say "locked 1" rather than an opaque error/conflict count.
+		expect(result.locked).toBe(1);
+		expect(result.conflicts).toBe(0);
+		expect(result.errors).toBe(0);
+	});
+
+	it('counts a 423 on the localWins conflict branch as locked, preserving the local edit', async () => {
+		const note = fakeCachedNote({
+			id: 5, title: 'Mine', body: 'Mine',
+			server_updated_at: '2024-01-01T00:00:00Z',
+			local_updated_at: '2024-01-09T00:00:00Z',
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(
+			fakeServerNote({ id: 5, title: 'Theirs', body: 'Theirs', locked: true, updated_at: '2024-01-05T00:00:00Z' })
+		);
+		vi.mocked(api.notes.update).mockRejectedValue(new ApiError(423, 'note is locked'));
+		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 999 }));
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(api.notes.create).toHaveBeenCalledWith('[sync conflict] Mine', 'Mine');
+		expect(offlineDB.upsertNote).toHaveBeenCalledWith(fakeDB, expect.objectContaining({
+			id: 5, is_dirty: false, locked: true,
+		}));
+		expect(result.locked).toBe(1);
 		expect(result.errors).toBe(0);
 	});
 
@@ -923,7 +949,7 @@ describe('syncOfflineChanges — lock safety and ordering', () => {
 		expect(api.notes.create).toHaveBeenCalledWith('[sync conflict] Edited', 'B');
 		expect(api.notes.archive).toHaveBeenCalledWith(8);
 		expect(offlineDB.deleteNote).toHaveBeenCalledWith(fakeDB, 8);
-		expect(result.conflicts).toBe(1);
+		expect(result.locked).toBe(1);
 		expect(result.errors).toBe(0);
 		expect(result.pushed.archived).toBe(1);
 	});

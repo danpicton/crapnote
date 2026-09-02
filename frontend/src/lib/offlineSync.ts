@@ -20,6 +20,10 @@ export interface SyncResult {
 	pushed: { created: number; updated: number; deleted: number; archived: number; flags: number };
 	/** Notes where both sides changed since our last sync. */
 	conflicts: number;
+	/** Notes the server refused to update because they are locked (423) —
+	 * typically auto-locked while the device was offline. The local edit is
+	 * preserved as a "[sync conflict]" note rather than retried forever. */
+	locked: number;
 	/** Notes whose push attempt threw (network error, server error). */
 	errors: number;
 	/** True if this call was a no-op because another sync was already running,
@@ -63,6 +67,7 @@ export async function syncOfflineChanges(
 		mappings: [],
 		pushed: { created: 0, updated: 0, deleted: 0, archived: 0, flags: 0 },
 		conflicts: 0,
+		locked: 0,
 		errors: 0,
 		skipped: false,
 	};
@@ -137,6 +142,7 @@ function logSyncResult(r: SyncResult): void {
 		archived: r.pushed.archived,
 		flags: r.pushed.flags,
 		conflicts: r.conflicts,
+		locked: r.locked,
 		errors: r.errors,
 		skipped: r.skipped,
 		reason: r.reason,
@@ -421,7 +427,7 @@ async function pushContentCheckpoint(
 			updated = await api.notes.update(note.id, { title: note.title, body: note.body });
 		} catch (err) {
 			if (!isLockedServerSide(err)) throw err;
-			result.conflicts++;
+			result.locked++;
 			return preserveLocalAsConflict();
 		}
 		const entry: CachedNote = {
@@ -456,6 +462,7 @@ async function pushContentCheckpoint(
 			// Locked server-side — the local edit can't win after all. Keep
 			// it as its own conflict note and accept the server's version so
 			// sync never wedges on the 423.
+			result.locked++;
 			return preserveLocalAsConflict();
 		}
 		const entry: CachedNote = {

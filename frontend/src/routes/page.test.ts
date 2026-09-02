@@ -118,6 +118,7 @@ const emptySyncResult = {
 	mappings: [] as Array<{ tempId: number; serverId: number }>,
 	pushed: { created: 0, updated: 0, deleted: 0, archived: 0, flags: 0 },
 	conflicts: 0,
+	locked: 0,
 	errors: 0,
 	skipped: false,
 };
@@ -130,6 +131,7 @@ vi.mock('$lib/offlineSync', () => ({
 		mappings: [],
 		pushed: { created: 0, updated: 0, deleted: 0, archived: 0, flags: 0 },
 		conflicts: 0,
+		locked: 0,
 		errors: 0,
 		skipped: false,
 	}),
@@ -945,6 +947,22 @@ describe('Offline mode', () => {
 
 		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalledWith('online', 1));
 		await waitFor(() => expect(api.notes.list).toHaveBeenCalled());
+	});
+
+	it('sync summary reports locked notes distinctly from errors', async () => {
+		// A note auto-locked while we were offline is not a transient error:
+		// the tooltip must say so rather than showing an opaque "errors 1".
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(api.notes.list).mockResolvedValue([]);
+		vi.mocked(syncOfflineChanges).mockResolvedValue({ ...emptySyncResult, locked: 1 });
+
+		render(Page);
+		await waitFor(() => expect(api.notes.list).toHaveBeenCalled());
+
+		const syncBtn = await waitFor(() => screen.getAllByRole('button', { name: /sync/i })[0]);
+		await fireEvent.click(syncBtn);
+
+		await waitFor(() => expect(screen.getByTitle(/locked 1/)).toBeInTheDocument());
 	});
 
 	it('clicking the sync status indicator triggers a manual sync', async () => {
