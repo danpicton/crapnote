@@ -743,8 +743,17 @@
 	onMount(() => {
 		isOnline = navigator.onLine;
 
-		// Load per-user keyboard shortcut overrides from localStorage.
-		if (auth.user?.id != null) shortcuts.load(auth.user.id);
+		// Load per-user keyboard shortcut overrides from localStorage. This
+		// callback runs before the root layout has resolved /api/auth/me, so
+		// `auth.user` is still null on every full page load — wait for the
+		// session check to settle before asking who is signed in, or the
+		// overrides silently never load (issue #104). Not awaited here: the
+		// listener registration below must stay synchronous so the returned
+		// teardown is the one Svelte gets.
+		void (async () => {
+			await auth.ready();
+			if (auth.user?.id != null) shortcuts.load(auth.user.id);
+		})();
 
 		const handleOnline = async () => {
 			isOnline = true;
