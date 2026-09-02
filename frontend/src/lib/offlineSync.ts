@@ -20,6 +20,10 @@ export interface SyncResult {
 	pushed: { created: number; updated: number; deleted: number; archived: number; flags: number };
 	/** Notes where both sides changed since our last sync. */
 	conflicts: number;
+	/** Notes the server refused to update because they are locked (423) —
+	 * typically auto-locked while the device was offline. The local edit is
+	 * preserved as a "[sync conflict]" note rather than retried forever. */
+	locked: number;
 	/** Notes whose push attempt threw (network error, server error). */
 	errors: number;
 	/** True if this call was a no-op because another sync was already running,
@@ -63,6 +67,7 @@ export async function syncOfflineChanges(
 		mappings: [],
 		pushed: { created: 0, updated: 0, deleted: 0, archived: 0, flags: 0 },
 		conflicts: 0,
+		locked: 0,
 		errors: 0,
 		skipped: false,
 	};
@@ -137,6 +142,7 @@ function logSyncResult(r: SyncResult): void {
 		archived: r.pushed.archived,
 		flags: r.pushed.flags,
 		conflicts: r.conflicts,
+		locked: r.locked,
 		errors: r.errors,
 		skipped: r.skipped,
 		reason: r.reason,
@@ -166,6 +172,12 @@ function isLockedServerSide(err: unknown): boolean {
  * (or on a 404 — already gone), so a failed call leaves the flag in place
  * for the next sync to retry. `deleted_offline` wins over `archived_offline`
  * when both are set — the user's last visible action was the delete.
+ *
+ * The delete is locked-gated server-side too, so a note auto-locked while we
+ * were offline answers 423. That is a settled refusal, not a transient
+ * failure: retrying it every heartbeat would wedge the queue forever behind
+ * an opaque error count, so the delete intent is dropped instead and the
+ * entry kept (see `abandonLockedDelete`).
  */
 async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
 	if (!note.is_new) {
@@ -181,6 +193,9 @@ async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncRe
 				// another device set.
 				await api.notes.toggleLock(note.id);
 				await api.notes.delete(note.id);
+			} else if (isLockedServerSide(err)) {
+				await abandonLockedDelete(db, note, result);
+				return;
 			} else if (!isGoneServerSide(err)) {
 				throw err;
 			}
@@ -188,6 +203,23 @@ async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncRe
 	}
 	await deleteNote(db, note.id);
 	result.pushed.deleted++;
+}
+
+/**
+ * The server refused to trash the note because it is locked, and the user
+ * never unlocked it here — the lock belongs to the server (auto-lock, or
+ * another device), so forcing the delete through would defeat it.
+ *
+ * Keep the note, mark it locked so the UI stops presenting it as freely
+ * editable, and clear the delete intent so it leaves the dirty queue instead
+ * of being retried on every heartbeat. Any other pending work on the entry
+ * (content edits, flag toggles) is left alone: the next run replays it
+ * through the normal phases, which already resolve a 423 by preserving the
+ * local edit as a "[sync conflict]" note.
+ */
+async function abandonLockedDelete(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
+	await upsertNote(db, { ...note, locked: true, deleted_offline: false });
+	result.locked++;
 }
 
 /**
@@ -421,7 +453,7 @@ async function pushContentCheckpoint(
 			updated = await api.notes.update(note.id, { title: note.title, body: note.body });
 		} catch (err) {
 			if (!isLockedServerSide(err)) throw err;
-			result.conflicts++;
+			result.locked++;
 			return preserveLocalAsConflict();
 		}
 		const entry: CachedNote = {
@@ -456,6 +488,7 @@ async function pushContentCheckpoint(
 			// Locked server-side — the local edit can't win after all. Keep
 			// it as its own conflict note and accept the server's version so
 			// sync never wedges on the 423.
+			result.locked++;
 			return preserveLocalAsConflict();
 		}
 		const entry: CachedNote = {

@@ -701,7 +701,10 @@
 		}
 
 		lastSyncAt = new Date();
-		lastSyncSummary = `pushed ${result.pushed.created + result.pushed.updated + result.pushed.deleted + result.pushed.archived}, conflicts ${result.conflicts}, errors ${result.errors}`;
+		// `locked` is reported separately from `errors`: a note auto-locked
+		// server-side is a settled outcome (the edit was preserved as a
+		// conflict note), not a transient failure that will be retried.
+		lastSyncSummary = `pushed ${result.pushed.created + result.pushed.updated + result.pushed.deleted + result.pushed.archived}, conflicts ${result.conflicts}, locked ${result.locked}, errors ${result.errors}`;
 	}
 
 	/** Manual sync — wired to the sync-status indicator in the sidebar footer. */
