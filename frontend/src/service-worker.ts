@@ -37,8 +37,9 @@ const PRECACHE = [
 ];
 
 // ─── Cache gate ──────────────────────────────────────────────────────────────
-// Whether cached note images may be served: the page reports its lock state
-// here, and a restarted SW asks for it again. See sw-cache-gate.ts.
+// Whether cached note images may be served: every decision asks the window
+// clients and takes the first answer, so nothing is served once no app page
+// is left to vouch for it. See sw-cache-gate.ts.
 
 const cacheGate = createCacheGate(() => {
 	void (async () => {

@@ -122,9 +122,10 @@ export async function cacheFirst(request: Request, cacheName: string): Promise<R
  * user whose gate has not been reported yet; offline, the fetch fails and the
  * image simply does not render.
  *
- * The gate is open exactly when the page's `auth.canReadCache` is true, which
- * the page reports to the SW (see sw-cache-gate.ts). Note the open path is
- * byte-for-byte the old behaviour: no extra round-trip, no revalidation.
+ * The gate is open exactly when a live app page answers that its
+ * `auth.canReadCache` is true (see sw-cache-gate.ts). Note the open path is
+ * byte-for-byte the old behaviour: no extra network round-trip, no
+ * revalidation.
  */
 export async function gatedCacheFirst(
 	request: Request,

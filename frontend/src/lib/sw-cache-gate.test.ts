@@ -10,50 +10,76 @@ import {
 // ─── Service-worker side ─────────────────────────────────────────────────────
 
 describe('createCacheGate (service-worker side)', () => {
-	it('is shut until the page says otherwise', async () => {
-		const gate = createCacheGate(() => {}, { timeoutMs: 5 });
-
-		// Fail closed: a service worker that has just started has no idea who
-		// is at the keyboard, and the cache it guards outlives the session.
-		expect(await gate.isOpen()).toBe(false);
-	});
-
-	it('opens once the page reports an unlocked session, without asking again', async () => {
-		const ask = vi.fn();
-		const gate = createCacheGate(ask, { timeoutMs: 5 });
-		gate.report(true);
-
-		expect(await gate.isOpen()).toBe(true);
-		expect(ask).not.toHaveBeenCalled();
-	});
-
-	it('shuts again when the page reports a locked or signed-out session', async () => {
-		const gate = createCacheGate(() => {}, { timeoutMs: 5 });
-		gate.report(true);
-		gate.report(false);
-
-		expect(await gate.isOpen()).toBe(false);
-	});
-
-	it('asks the page when it has no state yet, and uses the answer', async () => {
-		const gate = createCacheGate(() => queueMicrotask(() => gate.report(true)), {
-			timeoutMs: 1000,
+	/** A gate whose clients answer `open`, or don't answer at all. */
+	function gateAnswering(answer: () => boolean | null, timeoutMs = 20) {
+		const ask = vi.fn(() => {
+			const value = answer();
+			if (value !== null) queueMicrotask(() => gate.report(value));
 		});
+		const gate = createCacheGate(ask, { timeoutMs });
+		return { gate, ask };
+	}
 
-		// A service worker is killed while idle and restarted by the next
-		// fetch, losing the reported state; without this the owner's images
-		// would break until they reloaded the page.
+	it('is shut when no client answers', async () => {
+		// Fail closed: a service worker with no app page behind it has no idea
+		// who is at the keyboard, and the cache it guards outlives the session.
+		const { gate } = gateAnswering(() => null);
+
+		expect(await gate.isOpen()).toBe(false);
+	});
+
+	it('opens when a client answers that the session may read the cache', async () => {
+		const { gate } = gateAnswering(() => true);
+
 		expect(await gate.isOpen()).toBe(true);
 	});
 
-	it('only asks while the state is unknown', async () => {
-		const ask = vi.fn(() => queueMicrotask(() => gate.report(true)));
-		const gate = createCacheGate(ask, { timeoutMs: 1000 });
+	it('stays shut when a client answers that the session is locked', async () => {
+		const { gate } = gateAnswering(() => false);
+
+		expect(await gate.isOpen()).toBe(false);
+	});
+
+	it('asks a client for every decision', async () => {
+		const { gate, ask } = gateAnswering(() => true);
 
 		await gate.isOpen();
 		await gate.isOpen();
 
+		// Nothing is remembered between requests — see the next test for why.
+		expect(ask).toHaveBeenCalledTimes(2);
+	});
+
+	it('never reuses an earlier answer once no client is left to give one', async () => {
+		let aPageIsListening = true;
+		const { gate } = gateAnswering(() => (aPageIsListening ? true : null));
+
+		expect(await gate.isOpen()).toBe(true);
+
+		// A closes the tab but leaves the browser running, so the SW outlives
+		// its last window. Whoever types a known image URL in next never boots
+		// the app, so nothing can report the gate shut — a remembered `true`
+		// would hand them A's image (#108 all over again).
+		aPageIsListening = false;
+		expect(await gate.isOpen()).toBe(false);
+	});
+
+	it('shares one query between decisions made at the same time', async () => {
+		const { gate, ask } = gateAnswering(() => true);
+
+		// A note render asks for several images at once; one round-trip
+		// answers them all.
+		const answers = await Promise.all([gate.isOpen(), gate.isOpen(), gate.isOpen()]);
+
+		expect(answers).toEqual([true, true, true]);
 		expect(ask).toHaveBeenCalledTimes(1);
+	});
+
+	it('ignores a report that answers nothing', async () => {
+		const { gate } = gateAnswering(() => null);
+		gate.report(true);
+
+		expect(await gate.isOpen()).toBe(false);
 	});
 });
 

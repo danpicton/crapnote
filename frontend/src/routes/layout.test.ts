@@ -216,25 +216,7 @@ describe('Layout withholds the app until the session is settled', () => {
 
 
 describe('Service-worker cache gate', () => {
-	it('tells the service worker the gate is shut for a locked session', async () => {
-		mockAuth.user = { id: 1 };
-		mockAuth.locked = true;
-		render(Layout, { children: noopSnippet });
-
-		// The SW serves cached /api/images/* only on this report, so a locked
-		// arrival must never see one (#108).
-		await vi.waitFor(() => expect(cacheGate.reportCacheGate).toHaveBeenCalledWith(false));
-	});
-
-	it('tells the service worker the gate is open once the session may read the cache', async () => {
-		mockAuth.user = { id: 1 };
-		mockAuth.canReadCache = true;
-		render(Layout, { children: noopSnippet });
-
-		await vi.waitFor(() => expect(cacheGate.reportCacheGate).toHaveBeenCalledWith(true));
-	});
-
-	it('answers a restarted service worker with the current state', async () => {
+	it('answers the service worker with the current lock state', async () => {
 		mockAuth.user = { id: 1 };
 		mockAuth.canReadCache = true;
 		render(Layout, { children: noopSnippet });

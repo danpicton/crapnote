@@ -11,78 +11,93 @@
  * cached-data reader asks).
  *
  * The SW cannot read the page's module state, sessionStorage or the auth
- * store, so the state has to be pushed to it. Two directions, because a SW is
- * killed while idle and restarted by the next fetch event with its memory
- * wiped:
+ * store, so it has to ask: every decision sends a query to the SW's window
+ * clients and waits briefly for one to answer with the current state. No
+ * answer — no app page running, or none that will vouch — means no cached
+ * image.
  *
- *   - push: the page reports the state on load and on every change.
- *   - pull: a restarted SW asks its clients and waits briefly for an answer
- *     before falling back to shut. Without this, an offline owner's images
- *     would break after every SW restart until they reloaded the page.
+ * The answer is deliberately NOT remembered between requests. A service
+ * worker outlives the tab that reported to it (Chrome keeps it around for
+ * roughly 30 seconds of idle, and every request resets that timer), so a
+ * remembered `open` would still be there for whoever types a known image URL
+ * into the address bar after the owner closes their tab — and such a
+ * request boots no app page to correct it, which is the exact leak this file
+ * exists to close. Requiring a live page to vouch for every response means
+ * the state cannot outlive the session it describes.
  *
- * Both paths fail closed: no answer means no cached image.
+ * One accepted limitation: the query goes to every window client, so an
+ * unlocked tab vouches for a request made from a locked one. That needs the
+ * owner's unlocked session to still be on screen, where their notes are
+ * readable anyway — it is not a route to anything the next arrival cannot
+ * already see.
  */
 
-/** Page → SW: `{ type, open }`. */
+/** Page → SW: `{ type, open }`, in reply to a query. */
 export const CACHE_GATE_STATE = 'crapnote:cache-gate';
-/** SW → page: "I have restarted, tell me the state again". */
+/** SW → page: "may I serve a cached image?". */
 export const CACHE_GATE_QUERY = 'crapnote:cache-gate-query';
 
-/** How long a restarted SW waits for a client to answer before failing
- * closed. Long enough for a message round-trip to a live page, short enough
- * not to stall an image request noticeably. */
-const DEFAULT_QUERY_TIMEOUT_MS = 500;
+/**
+ * How long the SW waits for a client to answer before failing closed.
+ *
+ * Generous on purpose: the answer comes off the page's main thread, which can
+ * be busy for a while during a cold start, and timing out there would show
+ * the owner a broken image. Waiting longer costs nothing in the case it
+ * guards against — a request with no app page behind it is going to be
+ * refused whenever the timer fires.
+ */
+const DEFAULT_QUERY_TIMEOUT_MS = 2_000;
 
 export interface CacheGate {
-	/** Record what the page just reported. */
+	/** Answer the outstanding query, if there is one. */
 	report(open: boolean): void;
 	/** Whether cached image bytes may be served right now. */
 	isOpen(): Promise<boolean>;
 }
 
 /**
- * The SW-side gate. `askClients` is called at most once per unknown state to
- * prompt the page for a report (see CACHE_GATE_QUERY).
+ * The SW-side gate. `askClients` is called once per decision (concurrent
+ * decisions share the one query) to prompt the SW's window clients for a
+ * report; the first answer decides, and nobody answering means shut.
  */
 export function createCacheGate(
 	askClients: () => void,
 	{ timeoutMs = DEFAULT_QUERY_TIMEOUT_MS }: { timeoutMs?: number } = {}
 ): CacheGate {
-	let open: boolean | null = null;
-	let waiting: Promise<boolean> | null = null;
+	// The query in flight, if any. Nothing is kept once it settles: an answer
+	// outliving the page that gave it is precisely the hole being closed.
+	let asked: Promise<boolean> | null = null;
 	let settle: ((value: boolean) => void) | null = null;
 
 	return {
 		report(value: boolean) {
-			open = value;
 			settle?.(value);
 		},
-		async isOpen(): Promise<boolean> {
-			if (open !== null) return open;
-			waiting ??= new Promise<boolean>((resolve) => {
-				const timer = setTimeout(() => {
+		isOpen(): Promise<boolean> {
+			asked ??= new Promise<boolean>((resolve) => {
+				// Boxed so `finish` can cancel a timer created after it — a
+				// client can answer synchronously, before there is one.
+				const deadline: { timer?: ReturnType<typeof setTimeout> } = {};
+				const finish = (value: boolean) => {
+					clearTimeout(deadline.timer);
 					settle = null;
-					waiting = null;
-					// No client answered: assume the worst and serve nothing.
-					resolve(false);
-				}, timeoutMs);
-				settle = (value) => {
-					clearTimeout(timer);
-					settle = null;
-					waiting = null;
+					asked = null;
 					resolve(value);
 				};
+				// No client answered: assume the worst and serve nothing.
+				deadline.timer = setTimeout(() => finish(false), timeoutMs);
+				settle = finish;
 				askClients();
 			});
-			return waiting;
+			return asked;
 		},
 	};
 }
 
 /**
- * Page side: report the gate state to the service worker. Best-effort — if
- * there is no SW (unsupported, not yet registered) there is no cache for it
- * to guard either.
+ * Page side: report the gate state to the service worker, in reply to its
+ * query. Best-effort — if there is no SW (unsupported, not yet registered)
+ * there is no cache for it to guard either.
  */
 export async function reportCacheGate(open: boolean): Promise<void> {
 	if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
@@ -95,8 +110,8 @@ export async function reportCacheGate(open: boolean): Promise<void> {
 }
 
 /**
- * Page side: answer a restarted SW's query with the current state. Returns an
- * unsubscribe function.
+ * Page side: answer the service worker's queries with the current state.
+ * Returns an unsubscribe function.
  */
 export function answerCacheGateQueries(getOpen: () => boolean): () => void {
 	if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return () => {};
