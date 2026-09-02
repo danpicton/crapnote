@@ -11,38 +11,80 @@ import {
 // ─── Service-worker side ─────────────────────────────────────────────────────
 
 describe('createCacheGate (service-worker side)', () => {
-	/** A gate whose clients answer `open`, or don't answer at all. */
-	function gateAnswering(answer: () => boolean | null, timeoutMs = 20) {
-		const ask = vi.fn(() => {
-			const value = answer();
-			if (value !== null) queueMicrotask(() => gate.report(value));
+	/**
+	 * A gate whose window clients reply as listed: `true`/`false`, or `null`
+	 * for a client that is asked and never answers. Replies land in order, a
+	 * tick after the query.
+	 */
+	function gateWithClients(replies: Array<boolean | null>, timeoutMs = 50) {
+		const ask = vi.fn(async () => {
+			for (const reply of replies) {
+				if (reply !== null) queueMicrotask(() => gate.report(reply));
+			}
+			return replies.length;
 		});
-		const gate = createCacheGate(ask, { timeoutMs });
+		const gate: CacheGate = createCacheGate(ask, { timeoutMs });
 		return { gate, ask };
 	}
 
-	it('is shut when no client answers', async () => {
+	it('is shut when there is no client to ask', async () => {
 		// Fail closed: a service worker with no app page behind it has no idea
 		// who is at the keyboard, and the cache it guards outlives the session.
-		const { gate } = gateAnswering(() => null);
+		const { gate } = gateWithClients([]);
+
+		expect(await gate.isOpen()).toBe(false);
+	});
+
+	it('is shut when the client it asked never answers', async () => {
+		const { gate } = gateWithClients([null]);
 
 		expect(await gate.isOpen()).toBe(false);
 	});
 
 	it('opens when a client answers that the session may read the cache', async () => {
-		const { gate } = gateAnswering(() => true);
+		const { gate } = gateWithClients([true]);
 
 		expect(await gate.isOpen()).toBe(true);
 	});
 
 	it('stays shut when a client answers that the session is locked', async () => {
-		const { gate } = gateAnswering(() => false);
+		const { gate } = gateWithClients([false]);
 
 		expect(await gate.isOpen()).toBe(false);
 	});
 
-	it('asks a client for every decision', async () => {
-		const { gate, ask } = gateAnswering(() => true);
+	it('lets an unlocked tab vouch even when a locked one answers first', async () => {
+		// The unlock proof lives in per-tab sessionStorage, so a second tab
+		// opened offline is genuinely locked and answers false. Taking the
+		// first answer would fail the owner's own unlocked tab closed, at
+		// random, and render 503s for images it is entitled to.
+		const { gate } = gateWithClients([false, true]);
+
+		expect(await gate.isOpen()).toBe(true);
+	});
+
+	it('fails closed as soon as every client asked has refused', async () => {
+		const { gate } = gateWithClients([false, false], 10_000);
+
+		const started = Date.now();
+		expect(await gate.isOpen()).toBe(false);
+
+		// Unanimity, not the deadline: a locked browser must not wait out the
+		// full timeout before every image gives up.
+		expect(Date.now() - started).toBeLessThan(1_000);
+	});
+
+	it('does not wait out the deadline when there is nobody to ask', async () => {
+		const { gate } = gateWithClients([], 10_000);
+
+		const started = Date.now();
+		expect(await gate.isOpen()).toBe(false);
+
+		expect(Date.now() - started).toBeLessThan(1_000);
+	});
+
+	it('asks the clients for every decision', async () => {
+		const { gate, ask } = gateWithClients([true]);
 
 		await gate.isOpen();
 		await gate.isOpen();
@@ -52,8 +94,8 @@ describe('createCacheGate (service-worker side)', () => {
 	});
 
 	it('never reuses an earlier answer once no client is left to give one', async () => {
-		let aPageIsListening = true;
-		const { gate } = gateAnswering(() => (aPageIsListening ? true : null));
+		const replies: Array<boolean | null> = [true];
+		const { gate } = gateWithClients(replies);
 
 		expect(await gate.isOpen()).toBe(true);
 
@@ -61,7 +103,7 @@ describe('createCacheGate (service-worker side)', () => {
 		// its last window. Whoever types a known image URL in next never boots
 		// the app, so nothing can report the gate shut — a remembered `true`
 		// would hand them A's image (#108 all over again).
-		aPageIsListening = false;
+		replies.length = 0;
 		expect(await gate.isOpen()).toBe(false);
 	});
 
@@ -73,8 +115,10 @@ describe('createCacheGate (service-worker side)', () => {
 		// follows — pinning the answer for good, which is the remembered
 		// `open` this whole file exists to prevent.
 		const gate: CacheGate = createCacheGate(
-			() => {
-				if (aPageIsListening) gate.report(true);
+			async () => {
+				if (!aPageIsListening) return 0;
+				gate.report(true);
+				return 1;
 			},
 			{ timeoutMs: 20 }
 		);
@@ -88,10 +132,11 @@ describe('createCacheGate (service-worker side)', () => {
 	it('lets a settled query’s deadline expire without disturbing the next one', async () => {
 		const replyDelays: number[] = [];
 		const gate: CacheGate = createCacheGate(
-			() => {
+			async () => {
 				const delay = replyDelays.shift() ?? 0;
 				if (delay === 0) gate.report(true);
 				else setTimeout(() => gate.report(true), delay);
+				return 1;
 			},
 			{ timeoutMs: 50 }
 		);
@@ -108,7 +153,7 @@ describe('createCacheGate (service-worker side)', () => {
 	});
 
 	it('shares one query between decisions made at the same time', async () => {
-		const { gate, ask } = gateAnswering(() => true);
+		const { gate, ask } = gateWithClients([true]);
 
 		// A note render asks for several images at once; one round-trip
 		// answers them all.
@@ -119,8 +164,16 @@ describe('createCacheGate (service-worker side)', () => {
 	});
 
 	it('ignores a report that answers nothing', async () => {
-		const { gate } = gateAnswering(() => null);
+		const { gate } = gateWithClients([]);
 		gate.report(true);
+
+		expect(await gate.isOpen()).toBe(false);
+	});
+
+	it('fails closed when the clients cannot be asked at all', async () => {
+		const gate = createCacheGate(() => Promise.reject(new Error('no clients')), {
+			timeoutMs: 10_000,
+		});
 
 		expect(await gate.isOpen()).toBe(false);
 	});

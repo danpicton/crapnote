@@ -25,11 +25,18 @@
  * exists to close. Requiring a live page to vouch for every response means
  * the state cannot outlive the session it describes.
  *
- * One accepted limitation: the query goes to every window client, so an
- * unlocked tab vouches for a request made from a locked one. That needs the
- * owner's unlocked session to still be on screen, where their notes are
- * readable anyway — it is not a route to anything the next arrival cannot
- * already see.
+ * The query goes to every window client and any one of them may vouch: the
+ * gate opens on the first `true`, and shuts only when every client asked has
+ * refused, there was nobody to ask, or the deadline passes. Unanimity for
+ * `false` matters because the unlock proof lives in per-tab sessionStorage —
+ * a second tab opened offline is genuinely locked and answers `false`, and
+ * letting it win the race would fail the owner's own unlocked tab closed at
+ * random.
+ *
+ * The flip side is an accepted limitation: an unlocked tab vouches for a
+ * request made from a locked one. That needs the owner's unlocked session to
+ * still be on screen, where their notes are readable anyway — it is not a
+ * route to anything the next arrival cannot already see.
  */
 
 /** Page → SW: `{ type, open }`, in reply to a query. */
@@ -57,21 +64,22 @@ export interface CacheGate {
 
 /**
  * The SW-side gate. `askClients` is called once per decision (concurrent
- * decisions share the one query) to prompt the SW's window clients for a
- * report; the first answer decides, and nobody answering means shut.
+ * decisions share the one query): it prompts the SW's window clients for a
+ * report and resolves with how many it asked, so the gate knows when every
+ * one of them has refused. Failing to ask at all counts as a refusal.
  */
 export function createCacheGate(
-	askClients: () => void,
+	askClients: () => Promise<number>,
 	{ timeoutMs = DEFAULT_QUERY_TIMEOUT_MS }: { timeoutMs?: number } = {}
 ): CacheGate {
 	// The query in flight, if any. Nothing is kept once it settles: an answer
 	// outliving the page that gave it is precisely the hole being closed.
 	let asked: Promise<boolean> | null = null;
-	let settle: ((value: boolean) => void) | null = null;
+	let listener: ((value: boolean) => void) | null = null;
 
 	return {
 		report(value: boolean) {
-			settle?.(value);
+			listener?.(value);
 		},
 		isOpen(): Promise<boolean> {
 			if (asked) return asked;
@@ -88,21 +96,46 @@ export function createCacheGate(
 			// this module exists to prevent.
 			asked = query;
 
+			// How many clients were asked, once that is known, and how many
+			// of them have refused so far.
+			let expected: number | null = null;
+			let refusals = 0;
+
 			const finish = (value: boolean) => {
 				clearTimeout(timer);
 				// Identity checks, so a late timer from a query that has
 				// already been answered cannot tear down its successor's
 				// state and drop that query's answer.
 				if (asked === query) asked = null;
-				if (settle === finish) settle = null;
+				if (listener === collect) listener = null;
 				answer(value);
 			};
-			settle = finish;
-			// No client answered: assume the worst and serve nothing.
+			// One `true` is enough to open the gate; `false` only counts
+			// towards unanimity, so a locked tab cannot veto an unlocked one.
+			const collect = (value: boolean) => {
+				if (value) {
+					finish(true);
+					return;
+				}
+				refusals += 1;
+				if (expected !== null && refusals >= expected) finish(false);
+			};
+			listener = collect;
+			// Nobody answered in time: assume the worst and serve nothing.
 			// `finish` closes over this before it exists, which is safe
 			// because nothing can call it until `askClients` runs below.
 			const timer = setTimeout(() => finish(false), timeoutMs);
-			askClients();
+
+			void askClients().then(
+				(count) => {
+					expected = count;
+					// No client to ask, or they have all refused already —
+					// no reason to hold the request until the deadline.
+					if (count === 0 || refusals >= count) finish(false);
+				},
+				// Couldn't even ask: nothing can vouch, so refuse now.
+				() => finish(false)
+			);
 
 			return query;
 		},

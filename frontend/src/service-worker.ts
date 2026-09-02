@@ -38,14 +38,15 @@ const PRECACHE = [
 
 // ─── Cache gate ──────────────────────────────────────────────────────────────
 // Whether cached note images may be served: every decision asks the window
-// clients and takes the first answer, so nothing is served once no app page
+// clients, any one of which may vouch, so nothing is served once no app page
 // is left to vouch for it. See sw-cache-gate.ts.
 
-const cacheGate = createCacheGate(() => {
-	void (async () => {
-		const clients = await sw.clients.matchAll({ includeUncontrolled: true, type: 'window' });
-		for (const client of clients) client.postMessage({ type: CACHE_GATE_QUERY });
-	})();
+const cacheGate = createCacheGate(async () => {
+	const clients = await sw.clients.matchAll({ includeUncontrolled: true, type: 'window' });
+	for (const client of clients) client.postMessage({ type: CACHE_GATE_QUERY });
+	// The count is what lets the gate tell "every page says no" from "one page
+	// said no and the others have yet to answer".
+	return clients.length;
 });
 
 sw.addEventListener('message', (event) => {
