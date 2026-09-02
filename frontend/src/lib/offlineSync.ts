@@ -172,6 +172,12 @@ function isLockedServerSide(err: unknown): boolean {
  * (or on a 404 — already gone), so a failed call leaves the flag in place
  * for the next sync to retry. `deleted_offline` wins over `archived_offline`
  * when both are set — the user's last visible action was the delete.
+ *
+ * The delete is locked-gated server-side too, so a note auto-locked while we
+ * were offline answers 423. That is a settled refusal, not a transient
+ * failure: retrying it every heartbeat would wedge the queue forever behind
+ * an opaque error count, so the delete intent is dropped instead and the
+ * entry kept (see `abandonLockedDelete`).
  */
 async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
 	if (!note.is_new) {
@@ -187,6 +193,9 @@ async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncRe
 				// another device set.
 				await api.notes.toggleLock(note.id);
 				await api.notes.delete(note.id);
+			} else if (isLockedServerSide(err)) {
+				await abandonLockedDelete(db, note, result);
+				return;
 			} else if (!isGoneServerSide(err)) {
 				throw err;
 			}
@@ -194,6 +203,23 @@ async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncRe
 	}
 	await deleteNote(db, note.id);
 	result.pushed.deleted++;
+}
+
+/**
+ * The server refused to trash the note because it is locked, and the user
+ * never unlocked it here — the lock belongs to the server (auto-lock, or
+ * another device), so forcing the delete through would defeat it.
+ *
+ * Keep the note, mark it locked so the UI stops presenting it as freely
+ * editable, and clear the delete intent so it leaves the dirty queue instead
+ * of being retried on every heartbeat. Any other pending work on the entry
+ * (content edits, flag toggles) is left alone: the next run replays it
+ * through the normal phases, which already resolve a 423 by preserving the
+ * local edit as a "[sync conflict]" note.
+ */
+async function abandonLockedDelete(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
+	await upsertNote(db, { ...note, locked: true, deleted_offline: false });
+	result.locked++;
 }
 
 /**
