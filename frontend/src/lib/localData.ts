@@ -103,11 +103,10 @@ export async function ensureOfflineOwner(userId: number): Promise<void> {
  *
  * The store outlives a session — `clearLocalData()` runs on an explicit
  * logout and nothing else — so a browser that was merely closed still holds
- * the previous user's note titles and bodies. The list and note routes send
- * every cache read that can reach the DOM, and the bulk `cacheNotesForOffline`
- * write, through here. Single-note writes (the offline save/create/flag
- * paths in the routes and in `offlineActions.ts`) still open the store
- * directly — tracked in #107 — so this is not yet a complete chokepoint.
+ * the previous user's note titles and bodies. Every cache read that can reach
+ * the DOM goes through here, as does the bulk `cacheNotesForOffline` write;
+ * the single-note write paths use `requireOwnedOfflineDB` below, which is the
+ * same check with a throwing refusal.
  *
  * `userId` is the resolved session user online, or the identity remembered at
  * the last login when offline (see `readSessionUser`) — and offline that
@@ -144,5 +143,32 @@ export async function openOwnedOfflineDB(userId: number | null): Promise<IDBData
 		db.close();
 		return null;
 	}
+	return db;
+}
+
+/**
+ * Thrown when an offline write is refused because this browser's store does
+ * not belong to the writing user. Callers must surface it — a swallowed
+ * refusal is the silent data loss this replaces.
+ */
+export class OfflineOwnershipError extends Error {
+	constructor() {
+		super('Offline store belongs to a different account');
+		this.name = 'OfflineOwnershipError';
+	}
+}
+
+/**
+ * `openOwnedOfflineDB` for the write paths: same check, but a refusal throws
+ * instead of returning null.
+ *
+ * Reads can fail closed quietly — rendering nothing is self-explanatory. A
+ * write cannot: dropping the edit while the editor still shows it would look
+ * exactly like a successful save. Throwing forces every caller either to
+ * report the failure or to crash loudly enough to be noticed.
+ */
+export async function requireOwnedOfflineDB(userId: number | null): Promise<IDBDatabase> {
+	const db = await openOwnedOfflineDB(userId);
+	if (!db) throw new OfflineOwnershipError();
 	return db;
 }

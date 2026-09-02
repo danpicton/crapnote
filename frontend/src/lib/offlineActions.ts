@@ -1,4 +1,5 @@
-import { openOfflineDB, getNote, upsertNote, deleteNote, noteFlags } from '$lib/offlineDB';
+import { getNote, upsertNote, deleteNote, noteFlags } from '$lib/offlineDB';
+import { requireOwnedOfflineDB } from '$lib/localData';
 import type { CachedNote } from '$lib/offlineDB';
 import type { Note } from '$lib/api';
 
@@ -8,6 +9,12 @@ import type { Note } from '$lib/api';
  * (`deleted_offline` / `archived_offline` + `is_dirty`) so the UI can apply
  * it immediately and `syncOfflineChanges` replays it against the API on
  * reconnect.
+ *
+ * Every entry point takes the acting user's id and writes through
+ * `requireOwnedOfflineDB`: the store is shared per-browser and
+ * `ensureOfflineOwner` swallows its own failures, so a store still stamped
+ * with another account must reject the write rather than absorb it. A refusal
+ * throws `OfflineOwnershipError` for the caller to surface — see #107.
  */
 
 function cachedFromNote(note: Note, tags: Array<{ id: number; name: string }>): CachedNote {
@@ -32,10 +39,11 @@ function cachedFromNote(note: Note, tags: Array<{ id: number; name: string }>): 
  * to replay.
  */
 export async function markNoteDeletedOffline(
+	userId: number | null,
 	note: Note,
 	tags: Array<{ id: number; name: string }> = []
 ): Promise<void> {
-	const db = await openOfflineDB();
+	const db = await requireOwnedOfflineDB(userId);
 	try {
 		const existing = await getNote(db, note.id);
 		if (existing?.is_new || note.id < 0) {
@@ -62,11 +70,12 @@ export async function markNoteDeletedOffline(
  * an untouched flag can never clobber state set from another device.
  */
 export async function markNoteFlagsOffline(
+	userId: number | null,
 	note: Note,
 	flag: 'starred' | 'pinned' | 'locked',
 	tags: Array<{ id: number; name: string }> = []
 ): Promise<void> {
-	const db = await openOfflineDB();
+	const db = await requireOwnedOfflineDB(userId);
 	try {
 		const existing = await getNote(db, note.id);
 		await upsertNote(db, {
@@ -87,10 +96,11 @@ export async function markNoteFlagsOffline(
 /** Queue an archive for replay. Offline-created notes keep their `is_new`
  * flag so sync knows to create them server-side before archiving. */
 export async function markNoteArchivedOffline(
+	userId: number | null,
 	note: Note,
 	tags: Array<{ id: number; name: string }> = []
 ): Promise<void> {
-	const db = await openOfflineDB();
+	const db = await requireOwnedOfflineDB(userId);
 	try {
 		const existing = await getNote(db, note.id);
 		// is_dirty is left as-is: an archive with no content edits must not

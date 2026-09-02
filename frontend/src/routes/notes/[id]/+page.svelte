@@ -19,8 +19,8 @@
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, OfflineError, type Note, type Tag } from '$lib/api';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
-	import { openOfflineDB, getNote as getOfflineNote, upsertNote, type CachedNote } from '$lib/offlineDB';
-	import { openOwnedOfflineDB } from '$lib/localData';
+	import { getNote as getOfflineNote, upsertNote, type CachedNote } from '$lib/offlineDB';
+	import { openOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 	import {
@@ -50,6 +50,12 @@
 	let showTagSheet = $state(false);
 	let editorFocused = $state(false);
 	let showMobHeadingMenu = $state(false);
+	/**
+	 * Set when an offline write was refused because this browser's store
+	 * belongs to a different account (#107). Shown, never swallowed: on
+	 * screen a dropped save is indistinguishable from a successful one.
+	 */
+	let offlineWriteError = $state<string | null>(null);
 	let activeFormats = $state<ActiveFormats>({ ...EMPTY_FORMATS });
 
 	/**
@@ -60,8 +66,20 @@
 	async function toggleFlagOffline(err: unknown, flag: 'starred' | 'pinned' | 'locked') {
 		if (!(err instanceof OfflineError)) throw err;
 		if (!note) return;
-		note = { ...note, [flag]: !note[flag] };
-		await markNoteFlagsOffline(note, flag, noteTags.map((t) => ({ id: t.id, name: t.name })));
+		const toggled = { ...note, [flag]: !note[flag] };
+		try {
+			await markNoteFlagsOffline(
+				auth.user?.id ?? null,
+				toggled,
+				flag,
+				noteTags.map((t) => ({ id: t.id, name: t.name }))
+			);
+		} catch (e) {
+			if (!(e instanceof OfflineOwnershipError)) throw e;
+			reportOfflineWriteRefused();
+			return;
+		}
+		note = toggled;
 	}
 
 	async function mobToggleStar() {
@@ -108,7 +126,13 @@
 			}
 		}
 		// Offline — apply optimistically and queue the archive for replay.
-		await markNoteArchivedOffline(note);
+		try {
+			await markNoteArchivedOffline(auth.user?.id ?? null, note);
+		} catch (e) {
+			if (!(e instanceof OfflineOwnershipError)) throw e;
+			reportOfflineWriteRefused();
+			return;
+		}
 		goto('/');
 	}
 
@@ -125,7 +149,15 @@
 			}
 		}
 		// Offline — apply optimistically and queue the delete for replay.
-		if (note) await markNoteDeletedOffline(note);
+		if (note) {
+			try {
+				await markNoteDeletedOffline(auth.user?.id ?? null, note);
+			} catch (e) {
+				if (!(e instanceof OfflineOwnershipError)) throw e;
+				reportOfflineWriteRefused();
+				return;
+			}
+		}
 		goto('/');
 	}
 
@@ -286,8 +318,19 @@
 		}
 	});
 
+	/**
+	 * Report a refused offline write. Deliberately loud: the user has to know
+	 * the edit only exists in the editor, and what to do about it.
+	 */
+	function reportOfflineWriteRefused() {
+		offlineWriteError =
+			"This change could not be saved offline: this browser's stored notes belong to a different account. "
+			+ 'Reconnect and sign in again to save it.';
+	}
+
 	async function saveOfflineEdit(field: 'title' | 'body', value: string) {
-		const db = await openOfflineDB();
+		const db = await openOwnedCache();
+		if (!db) { reportOfflineWriteRefused(); return; }
 		try {
 			const existing = await getOfflineNote(db, noteId);
 			const base: CachedNote = existing ?? {
@@ -327,8 +370,10 @@
 				try {
 					const updated = await api.notes.update(noteId, { [field]: value });
 					note = updated;
-					// Keep cache in sync
-					const db = await openOfflineDB();
+					// Keep cache in sync — a refresh of server state, so a
+					// foreign store is skipped rather than reported.
+					const db = await openOwnedCache();
+					if (!db) return;
 					try {
 						const existing = await getOfflineNote(db, noteId);
 						if (existing && !existing.is_dirty) {
@@ -421,6 +466,14 @@
 	onfocusin={() => (editorFocused = true)}
 	onfocusout={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) editorFocused = false; }}
 >
+	{#if offlineWriteError}
+		<div class="offline-write-error" role="alert">
+			<span>{offlineWriteError}</span>
+			<button onclick={() => (offlineWriteError = null)} aria-label="Dismiss">
+				<X size={14} />
+			</button>
+		</div>
+	{/if}
 	<!-- ── Desktop toolbar (top) ─────────────────────────── -->
 	<div class="toolbar desk-toolbar" role="toolbar" aria-label="Formatting">
 		<button class="tb-btn" onclick={() => goto('/')} title="Back to notes" aria-label="Back to notes">
@@ -705,6 +758,28 @@
 		flex-direction: column;
 		height: 100dvh;
 		background: var(--bg);
+	}
+
+	/* Full-width so a refused offline save cannot be missed. */
+	.offline-write-error {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.5rem 0.75rem;
+		background: #fee2e2;
+		color: #991b1b;
+		border-bottom: 1px solid #fecaca;
+		font-size: 0.8rem;
+	}
+
+	.offline-write-error button {
+		margin-left: auto;
+		background: none;
+		border: none;
+		color: inherit;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
 	}
 
 	.loading {
