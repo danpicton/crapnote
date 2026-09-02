@@ -297,6 +297,88 @@ test.describe('Shared browser: cached notes need the password, not just a matchi
     await contextB.close();
   });
 
+  /**
+   * Issue #108: the same leak, one layer down. The service worker caches
+   * `/api/images/*` cache-first and that cache is cleared only on a
+   * deliberate logout, so a known image URL used to return the previous
+   * user's note image with no session and no unlock.
+   *
+   * The image seeded here has an id the server does not serve, which is what
+   * makes both halves conclusive: bytes coming back can only have come from
+   * the cache. That is also why the backend is not cut off as it is above —
+   * an unauthenticated request is already refused by the server, so the only
+   * thing that can hand out A's image is the service worker.
+   */
+  test('a cached note image is not served without a session, and comes back after login', async ({
+    browser,
+  }) => {
+    const runTag = Date.now().toString(36);
+    const TITLE = `Image Owner ${runTag}`;
+    // An id the API will never serve, so the only source of these bytes is
+    // the SW cache.
+    const IMAGE_URL = '/api/images/98765432';
+    const SECRET_BYTES = `A-private-image-${runTag}`;
+
+    // ── User A views a note with an image, then walks away ────────────────
+    const contextA = await browser.newContext();
+    const pageA = await contextA.newPage();
+    const { profile } = await captureProfileOfA(contextA, pageA, TITLE, `Body of ${TITLE}`);
+    const cacheName = await pageA.evaluate(
+      async ([url, bytes]) => {
+        const name = (await caches.keys()).find((k) => k.startsWith('crapnote-'));
+        if (!name) throw new Error('the service worker cache should exist by now');
+        const cache = await caches.open(name);
+        await cache.put(url, new Response(bytes, { headers: { 'Content-Type': 'image/png' } }));
+        return name;
+      },
+      [IMAGE_URL, SECRET_BYTES] as const,
+    );
+    await contextA.close();
+
+    // ── The next person, on the browser A left behind ─────────────────────
+    const contextB = await browser.newContext();
+    const pageB = await contextB.newPage();
+    await pageB.goto('/login');
+    await expect(pageB.getByRole('button', { name: /log in/i })).toBeVisible();
+    await seedProfile(pageB, profile);
+    await pageB.evaluate(
+      async ([name, url, bytes]) => {
+        const cache = await caches.open(name);
+        await cache.put(url, new Response(bytes, { headers: { 'Content-Type': 'image/png' } }));
+      },
+      [cacheName, IMAGE_URL, SECRET_BYTES] as const,
+    );
+    // The leak needs the SW to be answering fetches, so wait for it to claim
+    // this page rather than assuming it has.
+    await pageB.evaluate(() => navigator.serviceWorker.ready);
+    await pageB.waitForFunction(() => navigator.serviceWorker.controller !== null);
+    expect((await contextB.cookies()).length, 'no session cookie survives').toBe(0);
+
+    const beforeLogin = await pageB.evaluate(async (url) => {
+      const res = await fetch(url);
+      return { status: res.status, body: await res.text() };
+    }, IMAGE_URL);
+    expect(beforeLogin.body, "A's cached image must not be served to whoever arrives next").not.toContain(
+      SECRET_BYTES,
+    );
+    expect(beforeLogin.status).not.toBe(200);
+
+    // ── A comes back and signs in: their own cache is theirs again ────────
+    await login(pageB);
+    await expect
+      .poll(() => pageB.evaluate(async (url) => (await fetch(url)).text(), IMAGE_URL), {
+        message: 'the owner’s cached image should render again once unlocked',
+        timeout: 15_000,
+      })
+      .toContain(SECRET_BYTES);
+
+    // And it really did come from the cache — the API has no such image.
+    const fromServer = await contextB.request.get(IMAGE_URL);
+    expect(fromServer.status()).not.toBe(200);
+
+    await contextB.close();
+  });
+
   test('an install with cached notes but no unlock material fails closed', async ({ browser }) => {
     const runTag = Date.now().toString(36);
     const TITLE = `Pre-Upgrade Secret ${runTag}`;
