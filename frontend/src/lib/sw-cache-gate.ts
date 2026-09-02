@@ -88,7 +88,6 @@ export function createCacheGate(
 			// this module exists to prevent.
 			asked = query;
 
-			let timer: ReturnType<typeof setTimeout> | undefined;
 			const finish = (value: boolean) => {
 				clearTimeout(timer);
 				// Identity checks, so a late timer from a query that has
@@ -100,7 +99,9 @@ export function createCacheGate(
 			};
 			settle = finish;
 			// No client answered: assume the worst and serve nothing.
-			timer = setTimeout(() => finish(false), timeoutMs);
+			// `finish` closes over this before it exists, which is safe
+			// because nothing can call it until `askClients` runs below.
+			const timer = setTimeout(() => finish(false), timeoutMs);
 			askClients();
 
 			return query;
