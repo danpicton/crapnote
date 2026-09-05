@@ -170,6 +170,26 @@ func main() {
 	}
 	imagesHandler := images.NewHandlerWith(database, imagesCfg)
 
+	// Background job: reap orphaned uploads — images older than the grace
+	// period that no note body references — so they stop consuming quota.
+	// Runs hourly and deletes a bounded batch per pass, because SQLite has a
+	// single writer and a long DELETE would block note saves.
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			n, err := images.SweepOrphans(
+				context.Background(), database,
+				images.OrphanGracePeriod, images.SweepOrphanBatch,
+			)
+			if err != nil {
+				logger.Error("sweep orphaned images", "error", err)
+			} else if n > 0 {
+				logger.Info("swept orphaned images", "count", n)
+			}
+		}
+	}()
+
 	// Login rate limiter: defence against credential brute-forcing (issue #12).
 	// Defaults to 5 attempts/min with burst 5 per client IP. Both knobs are
 	// tunable via env vars so that E2E suites — which legitimately submit
