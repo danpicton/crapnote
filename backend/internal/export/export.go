@@ -20,8 +20,6 @@ var (
 	unsafeChars = regexp.MustCompile(`[/\\:*?"<>|]+`)
 	// collapseSpaces replaces runs of whitespace/hyphens with a single hyphen.
 	collapseSpaces = regexp.MustCompile(`[\s\-]+`)
-	// imageAPIPath matches /api/images/<id> inside src="…" attributes.
-	imageAPIPath = regexp.MustCompile(`/api/images/([a-f0-9\-]+)`)
 )
 
 // sanitiseFilename turns an arbitrary title into a safe .md filename.
@@ -76,7 +74,7 @@ func mimeToExt(mimeType string) string {
 
 // extractImageIDs returns the unique image IDs referenced in a note body.
 func extractImageIDs(body string) []string {
-	matches := imageAPIPath.FindAllStringSubmatch(body, -1)
+	matches := images.ImageAPIPath.FindAllStringSubmatch(body, -1)
 	seen := make(map[string]struct{})
 	var ids []string
 	for _, m := range matches {
@@ -91,9 +89,9 @@ func extractImageIDs(body string) []string {
 
 // rewriteImageSrcs replaces /api/images/<id> with images/<id>.<ext> in body.
 func rewriteImageSrcs(body string, imgFiles map[string]string) string {
-	return imageAPIPath.ReplaceAllStringFunc(body, func(match string) string {
+	return images.ImageAPIPath.ReplaceAllStringFunc(body, func(match string) string {
 		// match is the full "/api/images/<id>"
-		sub := imageAPIPath.FindStringSubmatch(match)
+		sub := images.ImageAPIPath.FindStringSubmatch(match)
 		if len(sub) < 2 {
 			return match
 		}

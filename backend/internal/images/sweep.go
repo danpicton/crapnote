@@ -26,9 +26,12 @@ const SweepOrphanBatch = 500
 // deleteChunk caps how many ids go into one DELETE statement.
 const deleteChunk = 100
 
-// imageAPIPath matches the /api/images/<id> URLs that note bodies use to
-// reference an upload. Mirrors the scan in internal/export.
-var imageAPIPath = regexp.MustCompile(`/api/images/([A-Za-z0-9_.-]+)`)
+// ImageAPIPath matches the /api/images/<id> URLs that note bodies use to
+// reference an upload. The character class is exactly what newID emits —
+// lowercase hex and hyphens — so a URL followed by punctuation (a full stop
+// ending a sentence, a closing paren, an underscore) yields the id alone.
+// internal/export scans bodies for the same shape and shares this pattern.
+var ImageAPIPath = regexp.MustCompile(`/api/images/([a-f0-9\-]+)`)
 
 // SweepOrphans deletes up to limit images that are older than grace and that
 // no note body of the owning user references. Notes that are archived or in
@@ -145,8 +148,8 @@ func unreferenced(ctx context.Context, db *sql.DB, userID int64, ids []string) (
 		if !strings.Contains(body, "/api/images/") {
 			continue
 		}
-		for _, m := range imageAPIPath.FindAllStringSubmatch(body, -1) {
-			delete(pending, m[1])
+		for _, m := range ImageAPIPath.FindAllStringSubmatch(body, -1) {
+			strikeOff(pending, m[1])
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -194,4 +197,17 @@ func deleteImages(ctx context.Context, db *sql.DB, userID int64, ids []string) (
 		deleted += int(n)
 	}
 	return deleted, nil
+}
+
+// strikeOff removes tok from pending, along with any hyphen-delimited prefix
+// of it. The prefixes matter because a URL glued to a hex-or-hyphen suffix
+// (".../<id>-1") captures more than the id, and failing to strike an id off
+// deletes a live image — which cannot be undone.
+func strikeOff(pending map[string]struct{}, tok string) {
+	delete(pending, tok)
+	for i, c := range tok {
+		if c == '-' {
+			delete(pending, tok[:i])
+		}
+	}
 }

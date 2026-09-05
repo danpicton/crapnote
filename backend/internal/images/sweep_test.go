@@ -60,6 +60,12 @@ func insertNote(t *testing.T, database *sql.DB, userID int64, body string, archi
 	return id
 }
 
+// imgID returns a deterministic id in the shape newID emits (lowercase hex and
+// hyphens), so tests reference images exactly as real note bodies do.
+func imgID(n int) string {
+	return fmt.Sprintf("%08x-0000-4000-8000-000000000000", n)
+}
+
 func imageExists(t *testing.T, database *sql.DB, id string) bool {
 	t.Helper()
 	var n int
@@ -73,8 +79,9 @@ func imageExists(t *testing.T, database *sql.DB, id string) bool {
 func TestSweepOrphans_DeletesOldUnreferencedImages(t *testing.T) {
 	database, alice, _ := newSweepFixture(t)
 
-	insertImage(t, database, "old-orphan", alice.ID, 48*time.Hour)
-	insertImage(t, database, "new-orphan", alice.ID, time.Minute)
+	oldOrphan, newOrphan := imgID(1), imgID(2)
+	insertImage(t, database, oldOrphan, alice.ID, 48*time.Hour)
+	insertImage(t, database, newOrphan, alice.ID, time.Minute)
 
 	n, err := images.SweepOrphans(t.Context(), database, images.OrphanGracePeriod, 100)
 	if err != nil {
@@ -83,10 +90,10 @@ func TestSweepOrphans_DeletesOldUnreferencedImages(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("expected 1 image swept, got %d", n)
 	}
-	if imageExists(t, database, "old-orphan") {
+	if imageExists(t, database, oldOrphan) {
 		t.Error("expected old orphan to be deleted")
 	}
-	if !imageExists(t, database, "new-orphan") {
+	if !imageExists(t, database, newOrphan) {
 		t.Error("expected image inside grace period to survive")
 	}
 }
@@ -94,12 +101,13 @@ func TestSweepOrphans_DeletesOldUnreferencedImages(t *testing.T) {
 func TestSweepOrphans_KeepsImagesReferencedByAnyNote(t *testing.T) {
 	database, alice, _ := newSweepFixture(t)
 
-	for _, id := range []string{"active", "archived", "trashed", "orphan"} {
+	active, archived, trashed, orphan := imgID(1), imgID(2), imgID(3), imgID(4)
+	for _, id := range []string{active, archived, trashed, orphan} {
 		insertImage(t, database, id, alice.ID, 48*time.Hour)
 	}
-	insertNote(t, database, alice.ID, `<img src="/api/images/active">`, false)
-	insertNote(t, database, alice.ID, `<img src="/api/images/archived">`, true)
-	trashedID := insertNote(t, database, alice.ID, `<img src="/api/images/trashed">`, false)
+	insertNote(t, database, alice.ID, `<img src="/api/images/`+active+`">`, false)
+	insertNote(t, database, alice.ID, `<img src="/api/images/`+archived+`">`, true)
+	trashedID := insertNote(t, database, alice.ID, `<img src="/api/images/`+trashed+`">`, false)
 	if _, err := database.ExecContext(t.Context(),
 		`INSERT INTO trash (note_id, user_id) VALUES (?, ?)`, trashedID, alice.ID); err != nil {
 		t.Fatalf("trash note: %v", err)
@@ -109,12 +117,12 @@ func TestSweepOrphans_KeepsImagesReferencedByAnyNote(t *testing.T) {
 		t.Fatalf("sweep: %v", err)
 	}
 
-	for _, id := range []string{"active", "archived", "trashed"} {
+	for _, id := range []string{active, archived, trashed} {
 		if !imageExists(t, database, id) {
 			t.Errorf("expected referenced image %q to survive", id)
 		}
 	}
-	if imageExists(t, database, "orphan") {
+	if imageExists(t, database, orphan) {
 		t.Error("expected unreferenced image to be deleted")
 	}
 }
@@ -122,27 +130,28 @@ func TestSweepOrphans_KeepsImagesReferencedByAnyNote(t *testing.T) {
 func TestSweepOrphans_ScopedPerOwningUser(t *testing.T) {
 	database, alice, bob := newSweepFixture(t)
 
-	insertImage(t, database, "alice-orphan", alice.ID, 48*time.Hour)
+	aliceOrphan, bobCross, bobKept := imgID(1), imgID(2), imgID(3)
+	insertImage(t, database, aliceOrphan, alice.ID, 48*time.Hour)
 	// bob-cross is referenced only by *alice's* note. A cross-user reference
 	// must not save it: bob is the owner, and alice could never load it
 	// anyway, since Serve only ever hands a user their own uploads.
-	insertImage(t, database, "bob-cross", bob.ID, 48*time.Hour)
-	insertNote(t, database, alice.ID, `<img src="/api/images/bob-cross">`, false)
+	insertImage(t, database, bobCross, bob.ID, 48*time.Hour)
+	insertNote(t, database, alice.ID, `<img src="/api/images/`+bobCross+`">`, false)
 	// bob-kept is referenced by its own owner, so it survives.
-	insertImage(t, database, "bob-kept", bob.ID, 48*time.Hour)
-	insertNote(t, database, bob.ID, `<img src="/api/images/bob-kept">`, false)
+	insertImage(t, database, bobKept, bob.ID, 48*time.Hour)
+	insertNote(t, database, bob.ID, `<img src="/api/images/`+bobKept+`">`, false)
 
 	if _, err := images.SweepOrphans(t.Context(), database, images.OrphanGracePeriod, 100); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 
-	if imageExists(t, database, "alice-orphan") {
+	if imageExists(t, database, aliceOrphan) {
 		t.Error("expected alice's orphan to be deleted")
 	}
-	if imageExists(t, database, "bob-cross") {
+	if imageExists(t, database, bobCross) {
 		t.Error("expected bob's image to be deleted: only another user's note referenced it")
 	}
-	if !imageExists(t, database, "bob-kept") {
+	if !imageExists(t, database, bobKept) {
 		t.Error("expected bob's own referenced image to survive")
 	}
 }
@@ -150,8 +159,8 @@ func TestSweepOrphans_ScopedPerOwningUser(t *testing.T) {
 func TestSweepOrphans_BoundsWorkPerPass(t *testing.T) {
 	database, alice, _ := newSweepFixture(t)
 
-	for _, id := range []string{"a", "b", "c"} {
-		insertImage(t, database, id, alice.ID, 48*time.Hour)
+	for i := range 3 {
+		insertImage(t, database, imgID(i), alice.ID, 48*time.Hour)
 	}
 
 	n, err := images.SweepOrphans(t.Context(), database, images.OrphanGracePeriod, 2)
@@ -170,7 +179,7 @@ func TestSweepOrphans_FreesQuota(t *testing.T) {
 
 	// 10 old orphan images of 10 bytes each fill the 100-byte quota.
 	for i := range 10 {
-		insertImage(t, database, fmt.Sprintf("orphan-%d", i), alice.ID, 48*time.Hour)
+		insertImage(t, database, imgID(i), alice.ID, 48*time.Hour)
 	}
 
 	req := withUser(multipartUpload(t, minimalPNG(), ""), alice)
@@ -205,7 +214,7 @@ func TestSweepOrphans_ScalesWithLargeTables(t *testing.T) {
 
 	body := strings.Repeat("filler text ", 700) // ~8KB note bodies
 	for i := range 3000 {
-		id := fmt.Sprintf("%08x-0000-4000-8000-000000000000", i)
+		id := imgID(i)
 		insertImage(t, database, id, alice.ID, 48*time.Hour)
 		insertNote(t, database, alice.ID, body+`<img src="/api/images/`+id+`">`, false)
 	}
@@ -230,11 +239,12 @@ func TestSweepOrphans_ReferencedImagesDoNotStarveTheSweep(t *testing.T) {
 	database, alice, _ := newSweepFixture(t)
 
 	for i := range 5 {
-		id := fmt.Sprintf("kept-%d", i)
+		id := imgID(i)
 		insertImage(t, database, id, alice.ID, 72*time.Hour)
 		insertNote(t, database, alice.ID, `<img src="/api/images/`+id+`">`, false)
 	}
-	insertImage(t, database, "younger-orphan", alice.ID, 48*time.Hour)
+	youngerOrphan := imgID(99)
+	insertImage(t, database, youngerOrphan, alice.ID, 48*time.Hour)
 
 	n, err := images.SweepOrphans(t.Context(), database, images.OrphanGracePeriod, 2)
 	if err != nil {
@@ -243,7 +253,42 @@ func TestSweepOrphans_ReferencedImagesDoNotStarveTheSweep(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("expected the orphan to be swept, got %d deletions", n)
 	}
-	if imageExists(t, database, "younger-orphan") {
+	if imageExists(t, database, youngerOrphan) {
 		t.Error("expected younger orphan to be deleted despite older referenced images")
+	}
+}
+
+// A bare image URL at the end of a sentence, or followed by any other
+// punctuation, still references the image. Over-capturing the trailing
+// character would strike a different token off the candidate set and delete a
+// live image — and deletion is irreversible.
+func TestSweepOrphans_KeepsImagesReferencedByPunctuatedURLs(t *testing.T) {
+	database, alice, _ := newSweepFixture(t)
+
+	cases := map[string]string{
+		"01000000-0000-4000-8000-000000000000": "see /api/images/%s.",
+		"02000000-0000-4000-8000-000000000000": "see /api/images/%s_thumb",
+		"03000000-0000-4000-8000-000000000000": "see [pic](/api/images/%s)",
+		"04000000-0000-4000-8000-000000000000": `<img src="/api/images/%s">`,
+		// Hex-or-hyphen suffixes are still captured by the pattern, so the
+		// strike-off has to tolerate over-capture as well.
+		"05000000-0000-4000-8000-000000000000": "see /api/images/%s-1",
+	}
+	for id, tmpl := range cases {
+		insertImage(t, database, id, alice.ID, 48*time.Hour)
+		insertNote(t, database, alice.ID, fmt.Sprintf(tmpl, id), false)
+	}
+
+	n, err := images.SweepOrphans(t.Context(), database, images.OrphanGracePeriod, 100)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("expected no deletions, got %d", n)
+	}
+	for id, tmpl := range cases {
+		if !imageExists(t, database, id) {
+			t.Errorf("image referenced by %q was deleted", fmt.Sprintf(tmpl, id))
+		}
 	}
 }
