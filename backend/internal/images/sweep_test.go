@@ -122,22 +122,28 @@ func TestSweepOrphans_KeepsImagesReferencedByAnyNote(t *testing.T) {
 func TestSweepOrphans_ScopedPerOwningUser(t *testing.T) {
 	database, alice, bob := newSweepFixture(t)
 
-	insertImage(t, database, "alice-img", alice.ID, 48*time.Hour)
-	insertImage(t, database, "bob-img", bob.ID, 48*time.Hour)
-	// Alice's note references Bob's image — that must not save Bob's image,
-	// since a user can only ever serve their own uploads.
-	insertNote(t, database, alice.ID, `<img src="/api/images/bob-img">`, false)
-	insertNote(t, database, bob.ID, `<img src="/api/images/bob-img">`, false)
+	insertImage(t, database, "alice-orphan", alice.ID, 48*time.Hour)
+	// bob-cross is referenced only by *alice's* note. A cross-user reference
+	// must not save it: bob is the owner, and alice could never load it
+	// anyway, since Serve only ever hands a user their own uploads.
+	insertImage(t, database, "bob-cross", bob.ID, 48*time.Hour)
+	insertNote(t, database, alice.ID, `<img src="/api/images/bob-cross">`, false)
+	// bob-kept is referenced by its own owner, so it survives.
+	insertImage(t, database, "bob-kept", bob.ID, 48*time.Hour)
+	insertNote(t, database, bob.ID, `<img src="/api/images/bob-kept">`, false)
 
 	if _, err := images.SweepOrphans(t.Context(), database, images.OrphanGracePeriod, 100); err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
 
-	if imageExists(t, database, "alice-img") {
+	if imageExists(t, database, "alice-orphan") {
 		t.Error("expected alice's orphan to be deleted")
 	}
-	if !imageExists(t, database, "bob-img") {
-		t.Error("expected bob's referenced image to survive")
+	if imageExists(t, database, "bob-cross") {
+		t.Error("expected bob's image to be deleted: only another user's note referenced it")
+	}
+	if !imageExists(t, database, "bob-kept") {
+		t.Error("expected bob's own referenced image to survive")
 	}
 }
 
