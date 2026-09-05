@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -182,5 +183,61 @@ func TestSweepOrphans_FreesQuota(t *testing.T) {
 	h.Upload(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201 after sweep, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// A steady-state pass — every image referenced, nothing to delete — must not
+// degenerate into a full notes scan per image. SQLite is capped at a single
+// connection, so a slow pass stalls every other request for its duration.
+// The threshold is deliberately loose (the quadratic version took ~5s here);
+// it only needs to catch a return to per-image scanning.
+func TestSweepOrphans_ScalesWithLargeTables(t *testing.T) {
+	if testing.Short() {
+		t.Skip("scaling guard; skipped under -short")
+	}
+	database, alice, _ := newSweepFixture(t)
+
+	body := strings.Repeat("filler text ", 700) // ~8KB note bodies
+	for i := range 3000 {
+		id := fmt.Sprintf("%08x-0000-4000-8000-000000000000", i)
+		insertImage(t, database, id, alice.ID, 48*time.Hour)
+		insertNote(t, database, alice.ID, body+`<img src="/api/images/`+id+`">`, false)
+	}
+
+	start := time.Now()
+	n, err := images.SweepOrphans(t.Context(), database, images.OrphanGracePeriod, 500)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("expected no deletions, got %d", n)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("steady-state sweep took %s over 3000 images/notes; expected well under 2s", elapsed)
+	}
+}
+
+// Bounding a pass must bound deletions, not candidates: a batch of older
+// referenced images must not starve a newer orphan out of every future pass.
+func TestSweepOrphans_ReferencedImagesDoNotStarveTheSweep(t *testing.T) {
+	database, alice, _ := newSweepFixture(t)
+
+	for i := range 5 {
+		id := fmt.Sprintf("kept-%d", i)
+		insertImage(t, database, id, alice.ID, 72*time.Hour)
+		insertNote(t, database, alice.ID, `<img src="/api/images/`+id+`">`, false)
+	}
+	insertImage(t, database, "younger-orphan", alice.ID, 48*time.Hour)
+
+	n, err := images.SweepOrphans(t.Context(), database, images.OrphanGracePeriod, 2)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected the orphan to be swept, got %d deletions", n)
+	}
+	if imageExists(t, database, "younger-orphan") {
+		t.Error("expected younger orphan to be deleted despite older referenced images")
 	}
 }
