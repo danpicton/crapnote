@@ -8,8 +8,8 @@ import (
 // ErrNotFound is returned when a note does not exist or belongs to another user.
 var ErrNotFound = errors.New("note not found")
 
-// ErrLocked is returned when an operation would change the content of a locked
-// note. Callers must unlock the note first.
+// ErrLocked is returned when an operation is blocked by a note's lock.
+// Callers must unlock the note first.
 var ErrLocked = errors.New("note is locked")
 
 // Note represents a single user note.

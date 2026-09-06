@@ -259,6 +259,9 @@ func (h *Handler) Archive(w http.ResponseWriter, r *http.Request) {
 	if err := h.svc.Archive(r.Context(), id, u.ID); errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "note not found")
 		return
+	} else if errors.Is(err, ErrLocked) {
+		writeError(w, http.StatusLocked, "note is locked")
+		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return

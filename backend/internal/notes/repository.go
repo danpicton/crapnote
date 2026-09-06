@@ -437,9 +437,31 @@ func (r *Repo) SoftDelete(ctx context.Context, id, userID int64) error {
 	return nil
 }
 
-// Archive moves a note to the archive (hidden from normal list but not deleted).
+// Archive moves an unlocked note to the archive (hidden from the normal list).
 func (r *Repo) Archive(ctx context.Context, id, userID int64) error {
-	return r.setBool(ctx, "archived", id, userID, true)
+	// Enforce the lock in the write itself so a concurrent lock cannot land
+	// between a check and the update.
+	res, err := r.db.ExecContext(ctx,
+		`UPDATE notes SET archived=1 WHERE id=? AND user_id=? AND locked=0`, id, userID,
+	)
+	if err != nil {
+		return fmt.Errorf("set archived: %w", err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set archived rows affected: %w", err)
+	}
+	if rows == 0 {
+		locked, err := r.IsLocked(ctx, id, userID)
+		if err != nil {
+			return err
+		}
+		if locked {
+			return ErrLocked
+		}
+		return ErrNotFound
+	}
+	return nil
 }
 
 // Unarchive restores an archived note back to the normal list.

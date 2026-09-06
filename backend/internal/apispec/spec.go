@@ -283,7 +283,7 @@ func Registry() []Operation {
 		},
 		{
 			Name: "notes_archive", Method: "PATCH", Path: "/api/notes/{id}/archive", Scope: ScopeWrite,
-			Description: "Archive a note (hidden from the main list).",
+			Description: "Archive a note (hidden from the main list). Fails with 423 if the note is locked.",
 			Response:    ResponseNone,
 			Params:      []Param{noteID()},
 		},
