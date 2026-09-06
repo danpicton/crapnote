@@ -472,6 +472,23 @@ func TestNotesHandler_Delete_LockedReturns423(t *testing.T) {
 	}
 }
 
+func TestNotesHandler_Archive_LockedReturns423(t *testing.T) {
+	h, user := newHandlerFixture(t)
+	id := createNoteViaHandler(t, h, user, `{"title":"Lock","body":"body"}`)
+	lockNoteViaHandler(t, h, user, id)
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/notes/"+id+"/archive", nil)
+	req.SetPathValue("id", id)
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+
+	h.Archive(w, req)
+
+	if w.Code != http.StatusLocked {
+		t.Fatalf("expected 423, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestNotesHandler_CreateResponseIncludesLocked(t *testing.T) {
 	h, user := newHandlerFixture(t)
 
