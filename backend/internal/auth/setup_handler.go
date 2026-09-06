@@ -10,6 +10,11 @@ import (
 	"github.com/danpicton/crapnote/internal/httpx"
 )
 
+// maxSetupBodyBytes caps the setup request body. It carries a single
+// password; anything larger is not a setup request. Matches the login route's
+// limit — both are unauthenticated.
+const maxSetupBodyBytes = 4 << 10
+
 // SetupHandler holds the public HTTP handlers that consume one-time setup
 // tokens. These endpoints require no authentication — the token is the sole
 // credential.
@@ -70,10 +75,27 @@ func (h *SetupHandler) Get(w http.ResponseWriter, r *http.Request) {
 // success returns 204; the user must then navigate to /login to sign in.
 func (h *SetupHandler) Complete(w http.ResponseWriter, r *http.Request) {
 	token := r.PathValue("token")
+
+	// Cap the body before decoding anything. This route is unauthenticated,
+	// so an uncapped body let any caller push arbitrary megabytes through the
+	// request path before validation rejected it. Same shape as the login
+	// route, internal/images and internal/mcp.
+	r.Body = http.MaxBytesReader(w, r.Body, maxSetupBodyBytes)
+
 	var req struct {
 		Password string `json:"password"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			slog.Warn("audit: setup body rejected — too large",
+				"event", "setup_body_too_large",
+				"limit", tooLarge.Limit,
+				"ip", httpx.ClientIP(r),
+			)
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

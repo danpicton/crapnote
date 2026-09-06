@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -150,6 +151,110 @@ func TestSetupHandler_Complete_UnknownToken_Returns404(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+// An oversized body must be rejected with a clean 413 before it is fully
+// read into memory — the setup route is unauthenticated, so it follows the
+// same cap as the login route.
+func TestSetupHandler_Complete_OversizedBody_Returns413(t *testing.T) {
+	h, svc, users := newSetupFixture(t)
+	ctx := context.Background()
+
+	u := createUser(t, users, "alice", "throwaway-dummy", false)
+	rawToken, _, _ := svc.CreateInvite(ctx, u.ID, time.Hour)
+
+	huge := `{"password":"brand-new-password-abc","pad":"` +
+		strings.Repeat("x", 64<<10) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/setup/"+rawToken,
+		bytes.NewBufferString(huge))
+	req.SetPathValue("token", rawToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.Complete(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("expected JSON error body, got %v", err)
+	}
+	if resp["error"] == nil || resp["error"] == "" {
+		t.Fatalf("expected an error message, got %v", resp)
+	}
+}
+
+// Chunked transfer encoding with no Content-Length is the case a naive
+// Content-Length check would miss; MaxBytesReader must still stop it.
+func TestSetupHandler_Complete_OversizedChunkedBody_Returns413(t *testing.T) {
+	h, svc, users := newSetupFixture(t)
+	ctx := context.Background()
+
+	u := createUser(t, users, "alice", "throwaway-dummy", false)
+	rawToken, _, _ := svc.CreateInvite(ctx, u.ID, time.Hour)
+
+	huge := `{"password":"brand-new-password-abc","pad":"` +
+		strings.Repeat("x", 64<<10) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/setup/"+rawToken,
+		bytes.NewBufferString(huge))
+	req.SetPathValue("token", rawToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.ContentLength = -1
+	req.TransferEncoding = []string{"chunked"}
+	w := httptest.NewRecorder()
+	h.Complete(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected 413 for chunked oversized body, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// A body exactly at the limit is still accepted.
+func TestSetupHandler_Complete_BodyAtLimit_Succeeds(t *testing.T) {
+	h, svc, users := newSetupFixture(t)
+	ctx := context.Background()
+
+	u := createUser(t, users, "alice", "throwaway-dummy", false)
+	rawToken, _, _ := svc.CreateInvite(ctx, u.ID, time.Hour)
+
+	prefix := `{"password":"brand-new-password-abc","pad":"`
+	suffix := `"}`
+	pad := 4096 - len(prefix) - len(suffix)
+	body := prefix + strings.Repeat("x", pad) + suffix
+	if len(body) != 4096 {
+		t.Fatalf("test bug: body is %d bytes", len(body))
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/setup/"+rawToken,
+		bytes.NewBufferString(body))
+	req.SetPathValue("token", rawToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.Complete(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 for body at the limit, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// A small malformed body still gets the existing 400, not a 413.
+func TestSetupHandler_Complete_MalformedSmallBody_Returns400(t *testing.T) {
+	h, svc, users := newSetupFixture(t)
+	ctx := context.Background()
+
+	u := createUser(t, users, "alice", "throwaway-dummy", false)
+	rawToken, _, _ := svc.CreateInvite(ctx, u.ID, time.Hour)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/setup/"+rawToken,
+		bytes.NewBufferString(`{"password":`))
+	req.SetPathValue("token", rawToken)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.Complete(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
