@@ -141,8 +141,8 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 
 // Update performs a partial update of a note's title and/or body. Only non-nil
 // fields are written; the other field keeps its current value.
-// Returns ErrNotFound if the note does not exist or belongs to a different user,
-// and ErrLocked if it is locked.
+// Returns ErrNotFound if the note does not exist, belongs to a different user,
+// or is archived or trashed, and ErrLocked if it is locked.
 //
 // The locked check lives in the UPDATE's own WHERE clause rather than in a
 // preceding SELECT, so a concurrent SetLocked or AutoLockStale cannot slip in
@@ -154,7 +154,8 @@ func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string
 		SET title      = CASE WHEN ? IS NOT NULL THEN ? ELSE title END,
 		    body       = CASE WHEN ? IS NOT NULL THEN ? ELSE body  END,
 		    updated_at = ?
-		WHERE id = ? AND user_id = ? AND archived = 0 AND locked = 0`,
+		WHERE id = ? AND user_id = ? AND archived = 0 AND locked = 0
+		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = notes.id)`,
 		title, title, body, body, now, id, userID,
 	)
 	if err != nil {
@@ -162,7 +163,7 @@ func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		// Zero rows means missing, another user's, or locked — ask which.
+		// Zero rows means missing, hidden, another user's, or locked — ask which.
 		// IsLocked reports ErrNotFound for the first two.
 		locked, err := r.IsLocked(ctx, id, userID)
 		if err != nil {

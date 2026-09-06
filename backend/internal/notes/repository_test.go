@@ -172,6 +172,29 @@ func TestNoteRepo_Update_ArchivedNoteDoesNotWrite(t *testing.T) {
 	}
 }
 
+func TestNoteRepo_Update_TrashedNoteDoesNotWrite(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, _ := repo.Create(ctx, userID, "Trashed", "original body")
+	repo.SoftDelete(ctx, note.ID, userID) //nolint:errcheck
+
+	_, err := repo.Update(ctx, note.ID, userID, strPtr("Changed"), strPtr("changed body"))
+	if err != notes.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	var title, body string
+	if err := database.QueryRow(`SELECT title, body FROM notes WHERE id = ?`, note.ID).Scan(&title, &body); err != nil {
+		t.Fatalf("read trashed note: %v", err)
+	}
+	if title != "Trashed" || body != "original body" {
+		t.Fatalf("trashed note was changed: title=%q body=%q", title, body)
+	}
+}
+
 func TestNoteRepo_Update_WrongUser(t *testing.T) {
 	database := openTestDB(t)
 	userID := seedUser(t, database)
