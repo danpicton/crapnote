@@ -444,7 +444,10 @@ func (r *Repo) Unarchive(ctx context.Context, id, userID int64) error {
 	if err != nil {
 		return fmt.Errorf("unarchive: %w", err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("unarchive rows affected: %w", err)
+	}
 	if rows == 0 {
 		return ErrNotFound
 	}
