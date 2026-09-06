@@ -111,7 +111,7 @@ func (h *AdminHandler) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(toUserResponse(u)) //nolint:errcheck
+	json.NewEncoder(w).Encode(h.toUserResponse(u)) //nolint:errcheck
 }
 
 // InviteTTL is the lifetime of a setup-token invite link.
@@ -316,7 +316,7 @@ func (h *AdminHandler) SetAPITokensEnabled(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(toUserResponse(u))
+	_ = json.NewEncoder(w).Encode(h.toUserResponse(u))
 }
 
 // MinPasswordLen is the minimum length enforced for passwords set via admin
@@ -442,7 +442,7 @@ func (h *AdminHandler) LockUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(toUserResponse(u))
+	_ = json.NewEncoder(w).Encode(h.toUserResponse(u))
 }
 
 // UnlockUser handles POST /api/admin/users/{id}/unlock
@@ -485,7 +485,7 @@ func (h *AdminHandler) UnlockUser(w http.ResponseWriter, r *http.Request) {
 	// complete unlock rather than a partial one.
 	h.svc.ClearAutomaticLockouts(u.Username)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(toUserResponse(u))
+	_ = json.NewEncoder(w).Encode(h.toUserResponse(u))
 }
 
 // DeleteUser handles DELETE /api/admin/users/{id}
@@ -534,10 +534,24 @@ type userResponse struct {
 	Locked           bool   `json:"locked"`
 	LockedAt         string `json:"locked_at,omitempty"`
 	PendingSetup     bool   `json:"pending_setup"`
-	CreatedAt        string `json:"created_at"`
+	// ActiveCooldowns is the number of client addresses currently serving an
+	// automatic failed-login cool-down against this username. Locked above
+	// stays admin-initiated locks only; the two are independent signals and
+	// deliberately not merged. Only the count is exposed, never the
+	// addresses — see lockoutTracker.lockedCount.
+	ActiveCooldowns int    `json:"active_cooldowns"`
+	CreatedAt       string `json:"created_at"`
 }
 
-func toUserResponse(u *User) userResponse {
+// toUserResponse renders a user for an admin response, including the
+// in-memory automatic cool-down count held by the handler's Service.
+func (h *AdminHandler) toUserResponse(u *User) userResponse {
+	resp := baseUserResponse(u)
+	resp.ActiveCooldowns = h.svc.AutomaticLockoutCount(u.Username)
+	return resp
+}
+
+func baseUserResponse(u *User) userResponse {
 	resp := userResponse{
 		ID:               u.ID,
 		Username:         u.Username,
@@ -553,7 +567,7 @@ func toUserResponse(u *User) userResponse {
 }
 
 func (h *AdminHandler) toUserResponseWithSetup(ctx context.Context, u *User) userResponse {
-	resp := toUserResponse(u)
+	resp := h.toUserResponse(u)
 	if has, err := h.svc.HasActiveInvite(ctx, u.ID); err == nil {
 		resp.PendingSetup = has
 	}
