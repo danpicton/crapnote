@@ -149,6 +149,68 @@ func TestNoteRepo_Update(t *testing.T) {
 	}
 }
 
+func TestNoteRepo_Update_ArchivedNoteDoesNotWrite(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, _ := repo.Create(ctx, userID, "Archived", "original body")
+	repo.Archive(ctx, note.ID, userID) //nolint:errcheck
+
+	_, err := repo.Update(ctx, note.ID, userID, strPtr("Changed"), strPtr("changed body"))
+	if err != notes.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	archived, err := repo.ListArchived(ctx, userID, 0, 0)
+	if err != nil {
+		t.Fatalf("ListArchived: %v", err)
+	}
+	if len(archived) != 1 || archived[0].Title != "Archived" || archived[0].Body != "original body" {
+		t.Fatalf("archived note was changed: %+v", archived)
+	}
+}
+
+func TestNoteRepo_Update_LockedArchivedNoteIsNotFound(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, _ := repo.Create(ctx, userID, "Locked and archived", "body")
+	repo.SetLocked(ctx, note.ID, userID, true) //nolint:errcheck
+	repo.Archive(ctx, note.ID, userID)         //nolint:errcheck
+
+	_, err := repo.Update(ctx, note.ID, userID, strPtr("Changed"), nil)
+	if err != notes.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestNoteRepo_Update_TrashedNoteDoesNotWrite(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, _ := repo.Create(ctx, userID, "Trashed", "original body")
+	repo.SoftDelete(ctx, note.ID, userID) //nolint:errcheck
+
+	_, err := repo.Update(ctx, note.ID, userID, strPtr("Changed"), strPtr("changed body"))
+	if err != notes.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	var title, body string
+	if err := database.QueryRow(`SELECT title, body FROM notes WHERE id = ?`, note.ID).Scan(&title, &body); err != nil {
+		t.Fatalf("read trashed note: %v", err)
+	}
+	if title != "Trashed" || body != "original body" {
+		t.Fatalf("trashed note was changed: title=%q body=%q", title, body)
+	}
+}
+
 func TestNoteRepo_Update_WrongUser(t *testing.T) {
 	database := openTestDB(t)
 	userID := seedUser(t, database)
