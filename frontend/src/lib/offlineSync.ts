@@ -177,7 +177,7 @@ function isLockedServerSide(err: unknown): boolean {
  * were offline answers 423. That is a settled refusal, not a transient
  * failure: retrying it every heartbeat would wedge the queue forever behind
  * an opaque error count, so the delete intent is dropped instead and the
- * entry kept (see `abandonLockedDelete`).
+ * entry kept (see `abandonLockedRemoval`).
  */
 async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
 	if (!note.is_new) {
@@ -194,7 +194,7 @@ async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncRe
 				await api.notes.toggleLock(note.id);
 				await api.notes.delete(note.id);
 			} else if (isLockedServerSide(err)) {
-				await abandonLockedDelete(db, note, result);
+				await abandonLockedRemoval(db, note, result);
 				return;
 			} else if (!isGoneServerSide(err)) {
 				throw err;
@@ -206,9 +206,9 @@ async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncRe
 }
 
 /**
- * The server refused to trash the note because it is locked, and the user
- * never unlocked it here — the lock belongs to the server (auto-lock, or
- * another device), so forcing the delete through would defeat it.
+ * The server refused to trash or archive the note because it is locked, and
+ * the user never unlocked it here. Forcing either removal through would defeat
+ * the server's lock.
  *
  * Keep the note, mark it locked so the UI stops presenting it as freely
  * editable, and clear both removal intents so it leaves the dirty queue instead
@@ -218,7 +218,7 @@ async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncRe
  * through the normal phases, which already resolve a 423 by preserving the
  * local edit as a "[sync conflict]" note.
  */
-async function abandonLockedDelete(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
+async function abandonLockedRemoval(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
 	await upsertNote(db, {
 		...note,
 		locked: true,
@@ -245,6 +245,10 @@ async function syncArchivedNote(db: IDBDatabase, note: CachedNote, result: SyncR
 	try {
 		await api.notes.archive(current.id);
 	} catch (err) {
+		if (isLockedServerSide(err)) {
+			await abandonLockedRemoval(db, current, result);
+			return;
+		}
 		if (!isGoneServerSide(err)) throw err;
 	}
 	await deleteNote(db, current.id);
