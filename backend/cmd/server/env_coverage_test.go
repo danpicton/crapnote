@@ -82,17 +82,30 @@ func TestREADMEDocumentsEveryServerEnvVar(t *testing.T) {
 	}
 }
 
-// deliberateDefaultOverrides are vars whose manifest value intentionally
-// differs from the server's compiled-in default, with the reason. Everything
-// else must match the default documented in the README table.
-var deliberateDefaultOverrides = map[string]string{
-	"DATABASE_PATH":  "manifests put the SQLite file on the mounted volume at /data",
-	"METRICS_ADDR":   "metrics listen on a private port the manifests do not publish",
-	"TRUST_PROXY":    "k8s traffic arrives through an ingress, so X-Forwarded-For is authoritative",
-	"LOG_FORMAT":     "manifests ship JSON logs to Loki",
-	"ADMIN_USERNAME": "seeded credential, supplied by the operator",
-	"ADMIN_PASSWORD": "seeded credential, supplied by the operator",
+// manifestVar identifies one env var in one deploy manifest, so an exemption
+// granted where it is justified (TRUST_PROXY behind a k8s ingress) does not
+// silently exempt the same var where it is not (compose, where the app is
+// usually exposed directly and false is the security-relevant default).
+type manifestVar struct{ manifest, name string }
+
+// deliberateDefaultOverrides are the (manifest, var) pairs whose value
+// intentionally differs from the server's compiled-in default, with the
+// reason. Everything else must match serverEnvDefaults exactly.
+var deliberateDefaultOverrides = map[manifestVar]string{
+	{compose, "DATABASE_PATH"}:   "the SQLite file lives on the named volume at /data",
+	{k8sDeploy, "DATABASE_PATH"}: "the SQLite file lives on the mounted PVC at /data",
+	{compose, "METRICS_ADDR"}:    "metrics are served on a port reachable only inside the compose network",
+	{k8sDeploy, "METRICS_ADDR"}:  "metrics are served on a port deliberately absent from the Service",
+	{k8sDeploy, "TRUST_PROXY"}:   "cluster traffic arrives through the ingress, so X-Forwarded-For is authoritative",
+	{compose, "ADMIN_USERNAME"}:  "compose seeds a conventional admin username; the password has no default",
+	{compose, "LOG_FORMAT"}:      "JSON logs are what Alloy ships to Loki",
+	{k8sDeploy, "LOG_FORMAT"}:    "JSON logs are what cluster log collection ingests",
 }
+
+const (
+	compose   = "deploy/docker-compose.yml"
+	k8sDeploy = "deploy/k8s/deployment.yaml"
+)
 
 var readmeRowPattern = regexp.MustCompile("(?m)^\\| `([A-Z0-9_]+)` \\| (—|`[^`]*`) \\|")
 
@@ -107,34 +120,55 @@ func readmeDefaults(t *testing.T) map[string]string {
 	return out
 }
 
-func TestManifestDefaultsMatchServerDefaults(t *testing.T) {
-	docs := readmeDefaults(t)
-	compose := repoFile(t, "deploy/docker-compose.yml")
-	k8s := repoFile(t, "deploy/k8s/deployment.yaml")
+// serverEnvDefaults is the authoritative list of compiled-in defaults, derived
+// in main.go from the same constants the server actually applies. Every var
+// main.go reads must appear in it, so a new knob cannot skip these checks.
+func TestServerEnvDefaultsCoversEveryEnvVar(t *testing.T) {
+	for _, name := range serverEnvVars(t) {
+		if _, ok := serverEnvDefaults[name]; !ok {
+			t.Errorf("serverEnvDefaults in main.go has no entry for %s", name)
+		}
+	}
+}
 
+func TestREADMEDefaultsMatchCompiledDefaults(t *testing.T) {
+	docs := readmeDefaults(t)
+	for name, want := range serverEnvDefaults {
+		got, documented := docs[name]
+		if !documented {
+			continue // covered by TestREADMEDocumentsEveryServerEnvVar
+		}
+		if got != want {
+			t.Errorf("README documents %s default as %q but the server compiles in %q",
+				name, got, want)
+		}
+	}
+}
+
+func TestManifestDefaultsMatchCompiledDefaults(t *testing.T) {
 	composeDefault := regexp.MustCompile(`- ([A-Z0-9_]+)=\$\{[A-Z0-9_]+:?-([^}?]*)\}`)
 	k8sDefault := regexp.MustCompile(`- name: ([A-Z0-9_]+)\n\s+value: "([^"]*)"`)
 
-	for _, manifest := range []struct {
+	for _, m := range []struct {
 		name  string
 		pairs [][]string
 	}{
-		{"deploy/docker-compose.yml", composeDefault.FindAllStringSubmatch(compose, -1)},
-		{"deploy/k8s/deployment.yaml", k8sDefault.FindAllStringSubmatch(k8s, -1)},
+		{compose, composeDefault.FindAllStringSubmatch(repoFile(t, compose), -1)},
+		{k8sDeploy, k8sDefault.FindAllStringSubmatch(repoFile(t, k8sDeploy), -1)},
 	} {
-		for _, m := range manifest.pairs {
-			name, value := m[1], m[2]
-			if _, ok := deliberateDefaultOverrides[name]; ok {
+		for _, pair := range m.pairs {
+			name, value := pair[1], pair[2]
+			if _, ok := deliberateDefaultOverrides[manifestVar{m.name, name}]; ok {
 				continue
 			}
-			want, documented := docs[name]
-			if !documented {
-				continue // covered by TestREADMEDocumentsEveryServerEnvVar
+			want, known := serverEnvDefaults[name]
+			if !known {
+				continue // not a server var (or caught by the coverage test above)
 			}
 			if value != want {
-				t.Errorf("%s sets %s=%q but the server default is %q; "+
+				t.Errorf("%s sets %s=%q but the server compiles in %q; "+
 					"change it back or record the reason in deliberateDefaultOverrides",
-					manifest.name, name, value, want)
+					m.name, name, value, want)
 			}
 		}
 	}
