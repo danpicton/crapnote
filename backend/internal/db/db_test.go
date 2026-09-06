@@ -63,19 +63,13 @@ func TestMigration016_DropsFailedLoginAttempts(t *testing.T) {
 	}
 	defer database.Close()
 
-	if _, err := database.Exec(
-		`INSERT INTO users (username, password_hash, locked_at, locked_until)
-		 VALUES ('legacy', 'hash', CURRENT_TIMESTAMP, '2099-01-01 00:00:00')`,
-	); err != nil {
-		t.Fatalf("seed legacy user: %v", err)
-	}
-
 	// Open() has already applied the up migration, so the column is gone.
 	if columnExists(t, database, "failed_login_attempts") {
 		t.Fatal("failed_login_attempts still present after migrations")
 	}
 
-	// The down migration restores it without disturbing the live lock.
+	// Wind back to the pre-#109 schema so the up migration can be exercised
+	// against a row that actually carries the state this change retires.
 	down, err := os.ReadFile("migrations/000016_drop_failed_login_attempts.down.sql")
 	if err != nil {
 		t.Fatalf("read down migration: %v", err)
@@ -87,30 +81,47 @@ func TestMigration016_DropsFailedLoginAttempts(t *testing.T) {
 		t.Fatal("failed_login_attempts missing after down migration")
 	}
 
+	// A pre-#109 row: stale non-zero counter, live (not yet lapsed) lock.
+	if _, err := database.Exec(
+		`INSERT INTO users (username, password_hash, failed_login_attempts, locked_at, locked_until)
+		 VALUES ('legacy', 'hash', 7, CURRENT_TIMESTAMP, '2099-01-01 00:00:00')`,
+	); err != nil {
+		t.Fatalf("seed legacy user: %v", err)
+	}
 	var attempts int
-	var lockedUntil time.Time
 	if err := database.QueryRow(
-		`SELECT failed_login_attempts, locked_until FROM users WHERE username='legacy'`,
-	).Scan(&attempts, &lockedUntil); err != nil {
-		t.Fatalf("read legacy row: %v", err)
+		`SELECT failed_login_attempts FROM users WHERE username='legacy'`,
+	).Scan(&attempts); err != nil {
+		t.Fatalf("read seeded counter: %v", err)
 	}
-	if attempts != 0 {
-		t.Fatalf("expected restored column to default to 0, got %d", attempts)
-	}
-	if lockedUntil.Year() != 2099 {
-		t.Fatalf("lock state disturbed: %v", lockedUntil)
+	if attempts != 7 {
+		t.Fatalf("seed did not take: got %d", attempts)
 	}
 
-	// And the up migration drops it again.
+	// The up migration drops the counter and leaves the live lock — the only
+	// state that still decides anything — untouched.
 	up, err := os.ReadFile("migrations/000016_drop_failed_login_attempts.up.sql")
 	if err != nil {
 		t.Fatalf("read up migration: %v", err)
 	}
 	if _, err := database.Exec(string(up)); err != nil {
-		t.Fatalf("re-apply up migration: %v", err)
+		t.Fatalf("apply up migration to legacy row: %v", err)
 	}
 	if columnExists(t, database, "failed_login_attempts") {
 		t.Fatal("failed_login_attempts still present after re-applying up migration")
+	}
+
+	var lockedAt, lockedUntil time.Time
+	if err := database.QueryRow(
+		`SELECT locked_at, locked_until FROM users WHERE username='legacy'`,
+	).Scan(&lockedAt, &lockedUntil); err != nil {
+		t.Fatalf("legacy row did not survive the migration: %v", err)
+	}
+	if lockedAt.IsZero() {
+		t.Fatal("locked_at cleared by the migration")
+	}
+	if lockedUntil.Year() != 2099 {
+		t.Fatalf("lock state disturbed: %v", lockedUntil)
 	}
 }
 
