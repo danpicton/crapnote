@@ -106,13 +106,21 @@ export async function navigationCacheFirst(request: Request, cacheName: string):
 }
 
 export async function cacheFirst(request: Request, cacheName: string): Promise<Response> {
-	const cached = await caches.match(request);
-	if (cached) return cached;
+	try {
+		const cached = await caches.match(request);
+		if (cached) return cached;
+	} catch {
+		// Cache Storage unavailable — continue as a network-only request.
+	}
 	try {
 		const response = await fetch(request);
 		if (response.ok) {
-			const cache = await caches.open(cacheName);
-			cache.put(request, response.clone());
+			try {
+				const cache = await caches.open(cacheName);
+				await cache.put(request, response.clone());
+			} catch {
+				// Best-effort: the fetched response remains usable without persistence.
+			}
 		}
 		return response;
 	} catch {

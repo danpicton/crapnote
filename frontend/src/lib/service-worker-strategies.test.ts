@@ -305,6 +305,19 @@ describe('cacheFirst', () => {
 		expect(await res.text()).toBe('Offline');
 		expect(cachedKeys()).toEqual([]);
 	});
+
+	it('falls back to the network when Cache Storage is disabled', async () => {
+		vi.stubGlobal('caches', {
+			match: vi.fn().mockRejectedValue(new Error('SecurityError: storage disabled')),
+		});
+		mockFetch.mockResolvedValueOnce(new Response('fresh image', { status: 200 }));
+		const request = req('/api/images/7');
+
+		const res = await cacheFirst(request, CACHE_NAME);
+
+		expect(await res.text()).toBe('fresh image');
+		expect(mockFetch).toHaveBeenCalledWith(request);
+	});
 });
 
 // ─── Fetch routing ───────────────────────────────────────────────────────────
