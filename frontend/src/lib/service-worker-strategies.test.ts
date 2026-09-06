@@ -245,6 +245,19 @@ describe('navigationCacheFirst', () => {
 		// Navigations are not API calls, so no OfflineError marker here.
 		expect(res.headers.get(OFFLINE_HEADER)).toBeNull();
 	});
+
+	it('falls back to the network when Cache Storage is disabled', async () => {
+		vi.stubGlobal('caches', {
+			match: vi.fn().mockRejectedValue(new Error('SecurityError: storage disabled')),
+		});
+		mockFetch.mockResolvedValueOnce(new Response('<fresh-shell/>', { status: 200 }));
+		const request = req('/notes/42', { mode: 'navigate' });
+
+		const res = await navigationCacheFirst(request, CACHE_NAME);
+
+		expect(await res.text()).toBe('<fresh-shell/>');
+		expect(mockFetch).toHaveBeenCalledWith(request);
+	});
 });
 
 // ─── cacheFirst ──────────────────────────────────────────────────────────────

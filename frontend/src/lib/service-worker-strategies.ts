@@ -78,8 +78,13 @@ export function selectStrategy(request: Request, swOrigin: string): FetchStrateg
 export async function navigationCacheFirst(request: Request, cacheName: string): Promise<Response> {
 	// The shell is always keyed under '/' (adapter-static emits one fallback
 	// index.html that boots every route), so any navigation can use it.
-	const cached = (await caches.match(request)) ?? (await caches.match('/'));
-	if (cached) return cached;
+	try {
+		const cached = (await caches.match(request)) ?? (await caches.match('/'));
+		if (cached) return cached;
+	} catch {
+		// Cache Storage can be disabled by browser policy. Treat that exactly
+		// like a cache miss; the network still works without offline storage.
+	}
 
 	// No cached shell yet — the install-time prime raced this navigation or
 	// failed. Serve the network and remember the result so the next
@@ -87,8 +92,12 @@ export async function navigationCacheFirst(request: Request, cacheName: string):
 	try {
 		const response = await fetch(request);
 		if (response.ok) {
-			const cache = await caches.open(cacheName);
-			await cache.put('/', response.clone());
+			try {
+				const cache = await caches.open(cacheName);
+				await cache.put('/', response.clone());
+			} catch {
+				// Best-effort: never replace a valid network response with a cache error.
+			}
 		}
 		return response;
 	} catch {
