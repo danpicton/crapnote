@@ -4,7 +4,7 @@
 // keep type-checking; removing these two lines breaks `npm run check`.
 /// <reference lib="dom" />
 /// <reference lib="dom.iterable" />
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cacheFirst, navigationCacheFirst, networkOnly } from '$lib/service-worker-strategies';
 
 // The strategies themselves are covered in service-worker-strategies.test.ts.
@@ -67,6 +67,10 @@ beforeEach(() => {
 	vi.mocked(networkOnly).mockClear();
 });
 
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
+
 describe('service worker lifecycle', () => {
 	it('does not reject installation when Cache Storage is disabled', async () => {
 		vi.stubGlobal('caches', {
@@ -75,6 +79,17 @@ describe('service worker lifecycle', () => {
 		vi.stubGlobal('skipWaiting', vi.fn().mockResolvedValue(undefined));
 
 		await expect(dispatchExtendable('install')).resolves.toBeUndefined();
+	});
+
+	it('still claims clients when Cache Storage is disabled during activation', async () => {
+		vi.stubGlobal('caches', {
+			keys: vi.fn().mockRejectedValue(new Error('SecurityError: storage disabled')),
+		});
+		const claim = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal('clients', { claim });
+
+		await expect(dispatchExtendable('activate')).resolves.toBeUndefined();
+		expect(claim).toHaveBeenCalledOnce();
 	});
 });
 

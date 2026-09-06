@@ -75,8 +75,12 @@ sw.addEventListener('install', (event) => {
 sw.addEventListener('activate', (event) => {
 	event.waitUntil(
 		(async () => {
-			const keys = await caches.keys();
-			await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
+			try {
+				const keys = await caches.keys();
+				await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
+			} catch {
+				// Cache cleanup is best-effort when browser storage is unavailable.
+			}
 			await sw.clients.claim();
 		})(),
 	);
