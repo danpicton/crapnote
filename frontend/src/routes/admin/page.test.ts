@@ -114,9 +114,12 @@ describe('Admin page', () => {
 		await fireEvent.click(screen.getAllByRole('button', { name: /clear cool-down for alice/i })[0]);
 
 		await waitFor(() => {
-			const call = mockFetch.mock.calls.find((c) => typeof c[0] === 'string' && c[0].endsWith('/2/unlock'));
+			const call = mockFetch.mock.calls.find((c) => typeof c[0] === 'string' && c[0].endsWith('/2/clear-cooldowns'));
 			expect(call).toBeTruthy();
 		});
+		// Never unlocks either: on an admin-locked account that would silently
+		// lift the lock.
+		expect(mockFetch.mock.calls.some((c) => typeof c[0] === 'string' && c[0].endsWith('/unlock'))).toBe(false);
 		// Never locks on the way, which would revoke the user's sessions.
 		expect(mockFetch.mock.calls.some((c) => typeof c[0] === 'string' && c[0].endsWith('/lock'))).toBe(false);
 		await waitFor(() => expect(screen.queryByText(/cooling down/i)).not.toBeInTheDocument());
@@ -138,6 +141,26 @@ describe('Admin page', () => {
 			const call = mockFetch.mock.calls.find((c) => typeof c[0] === 'string' && c[0].endsWith('/2/lock'));
 			expect(call).toBeTruthy();
 		});
+	});
+
+	it('keeps clearing a cool-down separate from unlocking a locked account', async () => {
+		const locked = { id: 2, username: 'alice', is_admin: false, locked: true, active_cooldowns: 2, created_at: '' };
+		mockFetch
+			.mockResolvedValueOnce(ok([mockUsers[0], locked]))
+			.mockResolvedValueOnce(ok({ ...locked, active_cooldowns: 0 }));
+
+		render(AdminPage);
+		await waitFor(() => screen.getAllByText('alice'));
+		// Both actions are offered, and they are not the same request.
+		expect(screen.getAllByRole('button', { name: /unlock alice/i }).length).toBeGreaterThan(0);
+		await fireEvent.click(screen.getAllByRole('button', { name: /clear cool-down for alice/i })[0]);
+
+		await waitFor(() => {
+			expect(screen.queryByText(/cooling down/i)).not.toBeInTheDocument();
+		});
+		// The account stays locked; only the cool-downs went.
+		expect(screen.getAllByText('Locked').length).toBeGreaterThan(0);
+		expect(mockFetch.mock.calls.some((c) => typeof c[0] === 'string' && c[0].endsWith('/unlock'))).toBe(false);
 	});
 
 	it('lets an admin clear a cool-down on their own account', async () => {

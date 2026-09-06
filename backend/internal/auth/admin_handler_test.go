@@ -691,3 +691,68 @@ func TestAdminHandler_UnlockUser_ClearsCooldownCount(t *testing.T) {
 		t.Fatalf("expected unlock to clear the cool-down count, got %v", got)
 	}
 }
+
+// Clearing automatic cool-downs is not an unlock: an admin who locked an
+// account for containment must be able to relieve an innocent address behind
+// the same gateway without dropping that lock.
+func TestAdminHandler_ClearCooldowns_LeavesAdminLockIntact(t *testing.T) {
+	h, admin, svc := newAdminInviteFixture(t)
+	svc.SetLockoutPolicy(2, time.Minute)
+
+	body := `{"username":"ivan","password":"correct-horse-battery","is_admin":false}`
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.CreateUser(w, req)
+	var created map[string]any
+	json.NewDecoder(w.Body).Decode(&created) //nolint:errcheck
+	ivanID := int64(created["id"].(float64))
+
+	lockReq := httptest.NewRequest(http.MethodPost, "/api/admin/users/lock", nil)
+	lockReq.SetPathValue("id", fmt.Sprintf("%d", ivanID))
+	lockReq = adminRequest(lockReq, admin)
+	lockW := httptest.NewRecorder()
+	h.LockUser(lockW, lockReq)
+	if lockW.Code != http.StatusOK {
+		t.Fatalf("lock: %d %s", lockW.Code, lockW.Body.String())
+	}
+
+	for i := 0; i < 2; i++ {
+		svc.Login(t.Context(), "ivan", "wrong", "10.0.0.1") //nolint:errcheck
+	}
+
+	clearReq := httptest.NewRequest(http.MethodPost, "/api/admin/users/clear-cooldowns", nil)
+	clearReq.SetPathValue("id", fmt.Sprintf("%d", ivanID))
+	clearReq = adminRequest(clearReq, admin)
+	clearW := httptest.NewRecorder()
+	h.ClearCooldowns(clearW, clearReq)
+	if clearW.Code != http.StatusOK {
+		t.Fatalf("clear cool-downs: %d %s", clearW.Code, clearW.Body.String())
+	}
+	var resp map[string]any
+	json.NewDecoder(clearW.Body).Decode(&resp) //nolint:errcheck
+	if got := resp["active_cooldowns"]; got != float64(0) {
+		t.Fatalf("expected the cool-downs to be cleared, got %v", got)
+	}
+	if resp["locked"] != true {
+		t.Fatalf("clearing cool-downs must not lift the admin lock, got locked=%v", resp["locked"])
+	}
+
+	// And the row really is still locked, not just reported as such.
+	if got := listUsers(t, h, admin)["ivan"]["locked"]; got != true {
+		t.Fatalf("expected ivan to still be locked, got %v", got)
+	}
+}
+
+func TestAdminHandler_ClearCooldowns_UnknownUser_404(t *testing.T) {
+	h, admin, _ := newAdminInviteFixture(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/admin/users/clear-cooldowns", nil)
+	req.SetPathValue("id", "99999")
+	req = adminRequest(req, admin)
+	w := httptest.NewRecorder()
+	h.ClearCooldowns(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}

@@ -488,6 +488,48 @@ func (h *AdminHandler) UnlockUser(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(h.toUserResponse(u))
 }
 
+// ClearCooldowns handles POST /api/admin/users/{id}/clear-cooldowns
+//
+// Releases every automatic (client IP, username) cool-down held against the
+// user and nothing else. It is deliberately not the unlock endpoint: an admin
+// who locked an account as containment during a brute force still needs a way
+// to relieve an innocent address behind the same NAT gateway, and routing
+// that through unlock would silently drop the account lock as well (issue
+// #110). The account row is untouched here.
+func (h *AdminHandler) ClearCooldowns(w http.ResponseWriter, r *http.Request) {
+	caller := UserFromContext(r.Context())
+	if caller == nil {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
+		return
+	}
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	u, err := h.users.FindByID(r.Context(), id)
+	if errors.Is(err, ErrNotFound) {
+		writeError(w, http.StatusNotFound, "user not found")
+		return
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	h.svc.ClearAutomaticLockouts(u.Username)
+
+	slog.Info("audit: automatic cool-downs cleared",
+		"event", "admin_clear_cooldowns",
+		"admin_id", caller.ID,
+		"target_user_id", id,
+		"ip", httpx.ClientIP(r),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(h.toUserResponse(u))
+}
+
 // DeleteUser handles DELETE /api/admin/users/{id}
 // An admin cannot delete themselves.
 func (h *AdminHandler) DeleteUser(w http.ResponseWriter, r *http.Request) {

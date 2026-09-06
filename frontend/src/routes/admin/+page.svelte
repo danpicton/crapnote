@@ -199,23 +199,22 @@
 	// Wording for the cool-down pill's tooltip. The addresses themselves are
 	// deliberately not exposed by the API — only how many are cooling down.
 	function cooldownTitle(n: number) {
-		return `${n} address${n === 1 ? '' : 'es'} currently serving an automatic failed-login cool-down. Clearing it releases all of them; locking the account bars every address instead.`;
+		return `${n} address${n === 1 ? '' : 'es'} currently serving an automatic failed-login cool-down. Clearing releases all of them and leaves any account lock in place; locking the account bars every address instead.`;
 	}
 
 	function lockLabel(user: AdminUser) {
 		return user.locked ? `Unlock ${user.username}` : `Lock ${user.username}`;
 	}
 
-	// Clearing cool-downs is its own action rather than a mode of the lock
-	// button: the two point in opposite directions. Releasing a cool-down
-	// helps whoever tripped it, and locking is the containment move an admin
-	// reaches for on seeing a brute force, so neither may hide the other.
-	// The endpoint is the same one (unlock clears both), but this never locks
-	// on the way — locking to clear a cool-down would revoke the sessions of
-	// someone who may have done nothing wrong, since the cool-down is per
-	// address and addresses are shared behind NAT.
+	// Clearing cool-downs is its own action, on its own endpoint: the two
+	// controls point in opposite directions. Releasing a cool-down helps
+	// whoever tripped it, and locking is the containment move an admin reaches
+	// for on seeing a brute force, so neither may hide or imply the other.
+	// /clear-cooldowns leaves the account row alone, where /unlock would drop
+	// an admin lock as well — an admin relieving an innocent address behind a
+	// shared NAT gateway must not silently release the account too.
 	async function clearCooldowns(user: AdminUser) {
-		const res = await fetch(`/api/admin/users/${user.id}/unlock`, {
+		const res = await fetch(`/api/admin/users/${user.id}/clear-cooldowns`, {
 			method: 'POST',
 			credentials: 'include',
 		});
