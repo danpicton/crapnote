@@ -417,7 +417,10 @@ func (r *Repo) SoftDelete(ctx context.Context, id, userID int64) error {
 	if err != nil {
 		return fmt.Errorf("soft delete: %w", err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("soft delete rows affected: %w", err)
+	}
 	if rows == 0 {
 		// IsLocked reports ErrNotFound for a missing or another user's note.
 		locked, err := r.IsLocked(ctx, id, userID)
