@@ -1,0 +1,14 @@
+-- NOTE: nothing runs this file. runMigrations (internal/db/db.go) only applies
+-- *.up.sql; down migrations here are documentation of the reverse operation,
+-- not an executable rollback path. To undo 000016 by hand — needed only if you
+-- roll back to a binary older than #111, whose user queries still select this
+-- column — run against the SQLite file with the app stopped:
+--
+--   ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0;
+--   DELETE FROM schema_migrations WHERE version = '000016_drop_failed_login_attempts';
+--
+-- The second statement matters: without it the newer binary would consider the
+-- migration already applied and never re-drop the column on a roll-forward.
+-- The restored counter is zeroed for every row, which is correct — nothing has
+-- incremented it since #109, and only locked_at/locked_until decide lock state.
+ALTER TABLE users ADD COLUMN failed_login_attempts INTEGER NOT NULL DEFAULT 0;

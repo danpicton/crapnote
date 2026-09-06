@@ -222,7 +222,7 @@ func (s *Service) Login(ctx context.Context, username, password, clientIP string
 	}
 
 	// A lock whose cool-down has already lapsed is stale state, not a
-	// decision: clear it (which also resets the failed-attempt counter) so
+	// decision: clear it so
 	// this attempt is judged on its own merits. Doing it before the password
 	// check discloses nothing — the response is identical either way — and
 	// keeps the failure path below from counting a fresh miss on top of the
@@ -232,7 +232,6 @@ func (s *Service) Login(ctx context.Context, username, password, clientIP string
 			return nil, fmt.Errorf("login: clear lapsed lock: %w", err)
 		}
 		u.LockedAt, u.LockedUntil = nil, nil
-		u.FailedLoginAttempts = 0
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(password)); err != nil {
@@ -274,10 +273,8 @@ func (s *Service) Login(ctx context.Context, username, password, clientIP string
 		}
 		return nil, ErrAccountLocked
 	}
-	// Successful login — clear this address's counter, and zero the row's
-	// legacy counter so pre-#62 state heals on first use.
+	// Successful login — clear this address's counter.
 	s.attempts.clear(attemptKey)
-	s.users.ResetFailedAttempts(ctx, u.ID) //nolint:errcheck
 
 	exp := time.Now().Add(s.ttl).UTC()
 	sess, err := s.sessions.Create(ctx, u.ID, exp)

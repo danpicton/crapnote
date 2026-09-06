@@ -89,7 +89,7 @@ func TestUserRepo_Count(t *testing.T) {
 
 // ── Lockout ──────────────────────────────────────────────────────────────────
 
-func TestUserRepo_NewUser_HasZeroFailedAttemptsAndNoLock(t *testing.T) {
+func TestUserRepo_NewUser_HasNoLock(t *testing.T) {
 	repo := auth.NewUserRepo(openTestDB(t))
 	ctx := context.Background()
 
@@ -97,54 +97,8 @@ func TestUserRepo_NewUser_HasZeroFailedAttemptsAndNoLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if u.FailedLoginAttempts != 0 {
-		t.Fatalf("expected 0 failed attempts, got %d", u.FailedLoginAttempts)
-	}
 	if u.LockedAt != nil {
 		t.Fatalf("expected no lock, got %v", u.LockedAt)
-	}
-}
-
-func TestUserRepo_IncrementFailedAttempts(t *testing.T) {
-	repo := auth.NewUserRepo(openTestDB(t))
-	ctx := context.Background()
-
-	u, _ := repo.Create(ctx, "alice", "hash", false)
-
-	n, err := repo.IncrementFailedAttempts(ctx, u.ID)
-	if err != nil {
-		t.Fatalf("IncrementFailedAttempts: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("expected 1 after first increment, got %d", n)
-	}
-
-	n, _ = repo.IncrementFailedAttempts(ctx, u.ID)
-	if n != 2 {
-		t.Fatalf("expected 2, got %d", n)
-	}
-
-	got, _ := repo.FindByID(ctx, u.ID)
-	if got.FailedLoginAttempts != 2 {
-		t.Fatalf("persisted count mismatch: %d", got.FailedLoginAttempts)
-	}
-}
-
-func TestUserRepo_ResetFailedAttempts(t *testing.T) {
-	repo := auth.NewUserRepo(openTestDB(t))
-	ctx := context.Background()
-
-	u, _ := repo.Create(ctx, "alice", "hash", false)
-	repo.IncrementFailedAttempts(ctx, u.ID) //nolint:errcheck
-	repo.IncrementFailedAttempts(ctx, u.ID) //nolint:errcheck
-
-	if err := repo.ResetFailedAttempts(ctx, u.ID); err != nil {
-		t.Fatalf("ResetFailedAttempts: %v", err)
-	}
-
-	got, _ := repo.FindByID(ctx, u.ID)
-	if got.FailedLoginAttempts != 0 {
-		t.Fatalf("expected 0, got %d", got.FailedLoginAttempts)
 	}
 }
 
@@ -166,13 +120,12 @@ func TestUserRepo_Lock_SetsLockedAt(t *testing.T) {
 	}
 }
 
-func TestUserRepo_Unlock_ClearsLockAndAttempts(t *testing.T) {
+func TestUserRepo_Unlock_ClearsLock(t *testing.T) {
 	repo := auth.NewUserRepo(openTestDB(t))
 	ctx := context.Background()
 
 	u, _ := repo.Create(ctx, "alice", "hash", false)
-	repo.IncrementFailedAttempts(ctx, u.ID) //nolint:errcheck
-	repo.Lock(ctx, u.ID)                    //nolint:errcheck
+	repo.Lock(ctx, u.ID) //nolint:errcheck
 
 	if err := repo.Unlock(ctx, u.ID); err != nil {
 		t.Fatalf("Unlock: %v", err)
@@ -181,9 +134,6 @@ func TestUserRepo_Unlock_ClearsLockAndAttempts(t *testing.T) {
 	got, _ := repo.FindByID(ctx, u.ID)
 	if got.LockedAt != nil {
 		t.Fatalf("expected LockedAt cleared, got %v", got.LockedAt)
-	}
-	if got.FailedLoginAttempts != 0 {
-		t.Fatalf("expected 0 attempts after unlock, got %d", got.FailedLoginAttempts)
 	}
 }
 

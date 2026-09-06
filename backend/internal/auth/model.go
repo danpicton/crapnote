@@ -4,15 +4,14 @@ import "time"
 
 // User represents an application user.
 type User struct {
-	ID                  int64
-	Username            string
-	PasswordHash        string
-	IsAdmin             bool
-	APITokensEnabled    bool
-	FailedLoginAttempts int
-	LockedAt            *time.Time
-	LockedUntil         *time.Time
-	CreatedAt           time.Time
+	ID               int64
+	Username         string
+	PasswordHash     string
+	IsAdmin          bool
+	APITokensEnabled bool
+	LockedAt         *time.Time
+	LockedUntil      *time.Time
+	CreatedAt        time.Time
 }
 
 // Locked reports whether the account's lock is active at the given time.
@@ -24,8 +23,7 @@ type User struct {
 // Automatic failed-login lockout no longer writes here — it is scoped to a
 // (client IP, username) pair in memory, see lockout.go — so a LockedUntil on
 // the row is either an operator's doing or a leftover from the account-scoped
-// scheme that shipped in #60. FailedLoginAttempts is likewise legacy: nothing
-// increments it any more, and a successful login zeroes it.
+// scheme that shipped in #60.
 func (u *User) Locked(now time.Time) bool {
 	if u.LockedAt == nil {
 		return false

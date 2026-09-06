@@ -7,6 +7,17 @@ metadata:
     app: crapnote
 spec:
   replicas: 1  # SQLite requires single writer
+  # Recreate, not the default RollingUpdate. Two reasons, both hard:
+  # the PVC is ReadWriteOnce, so a surging pod cannot mount /data anywhere
+  # but the old pod's node; and migrations run at startup, where they are no
+  # longer purely additive (000016 drops a column). Under RollingUpdate the
+  # new pod would apply that drop while the old pod still served traffic on
+  # the same file, and the old binary's user queries would start failing with
+  # "no such column" — an auth outage for the length of the rollout. Recreate
+  # takes the old pod down first: brief downtime instead, which is the right
+  # trade for a single-writer database.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: crapnote
