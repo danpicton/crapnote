@@ -23,6 +23,7 @@ beforeEach(() => {
 	vi.unstubAllGlobals();
 	localStorage.clear();
 	sessionStorage.clear();
+	resetUnlockAttempts();
 });
 
 describe('offline unlock passcode', () => {
@@ -151,6 +152,21 @@ describe('offline unlock throttle', () => {
 		recordFailedUnlock(1_000 + first);
 		const second = unlockLockoutRemainingMs(1_000 + first);
 		expect(second).toBeGreaterThan(first);
+	});
+
+	it('locks out in memory when attempt-counter writes are denied', () => {
+		const readableStorage = localStorage;
+		vi.stubGlobal('localStorage', {
+			getItem: readableStorage.getItem.bind(readableStorage),
+			setItem: () => {
+				throw new Error('SecurityError: storage write denied');
+			},
+			removeItem: readableStorage.removeItem.bind(readableStorage),
+		});
+
+		for (let i = 0; i < UNLOCK_FREE_ATTEMPTS + 1; i++) recordFailedUnlock(1_000);
+
+		expect(unlockLockoutRemainingMs(1_000)).toBeGreaterThan(0);
 	});
 
 	it('caps the backoff so the owner is never locked out for ever', () => {

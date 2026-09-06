@@ -207,24 +207,35 @@ export function clearUnlockPasscode(): void {
 	clearIdentityProof();
 	try {
 		localStorage.removeItem(RECORD_KEY);
-		localStorage.removeItem(ATTEMPTS_KEY);
 	} catch {
 		// Nothing to clear if storage is unavailable.
 	}
+	resetUnlockAttempts();
 }
 
+// Persistence can fail independently of reads (for example, quota or browser
+// policy changes). Keep the strongest counter seen in this page alive so a
+// denied write cannot turn repeated guesses into unlimited free attempts.
+let volatileAttempts: AttemptRecord = { failures: 0, lockedUntil: 0 };
+
 function readAttempts(): AttemptRecord {
+	let stored: AttemptRecord = { failures: 0, lockedUntil: 0 };
 	try {
 		const raw = localStorage.getItem(ATTEMPTS_KEY);
-		if (!raw) return { failures: 0, lockedUntil: 0 };
-		const rec = JSON.parse(raw) as AttemptRecord;
-		return {
-			failures: typeof rec?.failures === 'number' ? rec.failures : 0,
-			lockedUntil: typeof rec?.lockedUntil === 'number' ? rec.lockedUntil : 0,
-		};
+		if (raw) {
+			const rec = JSON.parse(raw) as AttemptRecord;
+			stored = {
+				failures: typeof rec?.failures === 'number' ? rec.failures : 0,
+				lockedUntil: typeof rec?.lockedUntil === 'number' ? rec.lockedUntil : 0,
+			};
+		}
 	} catch {
-		return { failures: 0, lockedUntil: 0 };
+		// Fall through to the in-memory counter.
 	}
+	return {
+		failures: Math.max(stored.failures, volatileAttempts.failures),
+		lockedUntil: Math.max(stored.lockedUntil, volatileAttempts.lockedUntil),
+	};
 }
 
 /**
@@ -245,6 +256,7 @@ export function recordFailedUnlock(now: number = Date.now()): void {
 		over > 0
 			? now + Math.min(UNLOCK_BACKOFF_BASE_MS * 2 ** (over - 1), UNLOCK_BACKOFF_MAX_MS)
 			: 0;
+	volatileAttempts = { failures, lockedUntil };
 	try {
 		localStorage.setItem(ATTEMPTS_KEY, JSON.stringify({ failures, lockedUntil }));
 	} catch {
@@ -259,6 +271,7 @@ export function unlockLockoutRemainingMs(now: number = Date.now()): number {
 
 /** Clears the failure count after a successful unlock. */
 export function resetUnlockAttempts(): void {
+	volatileAttempts = { failures: 0, lockedUntil: 0 };
 	try {
 		localStorage.removeItem(ATTEMPTS_KEY);
 	} catch {
