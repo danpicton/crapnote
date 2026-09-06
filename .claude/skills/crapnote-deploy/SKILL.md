@@ -43,6 +43,16 @@ with `git ls-remote --tags origin`. The CLI's `version` command reads the module
 prefixed tag, so a root tag whose mirror failed leaves `go install @latest` on the previous version
 — push `cli/vX.Y.Z` by hand if so.
 
+## Environment variables
+
+The server's env vars are listed in the README table, and every one of them is
+passed through by `deploy/docker-compose.yml` and `deploy/k8s/deployment.yaml`.
+When adding a new `os.Getenv` call to `backend/cmd/server/main.go`, add it to
+both manifests and the README table — `backend/cmd/server/env_coverage_test.go`
+enumerates the vars from the source and fails otherwise, and also checks that
+manifest defaults match the server's own (record any deliberate difference in
+`deliberateDefaultOverrides`).
+
 ## Key Constraints
 
 - SQLite means single-writer — do not scale replicas beyond 1 unless migrating to PostgreSQL.
