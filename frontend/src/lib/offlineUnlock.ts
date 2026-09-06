@@ -217,6 +217,7 @@ export function clearUnlockPasscode(): void {
 // policy changes). Keep the strongest counter seen in this page alive so a
 // denied write cannot turn repeated guesses into unlimited free attempts.
 let volatileAttempts: AttemptRecord = { failures: 0, lockedUntil: 0 };
+let attemptStorageReadable = true;
 
 function readAttempts(): AttemptRecord {
 	let stored: AttemptRecord = { failures: 0, lockedUntil: 0 };
@@ -229,8 +230,11 @@ function readAttempts(): AttemptRecord {
 				lockedUntil: typeof rec?.lockedUntil === 'number' ? rec.lockedUntil : 0,
 			};
 		}
+		attemptStorageReadable = true;
 	} catch {
-		// Fall through to the in-memory counter.
+		// An unknown persisted lockout may be active. Callers fail closed rather
+		// than treating an unreadable counter as a fresh set of attempts.
+		attemptStorageReadable = false;
 	}
 	return {
 		failures: Math.max(stored.failures, volatileAttempts.failures),
@@ -266,7 +270,9 @@ export function recordFailedUnlock(now: number = Date.now()): void {
 
 /** Milliseconds left before another attempt is accepted (0 when allowed). */
 export function unlockLockoutRemainingMs(now: number = Date.now()): number {
-	return Math.max(0, readAttempts().lockedUntil - now);
+	const attempts = readAttempts();
+	if (!attemptStorageReadable) return UNLOCK_BACKOFF_MAX_MS;
+	return Math.max(0, attempts.lockedUntil - now);
 }
 
 /** Clears the failure count after a successful unlock. */

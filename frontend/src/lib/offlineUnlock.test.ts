@@ -170,6 +170,18 @@ describe('offline unlock throttle', () => {
 		expect(second).toBeGreaterThan(first);
 	});
 
+	it('grants no attempts when the persisted counter cannot be read', () => {
+		vi.stubGlobal('localStorage', {
+			getItem: () => {
+				throw new Error('SecurityError: storage read denied');
+			},
+			setItem: vi.fn(),
+			removeItem: vi.fn(),
+		});
+
+		expect(unlockLockoutRemainingMs(1_000)).toBeGreaterThan(0);
+	});
+
 	it('locks out in memory when attempt-counter writes are denied', () => {
 		const readableStorage = localStorage;
 		vi.stubGlobal('localStorage', {
