@@ -59,6 +59,51 @@ spec:
               value: /data/notes.db
             - name: SESSION_TTL_DAYS
               value: "7"
+            # Client-IP resolution. Behind an ingress controller the real
+            # client address arrives in X-Forwarded-For; with TRUST_PROXY
+            # off, the per-IP login rate limiter, the per-(IP, username)
+            # lockout and the audit log all key on the ingress pod's address
+            # instead, so one noisy client can lock out everyone and audit
+            # entries name the proxy. Leave it "true" only while the app is
+            # reachable solely through the ingress — a pod reachable directly
+            # (port-forward, in-cluster client, NodePort) can spoof the header.
+            - name: TRUST_PROXY
+              value: "true"
+            # Structured logs for cluster log collection; set "text" for
+            # human-readable output. LOG_LEVEL: debug|info|warn|error.
+            - name: LOG_FORMAT
+              value: "json"
+            - name: LOG_LEVEL
+              value: "info"
+            # Global theme seeded on first run only; a theme later chosen in
+            # the UI wins. Lowercase theme id, e.g. "console-2001". Empty
+            # means the client's own default is used.
+            - name: DEFAULT_THEME
+              value: ""
+            # Auto-lock notes untouched for this many days; "0" disables it.
+            - name: AUTO_LOCK_DAYS
+              value: "7"
+            # Image uploads: per-user quota (MB) and per-user upload rate.
+            - name: IMAGE_QUOTA_MB
+              value: "100"
+            - name: IMAGE_UPLOADS_PER_MINUTE
+              value: "10"
+            # Automatic lockout after repeated failed logins from one
+            # (client IP, submitted username) pair.
+            - name: MAX_FAILED_LOGIN_ATTEMPTS
+              value: "5"
+            - name: LOCKOUT_COOLDOWN_MINUTES
+              value: "15"
+            # Per-IP login rate limiter.
+            - name: LOGIN_RATE_PER_MINUTE
+              value: "5"
+            - name: LOGIN_RATE_BURST
+              value: "5"
+            # Per-IP rate limiter for requests with an Authorization header.
+            - name: BEARER_RATE_PER_MINUTE
+              value: "600"
+            - name: BEARER_RATE_BURST
+              value: "300"
             - name: ADMIN_USERNAME
               valueFrom:
                 secretKeyRef:

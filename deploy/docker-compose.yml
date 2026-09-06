@@ -34,6 +34,23 @@ services:
       # (X-Forwarded-For/-Proto) are ignored otherwise because clients can
       # spoof them to bypass per-IP rate limits and forge audit-log IPs.
       - TRUST_PROXY=${TRUST_PROXY:-false}
+      # Global theme seeded on first run only; a theme picked later in the UI
+      # wins. Takes the lowercase theme id, e.g. console-2001. Unset by default.
+      - DEFAULT_THEME=${DEFAULT_THEME:-}
+      # Auto-lock notes untouched for this many days; 0 disables the job.
+      - AUTO_LOCK_DAYS=${AUTO_LOCK_DAYS:-7}
+      # Image uploads: per-user storage quota (MB) and per-user upload rate.
+      - IMAGE_QUOTA_MB=${IMAGE_QUOTA_MB:-100}
+      - IMAGE_UPLOADS_PER_MINUTE=${IMAGE_UPLOADS_PER_MINUTE:-10}
+      # Automatic lockout after repeated failed logins from one (IP, username).
+      - MAX_FAILED_LOGIN_ATTEMPTS=${MAX_FAILED_LOGIN_ATTEMPTS:-5}
+      - LOCKOUT_COOLDOWN_MINUTES=${LOCKOUT_COOLDOWN_MINUTES:-15}
+      # Per-IP login rate limiter.
+      - LOGIN_RATE_PER_MINUTE=${LOGIN_RATE_PER_MINUTE:-5}
+      - LOGIN_RATE_BURST=${LOGIN_RATE_BURST:-5}
+      # Per-IP rate limiter for requests carrying an Authorization header.
+      - BEARER_RATE_PER_MINUTE=${BEARER_RATE_PER_MINUTE:-600}
+      - BEARER_RATE_BURST=${BEARER_RATE_BURST:-300}
       # Set LOG_FORMAT=json for structured JSON logs (ingested by Loki via Alloy).
       - LOG_FORMAT=${LOG_FORMAT:-json}
       # Set LOG_LEVEL=debug|info|warn|error (default: info).

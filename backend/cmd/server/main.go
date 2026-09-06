@@ -25,12 +25,56 @@ import (
 	"github.com/danpicton/crapnote/internal/trash"
 )
 
+// Compiled-in defaults for the env vars the server reads. They are named
+// rather than inlined so the deploy manifests and the README can be checked
+// against them (issue #114) instead of against a hand-transcribed list.
+const (
+	defaultPort               = "8080"
+	defaultDatabasePath       = "notes.db"
+	defaultSessionTTLDays     = 7
+	defaultAutoLockDays       = 7
+	defaultLoginRatePerMinute = 5
+	defaultLoginRateBurst     = 5
+	defaultBearerRatePerMin   = 600
+	defaultBearerRateBurst    = 300
+	defaultTrustProxy         = "false"
+	defaultLogFormat          = "text"
+	defaultLogLevel           = "info"
+)
+
+// serverEnvDefaults maps every env var main.go reads to the default it falls
+// back to, as a string, with "" meaning "no default — the feature is off or
+// the operator must supply a value". Every entry is derived from the constant
+// the server actually applies, so this map cannot drift from the behaviour;
+// env_coverage_test.go checks the manifests and the README against it.
+var serverEnvDefaults = map[string]string{
+	"PORT":                      defaultPort,
+	"DATABASE_PATH":             defaultDatabasePath,
+	"ADMIN_USERNAME":            "",
+	"ADMIN_PASSWORD":            "",
+	"SESSION_TTL_DAYS":          strconv.Itoa(defaultSessionTTLDays),
+	"DEFAULT_THEME":             "",
+	"METRICS_ADDR":              "",
+	"AUTO_LOCK_DAYS":            strconv.Itoa(defaultAutoLockDays),
+	"IMAGE_QUOTA_MB":            strconv.FormatInt(images.DefaultConfig().QuotaBytes>>20, 10),
+	"IMAGE_UPLOADS_PER_MINUTE":  strconv.Itoa(images.DefaultConfig().UploadsPerMinute),
+	"MAX_FAILED_LOGIN_ATTEMPTS": strconv.Itoa(auth.DefaultMaxFailedLoginAttempts),
+	"LOCKOUT_COOLDOWN_MINUTES":  strconv.Itoa(int(auth.DefaultLockoutCooldown / time.Minute)),
+	"LOGIN_RATE_PER_MINUTE":     strconv.Itoa(defaultLoginRatePerMinute),
+	"LOGIN_RATE_BURST":          strconv.Itoa(defaultLoginRateBurst),
+	"BEARER_RATE_PER_MINUTE":    strconv.Itoa(defaultBearerRatePerMin),
+	"BEARER_RATE_BURST":         strconv.Itoa(defaultBearerRateBurst),
+	"TRUST_PROXY":               defaultTrustProxy,
+	"LOG_FORMAT":                defaultLogFormat,
+	"LOG_LEVEL":                 defaultLogLevel,
+}
+
 func main() {
 	logger := newLogger()
 	slog.SetDefault(logger)
 
 	cfg := db.Config{
-		SQLitePath: envOrDefault("DATABASE_PATH", "notes.db"),
+		SQLitePath: envOrDefault("DATABASE_PATH", defaultDatabasePath),
 	}
 
 	database, err := db.Open(cfg)
@@ -40,9 +84,9 @@ func main() {
 	}
 	defer database.Close()
 
-	ttlDays, _ := strconv.Atoi(envOrDefault("SESSION_TTL_DAYS", "7"))
+	ttlDays, _ := strconv.Atoi(envOrDefault("SESSION_TTL_DAYS", strconv.Itoa(defaultSessionTTLDays)))
 	if ttlDays <= 0 {
-		ttlDays = 7
+		ttlDays = defaultSessionTTLDays
 	}
 
 	userRepo := auth.NewUserRepo(database)
@@ -135,9 +179,9 @@ func main() {
 
 	// Background job: lock notes whose content has gone untouched, runs once at
 	// startup and then daily. AUTO_LOCK_DAYS=0 disables it.
-	autoLockDays, err := strconv.Atoi(envOrDefault("AUTO_LOCK_DAYS", "7"))
+	autoLockDays, err := strconv.Atoi(envOrDefault("AUTO_LOCK_DAYS", strconv.Itoa(defaultAutoLockDays)))
 	if err != nil || autoLockDays < 0 {
-		autoLockDays = 7
+		autoLockDays = defaultAutoLockDays
 	}
 	if autoLockDays > 0 {
 		window := time.Duration(autoLockDays) * 24 * time.Hour
@@ -195,8 +239,8 @@ func main() {
 	// tunable via env vars so that E2E suites — which legitimately submit
 	// dozens of logins from a single IP within seconds — can loosen the cap
 	// without disabling protection in production.
-	loginRate := 5.0 / 60.0
-	loginBurst := 5
+	loginRate := float64(defaultLoginRatePerMinute) / 60.0
+	loginBurst := defaultLoginRateBurst
 	if v, err := strconv.Atoi(os.Getenv("LOGIN_RATE_PER_MINUTE")); err == nil && v > 0 {
 		loginRate = float64(v) / 60.0
 	}
@@ -209,8 +253,8 @@ func main() {
 	// present an Authorization header. Defaults to 600 req/min with burst
 	// 300 — generous enough for CLI bursts while blunting credential-
 	// stuffing attempts and DoS against the verification path.
-	bearerRate := 10.0
-	bearerBurst := 300
+	bearerRate := float64(defaultBearerRatePerMin) / 60.0
+	bearerBurst := defaultBearerRateBurst
 	if v, err := strconv.Atoi(os.Getenv("BEARER_RATE_PER_MINUTE")); err == nil && v > 0 {
 		bearerRate = float64(v) / 60.0
 	}
@@ -239,7 +283,7 @@ func main() {
 		logger.Info("metrics listener started", "addr", metricsSrv.Addr)
 	}
 
-	port := envOrDefault("PORT", "8080")
+	port := envOrDefault("PORT", defaultPort)
 	// Observability middleware (metrics outermost, then logging, then security
 	// headers). newMux applies the same chain to MCP-dispatched tool calls, so
 	// they are recorded under the API route they actually exercise.
@@ -258,7 +302,7 @@ func main() {
 	// audit-log IPs. Set TRUST_PROXY=1 only when exactly one trusted reverse
 	// proxy sits in front of the app; the rightmost X-Forwarded-For entry
 	// (appended by that proxy) is then used. See httpx.TrustProxy.
-	if v, err := strconv.ParseBool(envOrDefault("TRUST_PROXY", "false")); err == nil && v {
+	if v, err := strconv.ParseBool(envOrDefault("TRUST_PROXY", defaultTrustProxy)); err == nil && v {
 		handler = httpx.TrustProxy()(handler)
 		logger.Info("trusting reverse-proxy forwarded headers (TRUST_PROXY)")
 	}
@@ -363,7 +407,7 @@ func serveMetrics(addr string, logger *slog.Logger) (*http.Server, error) {
 // control verbosity (default: info).
 func newLogger() *slog.Logger {
 	level := slog.LevelInfo
-	switch os.Getenv("LOG_LEVEL") {
+	switch envOrDefault("LOG_LEVEL", defaultLogLevel) {
 	case "debug":
 		level = slog.LevelDebug
 	case "warn":
@@ -373,7 +417,7 @@ func newLogger() *slog.Logger {
 	}
 
 	opts := &slog.HandlerOptions{Level: level}
-	if os.Getenv("LOG_FORMAT") == "json" {
+	if envOrDefault("LOG_FORMAT", defaultLogFormat) == "json" {
 		return slog.New(slog.NewJSONHandler(os.Stdout, opts))
 	}
 	return slog.New(slog.NewTextHandler(os.Stdout, opts))

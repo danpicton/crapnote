@@ -102,6 +102,9 @@ npm run lint      # eslint
 | `SESSION_TTL_DAYS` | `7` | Session lifetime in days; refreshed on activity |
 | `DEFAULT_THEME` | — | Global theme seeded on first run only; once an admin picks a theme in the UI, that stored choice wins on every later restart. Takes the lowercase theme **id** (e.g. `console-2001`), not the display label shown in the settings UI. A malformed value is always logged as a warning and ignored, whether or not a theme is already stored, and the server starts rather than failing |
 | `METRICS_ADDR` | — | Address for the Prometheus `/metrics` listener, e.g. `:9090` or `127.0.0.1:9090`. Unset (the default) means metrics are not exposed at all; `/metrics` on the main port always returns 404. Bind it to a private interface — the exposition enumerates exercised routes, traffic and error rates, and Go runtime details. A value that cannot be bound aborts startup |
+| `AUTO_LOCK_DAYS` | `7` | Age in days after which an untouched note is auto-locked by the daily background job; `0` disables auto-locking |
+| `IMAGE_QUOTA_MB` | `100` | Per-user storage quota for uploaded images, in MB |
+| `IMAGE_UPLOADS_PER_MINUTE` | `10` | Per-user rate limit on image uploads |
 | `MAX_FAILED_LOGIN_ATTEMPTS` | `5` | Consecutive failed passwords, from one client IP against one username, before that pair is locked out |
 | `LOCKOUT_COOLDOWN_MINUTES` | `15` | How long an automatic lockout lasts before clearing itself; manual admin locks never expire |
 | `LOGIN_RATE_PER_MINUTE` | `5` | Per-IP rate limit on `POST /api/auth/login` |
@@ -109,6 +112,8 @@ npm run lint      # eslint
 | `BEARER_RATE_PER_MINUTE` | `600` | Per-IP rate limit applied only to requests carrying an `Authorization` header |
 | `BEARER_RATE_BURST` | `300` | Burst allowance for the bearer-auth limiter |
 | `TRUST_PROXY` | `false` | Set to `1` only when the app sits behind exactly one trusted reverse proxy. When on, the client IP for rate limiting and audit logs is taken from the rightmost `X-Forwarded-For` entry (appended by the proxy; `X-Real-IP` as fallback) and `X-Forwarded-Proto: https` marks session cookies `Secure`. When off (the default), these headers are ignored — they are client-controlled — and the TCP peer address is used. |
+| `LOG_FORMAT` | `text` | Set to `json` for structured JSON logs (what Alloy ships to Loki); anything else logs human-readable text |
+| `LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn` or `error`; an unrecognised value falls back to `info` |
 
 Automatic lockout is counted per (client IP, submitted username) pair, not per
 account, so guessing at a username locks out only the address doing the
