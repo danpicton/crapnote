@@ -204,9 +204,6 @@ func TestService_Login_AutoLock_ExpiresAfterCooldown(t *testing.T) {
 	if got.LockedAt != nil || got.LockedUntil != nil {
 		t.Fatal("expected lapsed auto-lock to be cleared in storage")
 	}
-	if got.FailedLoginAttempts != 0 {
-		t.Fatalf("expected failed-attempt counter reset, got %d", got.FailedLoginAttempts)
-	}
 }
 
 func TestService_Login_ManualLock_DoesNotExpire(t *testing.T) {
@@ -226,21 +223,16 @@ func TestService_Login_ManualLock_DoesNotExpire(t *testing.T) {
 	}
 }
 
-func TestService_Login_NonAdmin_SuccessResetsCounter(t *testing.T) {
+func TestService_Login_NonAdmin_SucceedsAfterFailedAttempts(t *testing.T) {
 	svc, users := newTestServiceWithRepo(t)
 	ctx := context.Background()
-	u := createUser(t, users, "alice", "correctpass", false)
+	createUser(t, users, "alice", "correctpass", false)
 
 	svc.Login(ctx, "alice", "wrong", testIP) //nolint:errcheck
 	svc.Login(ctx, "alice", "wrong", testIP) //nolint:errcheck
 
 	if _, err := svc.Login(ctx, "alice", "correctpass", testIP); err != nil {
 		t.Fatalf("Login: %v", err)
-	}
-
-	got, _ := users.FindByID(ctx, u.ID)
-	if got.FailedLoginAttempts != 0 {
-		t.Fatalf("expected counter reset to 0, got %d", got.FailedLoginAttempts)
 	}
 }
 
@@ -421,9 +413,6 @@ func TestService_CompleteSetup_UnlocksTheAccount(t *testing.T) {
 	got, _ := users.FindByID(ctx, u.ID)
 	if got.LockedAt != nil {
 		t.Fatal("setup should unlock the account")
-	}
-	if got.FailedLoginAttempts != 0 {
-		t.Fatalf("setup should reset failed attempts, got %d", got.FailedLoginAttempts)
 	}
 }
 
