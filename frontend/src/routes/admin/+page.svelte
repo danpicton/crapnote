@@ -199,25 +199,36 @@
 	// Wording for the cool-down pill's tooltip. The addresses themselves are
 	// deliberately not exposed by the API — only how many are cooling down.
 	function cooldownTitle(n: number) {
-		return `${n} address${n === 1 ? '' : 'es'} currently serving an automatic failed-login cool-down. Use the clear action to release them.`;
-	}
-
-	// Unlock covers both an admin lock and any automatic cool-downs, so a user
-	// who is only cooling down gets the unlock action too — locking them first
-	// would revoke the sessions of someone who may have done nothing wrong
-	// (the cool-down is per address, and addresses are shared behind NAT).
-	function lockAction(user: AdminUser): 'lock' | 'unlock' {
-		return user.locked || user.active_cooldowns ? 'unlock' : 'lock';
+		return `${n} address${n === 1 ? '' : 'es'} currently serving an automatic failed-login cool-down. Clearing it releases all of them; locking the account bars every address instead.`;
 	}
 
 	function lockLabel(user: AdminUser) {
-		if (user.locked) return `Unlock ${user.username}`;
-		if (user.active_cooldowns) return `Clear cool-down for ${user.username}`;
-		return `Lock ${user.username}`;
+		return user.locked ? `Unlock ${user.username}` : `Lock ${user.username}`;
+	}
+
+	// Clearing cool-downs is its own action rather than a mode of the lock
+	// button: the two point in opposite directions. Releasing a cool-down
+	// helps whoever tripped it, and locking is the containment move an admin
+	// reaches for on seeing a brute force, so neither may hide the other.
+	// The endpoint is the same one (unlock clears both), but this never locks
+	// on the way — locking to clear a cool-down would revoke the sessions of
+	// someone who may have done nothing wrong, since the cool-down is per
+	// address and addresses are shared behind NAT.
+	async function clearCooldowns(user: AdminUser) {
+		const res = await fetch(`/api/admin/users/${user.id}/unlock`, {
+			method: 'POST',
+			credentials: 'include',
+		});
+		if (res.ok) {
+			const updated = (await res.json()) as AdminUser;
+			users = users.map((u) => (u.id === updated.id ? updated : u));
+		} else {
+			alert('Failed to clear the cool-down.');
+		}
 	}
 
 	async function toggleLock(user: AdminUser) {
-		const action = lockAction(user);
+		const action = user.locked ? 'unlock' : 'lock';
 		const res = await fetch(`/api/admin/users/${user.id}/${action}`, {
 			method: 'POST',
 			credentials: 'include',
@@ -459,21 +470,29 @@
 										</button>
 										<!-- Clearing your own cool-down is allowed; locking or deleting
 										     yourself is not. -->
-										{#if user.id !== auth.user?.id || user.active_cooldowns}
+										{#if user.active_cooldowns}
+											<button
+												class="icon-btn icon-cooldown"
+												onclick={() => clearCooldowns(user)}
+												title={`Clear cool-down for ${user.username}`}
+												aria-label={`Clear cool-down for ${user.username}`}
+											>
+												<LockOpen size={14} />
+											</button>
+										{/if}
+										{#if user.id !== auth.user?.id}
 											<button
 												class="icon-btn icon-lock"
 												onclick={() => toggleLock(user)}
 												title={lockLabel(user)}
 												aria-label={lockLabel(user)}
 											>
-												{#if lockAction(user) === 'unlock'}
+												{#if user.locked}
 													<LockOpen size={14} />
 												{:else}
 													<Lock size={14} />
 												{/if}
 											</button>
-										{/if}
-										{#if user.id !== auth.user?.id}
 											<button
 												class="icon-btn icon-delete"
 												onclick={() => deleteUser(user.id)}
@@ -537,12 +556,15 @@
 												<Webhook size={15} /> {user.api_tokens_enabled ? 'Disable API' : 'Enable API'}
 											</button>
 										{/if}
-										{#if user.id !== auth.user?.id || user.active_cooldowns}
-											<button class="mob-user-action-btn" onclick={() => toggleLock(user)} aria-label={lockLabel(user)}>
-												{#if user.locked}<LockOpen size={15} /> Unlock{:else if user.active_cooldowns}<LockOpen size={15} /> Clear cool-down{:else}<Lock size={15} /> Lock{/if}
+										{#if user.active_cooldowns}
+											<button class="mob-user-action-btn" onclick={() => clearCooldowns(user)} aria-label={`Clear cool-down for ${user.username}`}>
+												<LockOpen size={15} /> Clear cool-down
 											</button>
 										{/if}
 										{#if user.id !== auth.user?.id}
+											<button class="mob-user-action-btn" onclick={() => toggleLock(user)} aria-label={lockLabel(user)}>
+												{#if user.locked}<LockOpen size={15} /> Unlock{:else}<Lock size={15} /> Lock{/if}
+											</button>
 											<button class="mob-user-action-btn mob-user-action-danger" onclick={() => deleteUser(user.id)}>
 												<Trash2 size={15} /> Delete
 											</button>

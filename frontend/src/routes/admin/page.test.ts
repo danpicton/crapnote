@@ -122,6 +122,24 @@ describe('Admin page', () => {
 		await waitFor(() => expect(screen.queryByText(/cooling down/i)).not.toBeInTheDocument());
 	});
 
+	it('still offers the lock action while a user is cooling down', async () => {
+		const cooling = { id: 2, username: 'alice', is_admin: false, locked: false, active_cooldowns: 2, created_at: '' };
+		mockFetch
+			.mockResolvedValueOnce(ok([mockUsers[0], cooling]))
+			.mockResolvedValueOnce(ok({ ...cooling, locked: true }));
+
+		render(AdminPage);
+		await waitFor(() => screen.getAllByText('alice'));
+		// Containment must not disappear just because the brute force tripped a
+		// cool-down — that is precisely when an admin may want to lock.
+		await fireEvent.click(screen.getAllByRole('button', { name: /^lock alice$/i })[0]);
+
+		await waitFor(() => {
+			const call = mockFetch.mock.calls.find((c) => typeof c[0] === 'string' && c[0].endsWith('/2/lock'));
+			expect(call).toBeTruthy();
+		});
+	});
+
 	it('lets an admin clear a cool-down on their own account', async () => {
 		mockFetch.mockResolvedValue(
 			ok([
