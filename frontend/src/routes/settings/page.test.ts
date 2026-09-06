@@ -279,6 +279,131 @@ describe('Settings — Global theme (admin)', () => {
 			expect(select.value).toBe('verdana');
 		});
 	});
+
+	// Two saves in flight at once: only the newest may write the select or the
+	// error. An older request that rejects after a newer one has succeeded must
+	// not revert the admin's newer, saved pick or claim a failure for it.
+	it('ignores a stale rejection that lands after a newer save succeeded', async () => {
+		mockTheme.globalTheme = 'rosso';
+		let rejectFirst: (err: Error) => void = () => {};
+		mockTheme.setGlobal = vi.fn().mockImplementation(async (id: string) => {
+			if (id === 'bianco') {
+				await new Promise((_, reject) => {
+					rejectFirst = reject;
+				});
+				return;
+			}
+			mockTheme.globalTheme = id;
+		});
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+
+		await fireEvent.change(select, { target: { value: 'bianco' } });
+		await fireEvent.change(select, { target: { value: 'verdana' } });
+		await waitFor(() => {
+			expect(select.value).toBe('verdana');
+		});
+
+		rejectFirst(new Error('boom'));
+		await waitFor(() => {
+			expect(mockTheme.setGlobal).toHaveBeenCalledTimes(2);
+		});
+
+		expect(select.value).toBe('verdana');
+		expect(screen.queryByText('Failed to save the global theme.')).toBeNull();
+	});
+
+	// The mirror case: an older request that *succeeds* late must not pull the
+	// select off the newer, saved pick. The select follows theme.globalTheme, so
+	// the mock mirrors the real store: saves are serialised (the newer request
+	// waits for the earlier one to settle) and only the newest pick's outcome
+	// writes globalTheme (theme.svelte.test.ts, 'an older save that succeeds
+	// while a newer save is pending does not apply its value'). Without that
+	// store guard globalTheme would land on 'bianco' here and drag the select
+	// back with it.
+	it('ignores a stale success that lands after a newer save succeeded', async () => {
+		mockTheme.globalTheme = 'rosso';
+		// Both requests are held until the first (bianco) one settles.
+		let firstGateResolve: () => void = () => {};
+		const firstGate = new Promise<void>((resolve) => {
+			firstGateResolve = resolve;
+		});
+		let saves = 0;
+		mockTheme.setGlobal = vi.fn().mockImplementation(async (id: string) => {
+			const attempt = ++saves;
+			// Mirror the store's serialisation: the newer save's request waits
+			// for the earlier one (bianco) to settle before it is sent.
+			await firstGate;
+			if (attempt !== saves) return;
+			mockTheme.globalTheme = id;
+		});
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+
+		await fireEvent.change(select, { target: { value: 'bianco' } });
+		await fireEvent.change(select, { target: { value: 'verdana' } });
+		await waitFor(() => {
+			expect(select.value).toBe('verdana');
+		});
+
+		firstGateResolve();
+		await waitFor(() => {
+			// Both requests have settled; the stale first one applied nothing.
+			expect(mockTheme.globalTheme).toBe('verdana');
+		});
+
+		expect(select.value).toBe('verdana');
+		expect(screen.queryByText('Failed to save the global theme.')).toBeNull();
+	});
+
+	// The failure side of the same race: the first pick's save succeeds, the
+	// newer pick's save fails. The first value is what the server now holds,
+	// so the select must revert to *it* — not to the theme stored before
+	// either pick — while the newer save's error stays visible. The mock
+	// mirrors the fixed store: saves are serialised, a stale success is
+	// recorded but not applied, and the newest save's failure reconciles
+	// globalTheme to the last confirmed value before rethrowing
+	// (theme.svelte.test.ts, 'falls back to an earlier confirmed save when the
+	// newest save fails').
+	it('reverts the select to the earlier confirmed save when the newest save fails', async () => {
+		mockTheme.globalTheme = 'rosso';
+		let gateResolve: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			gateResolve = resolve;
+		});
+		let saves = 0;
+		let confirmed: string | null = null;
+		mockTheme.setGlobal = vi.fn().mockImplementation(async (id: string) => {
+			const attempt = ++saves;
+			await gate;
+			if (id === 'verdana') {
+				// Newest save fails: fall back to the last confirmed value.
+				if (attempt === saves) mockTheme.globalTheme = confirmed;
+				throw new Error('boom');
+			}
+			confirmed = id;
+			if (attempt !== saves) return; // stale success: recorded, not applied
+			mockTheme.globalTheme = id;
+		});
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+
+		await fireEvent.change(select, { target: { value: 'bianco' } });
+		await fireEvent.change(select, { target: { value: 'verdana' } });
+		await waitFor(() => {
+			expect(select.value).toBe('verdana');
+		});
+
+		gateResolve();
+		await waitFor(() => {
+			expect(screen.getByText('Failed to save the global theme.')).toBeInTheDocument();
+		});
+
+		// bianco reached the server before verdana failed, so bianco — not the
+		// pre-pick 'rosso' — is what the select must show.
+		expect(select.value).toBe('bianco');
+	});
+
 });
 
 describe('Settings — Change password', () => {

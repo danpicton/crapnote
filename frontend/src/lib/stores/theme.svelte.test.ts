@@ -361,6 +361,198 @@ describe('theme store — global (admin-set) theme', () => {
 		expect(theme.globalTheme).toBe('rosso');
 		expect(theme.current).toBe('rosso');
 	});
+
+	// Two saves in flight at once: the newest pick is the one the admin last
+	// asked for, so an older save that settles afterwards must not apply its
+	// value — the settings select follows globalTheme, so a late older write
+	// would visibly move it back off the newer pick even while that newer
+	// save is still in flight (or has since failed).
+	it('an older save that succeeds while a newer save is pending does not apply its value', async () => {
+		let resolveRosso!: () => void;
+		let resolveBianco!: () => void;
+		mockApi.theme.setGlobal.mockImplementation((id: string) =>
+			id === 'rosso'
+				? new Promise<void>((resolve) => {
+						resolveRosso = resolve;
+					})
+				: new Promise<void>((resolve) => {
+						resolveBianco = resolve;
+					}),
+		);
+
+		const theme = await freshTheme();
+		await theme.init();
+
+		const saveRosso = theme.setGlobal('rosso'); // picked first, slow
+		const saveBianco = theme.setGlobal('bianco'); // picked second
+		// Saves are queued behind the previous one, so flush the queue so the
+		// mock's handles are installed before they are released below.
+		await Promise.resolve();
+
+		// The older request's PUT settles first. It succeeded — but a newer
+		// pick is pending, so applying it would flash 'rosso' over 'bianco'.
+		resolveRosso();
+		await saveRosso;
+		expect(theme.globalTheme).toBeNull();
+		expect(theme.current).toBe('light');
+
+		resolveBianco();
+		await saveBianco;
+		expect(theme.globalTheme).toBe('bianco');
+		expect(theme.current).toBe('bianco');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('bianco');
+	});
+
+	// The same stale-success window, but the newer save fails. While the newer
+	// save is still pending the stale value must not land — but rosso's PUT
+	// *did* reach the server, so once the newer save has failed the store must
+	// not simply forget it: globalTheme has to fall back to the last confirmed
+	// value, or the settings select reverts to a theme the server no longer
+	// holds and stays wrong until reload. The newer save's rejection still
+	// propagates to its caller, which shows the error.
+	it('falls back to an earlier confirmed save when the newest save fails', async () => {
+		let resolveRosso!: () => void;
+		let rejectBianco!: (reason: Error) => void;
+		mockApi.theme.setGlobal.mockImplementation((id: string) =>
+			id === 'rosso'
+				? new Promise<void>((resolve) => {
+						resolveRosso = resolve;
+					})
+				: new Promise<void>((_resolve, reject) => {
+						rejectBianco = reject;
+					}),
+		);
+
+		const theme = await freshTheme();
+		await theme.init();
+
+		const saveRosso = theme.setGlobal('rosso'); // picked first, slow
+		const saveBianco = theme.setGlobal('bianco'); // picked second, will fail
+		await Promise.resolve();
+
+		resolveRosso(); // the older success lands first...
+		await saveRosso;
+		// ...and must not apply anything while bianco's save is still pending:
+		// its outcome owns the UI. (Saves are serialised, so bianco's PUT only
+		// goes out once rosso's has settled — wait for it to be sent.)
+		await vi.waitFor(() => {
+			expect(mockApi.theme.setGlobal).toHaveBeenCalledTimes(2);
+		});
+		expect(theme.globalTheme).toBeNull();
+		expect(theme.current).toBe('light');
+
+		// The newer save then fails. The rejection is surfaced to its caller,
+		// but rosso is what the server now holds — globalTheme must reconcile
+		// to it, not to the pre-save value.
+		rejectBianco(new Error('boom'));
+		await expect(saveBianco).rejects.toThrow('boom');
+		expect(theme.globalTheme).toBe('rosso');
+		expect(theme.current).toBe('rosso');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('rosso');
+	});
+
+	// The mirror guard: with no earlier confirmed save in this session, a
+	// failed save changes nothing — the value init() loaded is still what the
+	// server holds.
+	it('a failed save leaves globalTheme alone when no earlier save succeeded', async () => {
+		mockApi.theme.get.mockResolvedValue({ theme: 'verdana' });
+		mockApi.theme.setGlobal.mockRejectedValue(new Error('boom'));
+
+		const theme = await freshTheme();
+		await theme.init();
+		expect(theme.globalTheme).toBe('verdana');
+
+		await expect(theme.setGlobal('bianco')).rejects.toThrow('boom');
+		expect(theme.globalTheme).toBe('verdana');
+		expect(theme.current).toBe('verdana');
+	});
+
+	// The guard is about ordering, not about suppressing everything that
+	// overlaps: a newer save that lands last is still the one that applies.
+	it('a newer setGlobal() still applies when it resolves after an older one', async () => {
+		let resolveSecond!: () => void;
+		mockApi.theme.setGlobal.mockImplementation((id: string) =>
+			id === 'verdana'
+				? new Promise<void>((resolve) => {
+						resolveSecond = resolve;
+					})
+				: Promise.resolve(undefined),
+		);
+
+		const theme = await freshTheme();
+		await theme.setGlobal('bianco');
+		const second = theme.setGlobal('verdana');
+		await Promise.resolve();
+
+		expect(theme.globalTheme).toBe('bianco');
+		resolveSecond();
+		await second;
+
+		expect(theme.globalTheme).toBe('verdana');
+	});
+
+	// Two PUTs sent concurrently can reach a last-write-wins backend in the
+	// wrong order and leave the *older* pick persisted, making the client's
+	// claim that the newer pick won a lie until the next reload. Saves are
+	// therefore serialised: a newer save's PUT waits for the earlier one to
+	// settle (success or failure) before it is sent.
+	it('sends saves to the server in the order they were picked', async () => {
+		let resolveRosso!: () => void;
+		mockApi.theme.setGlobal.mockImplementation((id: string) =>
+			id === 'rosso'
+				? new Promise<void>((resolve) => {
+						resolveRosso = resolve;
+					})
+				: Promise.resolve(undefined),
+		);
+
+		const theme = await freshTheme();
+		await theme.init();
+
+		const saveRosso = theme.setGlobal('rosso'); // picked first, slow
+		const saveBianco = theme.setGlobal('bianco'); // picked second
+		await Promise.resolve();
+
+		// While the first PUT is outstanding the second must not be on the
+		// wire yet — a concurrent pair could commit in the wrong order.
+		expect(mockApi.theme.setGlobal).toHaveBeenCalledTimes(1);
+
+		resolveRosso();
+		await saveRosso;
+		await saveBianco;
+
+		expect(mockApi.theme.setGlobal.mock.calls.map(([id]) => id)).toEqual(['rosso', 'bianco']);
+		expect(theme.globalTheme).toBe('bianco');
+	});
+
+	// A failure of one save must not block the chain: the newer pick still
+	// needs to reach the server even if the one before it failed.
+	it('a failed save does not stop the newer save from being sent', async () => {
+		let rejectRosso!: (reason: Error) => void;
+		mockApi.theme.setGlobal.mockImplementation((id: string) =>
+			id === 'rosso'
+				? new Promise<void>((_resolve, reject) => {
+						rejectRosso = reject;
+					})
+				: Promise.resolve(undefined),
+		);
+
+		const theme = await freshTheme();
+		await theme.init();
+
+		const saveRosso = theme.setGlobal('rosso'); // picked first, will fail
+		const saveBianco = theme.setGlobal('bianco'); // picked second
+		await Promise.resolve();
+
+		expect(mockApi.theme.setGlobal).toHaveBeenCalledTimes(1);
+
+		rejectRosso(new Error('network down'));
+		await expect(saveRosso).rejects.toThrow('network down');
+		await saveBianco;
+
+		expect(mockApi.theme.setGlobal.mock.calls.map(([id]) => id)).toEqual(['rosso', 'bianco']);
+		expect(theme.globalTheme).toBe('bianco');
+	});
 });
 
 describe('browser theme-color', () => {

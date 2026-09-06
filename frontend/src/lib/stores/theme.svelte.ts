@@ -50,13 +50,37 @@ function createThemeStore() {
 	let current = $state<ThemeId>('light');
 	let globalTheme = $state<ThemeId | null>(null);
 
-	// Bumped every time setGlobal() writes the global theme. init() snapshots it
-	// before its fetch starts and discards the response if the count has moved
-	// on, so a slow GET can never resurrect a value the admin has just replaced.
-	// A counter rather than a "has ever been written" flag: the test is whether
-	// *this* fetch is older than the latest write, so an init() started after a
-	// save is still free to apply what it reads.
+	// Sequence number of every setGlobal() call, in the order they were made.
+	// Bumped when the save is *accepted*, so an older request's outcome is
+	// stale from the moment a newer one starts — whether or not the newer one
+	// has resolved yet.
+	let globalSaves = 0;
+
+	// The sequence number of the newest setGlobal() that has actually written
+	// the global theme — 0 before any has. Moves whenever a write lands, so
+	// init() can snapshot it before its fetch starts and discard the response
+	// if it has changed: a slow GET can never resurrect a value the admin has
+	// just replaced. A counter rather than a "has ever been written" flag: the
+	// test is whether *this* fetch is older than the latest write, so an init()
+	// started after a save is still free to apply what it reads.
 	let globalWrites = 0;
+
+	// Serialises the PUTs themselves. Two saves sent concurrently could reach
+	// the last-write-wins backend in the wrong order and leave the *older*
+	// pick persisted, so each request waits for the previous one to settle
+	// (success or failure) before it is sent. The chain never rejects — a
+	// failed PUT must not stop the newer pick from reaching the server — but
+	// each call still sees its own outcome through the promise it awaits.
+	let lastSave: Promise<unknown> = Promise.resolve();
+
+	// The value the server is known to hold because one of this session's
+	// saves confirmed it — recorded even when the stale guard keeps that save
+	// off globalTheme. null until the first successful save; before that, the
+	// globalTheme init() loaded is the best known server value. This is what a
+	// failed newest save falls back to: the earlier save's PUT already changed
+	// the server, so forgetting it would leave the select showing a theme the
+	// server no longer holds until the next reload.
+	let lastConfirmed: ThemeId | null = null;
 
 	function applyToDOM(t: ThemeId) {
 		document.documentElement.setAttribute('data-theme', t);
@@ -149,11 +173,46 @@ function createThemeStore() {
 	}
 
 	/** Persist the global default (admin only) and apply it locally unless
-	 *  this device has its own user-level preference. */
+	 *  this device has its own user-level preference. Saves are serialised so
+	 *  the server learns them in pick order, and only the newest pick's
+	 *  outcome is applied locally — an older request that settles late must
+	 *  not move the select off a newer pick that is still in flight (or has
+	 *  since failed). */
 	async function setGlobal(id: ThemeId) {
 		if (!isThemeId(id)) return;
-		await api.theme.setGlobal(id);
-		globalWrites++;
+		const attempt = ++globalSaves;
+		const previous = lastSave;
+		const outcome = previous.then(() => api.theme.setGlobal(id));
+		lastSave = outcome.catch(() => {});
+		try {
+			await outcome;
+		} catch (err) {
+			// The newest save failed. If an earlier save in this batch went
+			// through, the server holds *its* value — the stale guard kept it
+			// off globalTheme while this save was pending. Now that the newest
+			// pick has failed, reconcile to the last confirmed value so the
+			// select matches what is actually persisted. The rejection still
+			// propagates: the caller shows the error, the store owns the value.
+			if (attempt === globalSaves && lastConfirmed !== null && lastConfirmed !== globalTheme) {
+				globalWrites = attempt;
+				globalTheme = lastConfirmed;
+				if (!hasUserPreference()) {
+					current = lastConfirmed;
+					applyToDOM(current);
+				}
+			}
+			throw err;
+		}
+		// Confirmed on the server — remember it even if a newer save has since
+		// started, so that save's failure can fall back to what is persisted.
+		lastConfirmed = id;
+		// The guard keys on the save *starting*, not on an earlier write
+		// having landed: a save that began before a newer one is stale the
+		// moment the newer one starts, so it must not apply even if it is the
+		// first to complete — while the newer save is still pending, its
+		// outcome owns the UI, not this stale success.
+		if (attempt !== globalSaves) return;
+		globalWrites = attempt;
 		globalTheme = id;
 		if (!hasUserPreference()) {
 			current = id;
