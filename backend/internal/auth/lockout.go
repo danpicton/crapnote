@@ -208,6 +208,35 @@ func (t *lockoutTracker) clearUsername(username string) {
 	}
 }
 
+// lockedCount reports how many addresses are currently serving an automatic
+// cool-down against a username. It backs the admin-facing signal that an
+// account is being brute-forced, which the per-pair scoping otherwise made
+// invisible: the account row is deliberately untouched by automatic lockout,
+// so there is nowhere else for an admin to read it from (issue #110).
+//
+// It is a count and not a list because the keys hold only unsalted digests of
+// the addresses; recovering the addresses would mean retaining the raw
+// strings, which is exactly the unbounded-memory shape the fixed-size key
+// exists to prevent.
+//
+// The scan is O(entries) under the lock, but it runs once per user rendered
+// in the admin UI, not on the login path, and the table is capped at
+// maxLockoutEntries.
+func (t *lockoutTracker) lockedCount(username string) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	now := t.now()
+	want := lockoutUsername(username)
+	n := 0
+	for k, e := range t.entries {
+		if k.username == want && e.isLocked(now) {
+			n++
+		}
+	}
+	return n
+}
+
 // size reports how many pairs are tracked (for tests and metrics).
 func (t *lockoutTracker) size() int {
 	t.mu.Lock()
