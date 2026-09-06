@@ -47,7 +47,8 @@ func (rowsAffectedErrorResult) RowsAffected() (int64, error) {
 	return 0, errRowsAffected
 }
 
-func TestNoteRepo_SetBoolWriters_PropagateRowsAffectedError(t *testing.T) {
+func openRowsAffectedErrorDB(t *testing.T) *sql.DB {
+	t.Helper()
 	registerRowsAffectedErrorDriver.Do(func() {
 		sql.Register("notes_rows_affected_error", rowsAffectedErrorDriver{})
 	})
@@ -56,8 +57,11 @@ func TestNoteRepo_SetBoolWriters_PropagateRowsAffectedError(t *testing.T) {
 		t.Fatalf("open database: %v", err)
 	}
 	t.Cleanup(func() { database.Close() })
+	return database
+}
 
-	repo := notes.NewRepo(database)
+func TestNoteRepo_SetBoolWriters_PropagateRowsAffectedError(t *testing.T) {
+	repo := notes.NewRepo(openRowsAffectedErrorDB(t))
 	writers := map[string]func() error{
 		"starred": func() error { return repo.SetStarred(context.Background(), 1, 2, true) },
 		"locked":  func() error { return repo.SetLocked(context.Background(), 1, 2, true) },
@@ -74,6 +78,18 @@ func TestNoteRepo_SetBoolWriters_PropagateRowsAffectedError(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "set "+column) {
 			t.Errorf("set %s: error lacks operation context: %v", column, err)
 		}
+	}
+}
+
+func TestNoteRepo_SetPinned_PropagatesRowsAffectedError(t *testing.T) {
+	repo := notes.NewRepo(openRowsAffectedErrorDB(t))
+
+	err := repo.SetPinned(context.Background(), 1, 2, true)
+	if !errors.Is(err, errRowsAffected) {
+		t.Fatalf("expected RowsAffected error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "set pinned") {
+		t.Fatalf("error lacks operation context: %v", err)
 	}
 }
 

@@ -262,7 +262,10 @@ func (r *Repo) SetPinned(ctx context.Context, id, userID int64, pinned bool) err
 	if err != nil {
 		return fmt.Errorf("set pinned: %w", err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set pinned rows affected: %w", err)
+	}
 	if rows == 0 {
 		return ErrNotFound
 	}
