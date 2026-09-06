@@ -40,12 +40,22 @@
 	// load and every successful save drop the override and flow through.
 	let globalThemeSelection = $derived(theme.globalTheme ?? '');
 
+	// Bumped on every save attempt. Each attempt snapshots it before awaiting
+	// and only writes the select or the error if it is still the newest — two
+	// quick picks put two requests in flight, and an older one landing last
+	// must not discard the newer pick or report a failure the newer save
+	// already contradicted. Same shape as the store's globalWrites guard.
+	let globalSaves = 0;
+
 	async function saveGlobalTheme(value: string) {
+		const attempt = ++globalSaves;
 		globalThemeError = '';
 		globalThemeSelection = value;
 		try {
 			await theme.setGlobal(value as (typeof theme.themes)[number]['id']);
 		} catch {
+			// A newer save has since been started — its outcome owns the UI.
+			if (attempt !== globalSaves) return;
 			globalThemeError = 'Failed to save the global theme.';
 			globalThemeSelection = theme.globalTheme ?? '';
 		}

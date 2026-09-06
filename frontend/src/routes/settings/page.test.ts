@@ -279,6 +279,72 @@ describe('Settings — Global theme (admin)', () => {
 			expect(select.value).toBe('verdana');
 		});
 	});
+
+	// Two saves in flight at once: only the newest may write the select or the
+	// error. An older request that rejects after a newer one has succeeded must
+	// not revert the admin's newer, saved pick or claim a failure for it.
+	it('ignores a stale rejection that lands after a newer save succeeded', async () => {
+		mockTheme.globalTheme = 'rosso';
+		let rejectFirst: (err: Error) => void = () => {};
+		mockTheme.setGlobal = vi.fn().mockImplementation(async (id: string) => {
+			if (id === 'bianco') {
+				await new Promise((_, reject) => {
+					rejectFirst = reject;
+				});
+				return;
+			}
+			mockTheme.globalTheme = id;
+		});
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+
+		await fireEvent.change(select, { target: { value: 'bianco' } });
+		await fireEvent.change(select, { target: { value: 'verdana' } });
+		await waitFor(() => {
+			expect(select.value).toBe('verdana');
+		});
+
+		rejectFirst(new Error('boom'));
+		await waitFor(() => {
+			expect(mockTheme.setGlobal).toHaveBeenCalledTimes(2);
+		});
+
+		expect(select.value).toBe('verdana');
+		expect(screen.queryByText('Failed to save the global theme.')).toBeNull();
+	});
+
+	// The mirror case: an older request that *succeeds* late must not clear the
+	// newest attempt's error or pull the select off the newest value.
+	it('ignores a stale success that lands after a newer save failed', async () => {
+		mockTheme.globalTheme = 'rosso';
+		let resolveFirst: () => void = () => {};
+		mockTheme.setGlobal = vi.fn().mockImplementation(async (id: string) => {
+			if (id === 'bianco') {
+				await new Promise<void>((resolve) => {
+					resolveFirst = resolve;
+				});
+				return;
+			}
+			throw new Error('boom');
+		});
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+
+		await fireEvent.change(select, { target: { value: 'bianco' } });
+		await fireEvent.change(select, { target: { value: 'verdana' } });
+		await waitFor(() => {
+			expect(screen.getByText('Failed to save the global theme.')).toBeInTheDocument();
+		});
+		expect(select.value).toBe('rosso');
+
+		resolveFirst();
+		await waitFor(() => {
+			expect(mockTheme.setGlobal).toHaveBeenCalledTimes(2);
+		});
+
+		expect(screen.getByText('Failed to save the global theme.')).toBeInTheDocument();
+		expect(select.value).toBe('rosso');
+	});
 });
 
 describe('Settings — Change password', () => {
