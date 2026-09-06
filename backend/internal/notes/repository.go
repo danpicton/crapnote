@@ -488,7 +488,10 @@ func (r *Repo) HardDelete(ctx context.Context, id, userID int64) error {
 	if err != nil {
 		return fmt.Errorf("hard delete: %w", err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("hard delete rows affected: %w", err)
+	}
 	if rows == 0 {
 		return ErrNotFound
 	}
