@@ -4,7 +4,7 @@
 // keep type-checking; removing these two lines breaks `npm run check`.
 /// <reference lib="dom" />
 /// <reference lib="dom.iterable" />
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cacheFirst, navigationCacheFirst, networkOnly } from '$lib/service-worker-strategies';
 
 // The strategies themselves are covered in service-worker-strategies.test.ts.
@@ -42,6 +42,17 @@ function dispatchFetch(request: Request): Promise<Response> | undefined {
 	return responded;
 }
 
+function dispatchExtendable(type: 'install' | 'activate'): Promise<unknown> | undefined {
+	let lifetime: Promise<unknown> | undefined;
+	const event = Object.assign(new Event(type), {
+		waitUntil: (promise: Promise<unknown>) => {
+			lifetime = promise;
+		},
+	});
+	window.dispatchEvent(event);
+	return lifetime;
+}
+
 function req(path: string, init: { method?: string; mode?: RequestMode } = {}): Request {
 	return {
 		url: new URL(path, location.origin).href,
@@ -54,6 +65,47 @@ beforeEach(() => {
 	vi.mocked(navigationCacheFirst).mockClear();
 	vi.mocked(cacheFirst).mockClear();
 	vi.mocked(networkOnly).mockClear();
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
+
+describe('service worker lifecycle', () => {
+	it('does not reject installation when Cache Storage is disabled', async () => {
+		vi.stubGlobal('caches', {
+			open: vi.fn().mockRejectedValue(new Error('SecurityError: storage disabled')),
+		});
+		vi.stubGlobal('skipWaiting', vi.fn().mockResolvedValue(undefined));
+
+		await expect(dispatchExtendable('install')).resolves.toBeUndefined();
+	});
+
+	it('does not reject installation when precache writes are denied', async () => {
+		vi.stubGlobal('caches', {
+			open: vi.fn().mockResolvedValue({
+				addAll: vi.fn().mockRejectedValue(
+					new DOMException('Cache write denied', 'SecurityError')
+				),
+			}),
+		});
+		const skipWaiting = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal('skipWaiting', skipWaiting);
+
+		await expect(dispatchExtendable('install')).resolves.toBeUndefined();
+		expect(skipWaiting).toHaveBeenCalledOnce();
+	});
+
+	it('still claims clients when Cache Storage is disabled during activation', async () => {
+		vi.stubGlobal('caches', {
+			keys: vi.fn().mockRejectedValue(new Error('SecurityError: storage disabled')),
+		});
+		const claim = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal('clients', { claim });
+
+		await expect(dispatchExtendable('activate')).resolves.toBeUndefined();
+		expect(claim).toHaveBeenCalledOnce();
+	});
 });
 
 describe('service worker fetch listener', () => {
