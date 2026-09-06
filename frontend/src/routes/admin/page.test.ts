@@ -85,6 +85,23 @@ describe('Admin page', () => {
 		});
 	});
 
+	it('shows active automatic cool-downs alongside the account status', async () => {
+		mockFetch.mockResolvedValue(
+			ok([
+				{ id: 1, username: 'admin', is_admin: true, locked: false, created_at: '' },
+				{ id: 2, username: 'alice', is_admin: false, locked: false, active_cooldowns: 3, created_at: '' },
+			])
+		);
+		render(AdminPage);
+		await waitFor(() => {
+			expect(screen.getAllByText('alice').length).toBeGreaterThan(0);
+		});
+		// The account itself is not locked — the cool-down is its own signal.
+		expect(screen.getAllByTitle(/3 addresses? .*cool-down/i).length).toBeGreaterThan(0);
+		expect(screen.getAllByText(/cooling down \(3\)/i).length).toBeGreaterThan(0);
+		expect(screen.queryByText('Locked')).not.toBeInTheDocument();
+	});
+
 	it('shows locked state for a locked user', async () => {
 		mockFetch.mockResolvedValue(
 			ok([
