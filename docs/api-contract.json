@@ -457,7 +457,7 @@
       "scope": "write",
       "admin_only": false,
       "cookie_only": false,
-      "description": "Archive a note (hidden from the main list).",
+      "description": "Archive a note (hidden from the main list). Fails with 423 if the note is locked.",
       "params": [
         {
           "name": "id",

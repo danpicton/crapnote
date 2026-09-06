@@ -69,7 +69,7 @@ func (s *Service) ToggleStar(ctx context.Context, id, userID int64) (*Note, erro
 	return s.repo.Get(ctx, id, userID)
 }
 
-// Archive moves a note to the archive.
+// Archive moves a note to the archive. Returns ErrLocked if the note is locked.
 func (s *Service) Archive(ctx context.Context, id, userID int64) error {
 	return s.repo.Archive(ctx, id, userID)
 }
