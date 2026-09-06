@@ -163,13 +163,13 @@ func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string
 	}
 	rows, _ := res.RowsAffected()
 	if rows == 0 {
-		// Zero rows means missing, hidden, another user's, or locked — ask which.
-		// IsLocked reports ErrNotFound for the first two.
-		locked, err := r.IsLocked(ctx, id, userID)
+		// Get preserves the same visibility rules as Update, while identifying
+		// a visible note rejected by the locked predicate.
+		note, err := r.Get(ctx, id, userID)
 		if err != nil {
 			return nil, err
 		}
-		if locked {
+		if note.Locked {
 			return nil, ErrLocked
 		}
 		return nil, ErrNotFound

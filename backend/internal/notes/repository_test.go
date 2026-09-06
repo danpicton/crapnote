@@ -172,6 +172,22 @@ func TestNoteRepo_Update_ArchivedNoteDoesNotWrite(t *testing.T) {
 	}
 }
 
+func TestNoteRepo_Update_LockedArchivedNoteIsNotFound(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, _ := repo.Create(ctx, userID, "Locked and archived", "body")
+	repo.SetLocked(ctx, note.ID, userID, true) //nolint:errcheck
+	repo.Archive(ctx, note.ID, userID)         //nolint:errcheck
+
+	_, err := repo.Update(ctx, note.ID, userID, strPtr("Changed"), nil)
+	if err != notes.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
 func TestNoteRepo_Update_TrashedNoteDoesNotWrite(t *testing.T) {
 	database := openTestDB(t)
 	userID := seedUser(t, database)
