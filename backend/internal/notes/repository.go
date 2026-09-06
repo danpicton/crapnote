@@ -161,7 +161,10 @@ func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("update note rows affected: %w", err)
+	}
 	if rows == 0 {
 		// Get preserves the same visibility rules as Update, while identifying
 		// a visible note rejected by the locked predicate.

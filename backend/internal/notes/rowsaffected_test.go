@@ -117,5 +117,17 @@ func TestNoteRepo_HardDelete_PropagatesRowsAffectedError(t *testing.T) {
 	}
 }
 
+func TestNoteRepo_Update_PropagatesRowsAffectedError(t *testing.T) {
+	repo := notes.NewRepo(openRowsAffectedErrorDB(t))
+
+	_, err := repo.Update(context.Background(), 1, 2, nil, nil)
+	if !errors.Is(err, errRowsAffected) {
+		t.Fatalf("expected RowsAffected error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "update note") {
+		t.Fatalf("error lacks operation context: %v", err)
+	}
+}
+
 var _ driver.Driver = rowsAffectedErrorDriver{}
 var _ driver.ExecerContext = rowsAffectedErrorConn{}
