@@ -315,25 +315,26 @@ describe('Settings — Global theme (admin)', () => {
 
 	// The mirror case: an older request that *succeeds* late must not pull the
 	// select off the newer, saved pick. The select follows theme.globalTheme, so
-	// the mock mirrors the real store's own ordering guard — a save that resolves
-	// after a newer one has already written leaves globalTheme alone
-	// (theme.svelte.test.ts, 'an older setGlobal() resolving after a newer one
-	// does not resurrect its value'). Without that store guard globalTheme would
-	// land on 'bianco' here and drag the select back with it.
+	// the mock mirrors the real store: saves are serialised (the newer request
+	// waits for the earlier one to settle) and only the newest pick's outcome
+	// writes globalTheme (theme.svelte.test.ts, 'an older save that succeeds
+	// while a newer save is pending does not apply its value'). Without that
+	// store guard globalTheme would land on 'bianco' here and drag the select
+	// back with it.
 	it('ignores a stale success that lands after a newer save succeeded', async () => {
 		mockTheme.globalTheme = 'rosso';
-		let resolveFirst: () => void = () => {};
+		// Both requests are held until the first (bianco) one settles.
+		let firstGateResolve: () => void = () => {};
+		const firstGate = new Promise<void>((resolve) => {
+			firstGateResolve = resolve;
+		});
 		let saves = 0;
-		let writes = 0;
 		mockTheme.setGlobal = vi.fn().mockImplementation(async (id: string) => {
 			const attempt = ++saves;
-			if (id === 'bianco') {
-				await new Promise<void>((resolve) => {
-					resolveFirst = resolve;
-				});
-			}
-			if (attempt < writes) return;
-			writes = attempt;
+			// Mirror the store's serialisation: the newer save's request waits
+			// for the earlier one (bianco) to settle before it is sent.
+			await firstGate;
+			if (attempt !== saves) return;
 			mockTheme.globalTheme = id;
 		});
 		render(SettingsPage);
@@ -345,9 +346,10 @@ describe('Settings — Global theme (admin)', () => {
 			expect(select.value).toBe('verdana');
 		});
 
-		resolveFirst();
+		firstGateResolve();
 		await waitFor(() => {
-			expect(mockTheme.setGlobal).toHaveBeenCalledTimes(2);
+			// Both requests have settled; the stale first one applied nothing.
+			expect(mockTheme.globalTheme).toBe('verdana');
 		});
 
 		expect(select.value).toBe('verdana');

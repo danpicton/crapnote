@@ -51,6 +51,9 @@ function createThemeStore() {
 	let globalTheme = $state<ThemeId | null>(null);
 
 	// Sequence number of every setGlobal() call, in the order they were made.
+	// Bumped when the save is *accepted*, so an older request's outcome is
+	// stale from the moment a newer one starts — whether or not the newer one
+	// has resolved yet.
 	let globalSaves = 0;
 
 	// The sequence number of the newest setGlobal() that has actually written
@@ -61,6 +64,14 @@ function createThemeStore() {
 	// test is whether *this* fetch is older than the latest write, so an init()
 	// started after a save is still free to apply what it reads.
 	let globalWrites = 0;
+
+	// Serialises the PUTs themselves. Two saves sent concurrently could reach
+	// the last-write-wins backend in the wrong order and leave the *older*
+	// pick persisted, so each request waits for the previous one to settle
+	// (success or failure) before it is sent. The chain never rejects — a
+	// failed PUT must not stop the newer pick from reaching the server — but
+	// each call still sees its own outcome through the promise it awaits.
+	let lastSave: Promise<unknown> = Promise.resolve();
 
 	function applyToDOM(t: ThemeId) {
 		document.documentElement.setAttribute('data-theme', t);
@@ -153,17 +164,24 @@ function createThemeStore() {
 	}
 
 	/** Persist the global default (admin only) and apply it locally unless
-	 *  this device has its own user-level preference. */
+	 *  this device has its own user-level preference. Saves are serialised so
+	 *  the server learns them in pick order, and only the newest pick's
+	 *  outcome is applied locally — an older request that settles late must
+	 *  not move the select off a newer pick that is still in flight (or has
+	 *  since failed). */
 	async function setGlobal(id: ThemeId) {
 		if (!isThemeId(id)) return;
 		const attempt = ++globalSaves;
-		await api.theme.setGlobal(id);
-		// Two saves can be in flight at once — the admin picked twice inside one
-		// request window. Only apply this one if no newer save has already
-		// written: an older PUT resolving last must not resurrect its value.
-		// Ordering, not exclusion — a newer save landing after an older one has
-		// applied is still the one that wins.
-		if (attempt < globalWrites) return;
+		const previous = lastSave;
+		const outcome = previous.then(() => api.theme.setGlobal(id));
+		lastSave = outcome.catch(() => {});
+		await outcome;
+		// The guard keys on the save *starting*, not on an earlier write
+		// having landed: a save that began before a newer one is stale the
+		// moment the newer one starts, so it must not apply even if it is the
+		// first to complete — and even if the newer save then fails, that
+		// failure owns the UI, not this stale success.
+		if (attempt !== globalSaves) return;
 		globalWrites = attempt;
 		globalTheme = id;
 		if (!hasUserPreference()) {
