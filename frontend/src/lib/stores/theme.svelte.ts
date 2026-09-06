@@ -73,6 +73,15 @@ function createThemeStore() {
 	// each call still sees its own outcome through the promise it awaits.
 	let lastSave: Promise<unknown> = Promise.resolve();
 
+	// The value the server is known to hold because one of this session's
+	// saves confirmed it — recorded even when the stale guard keeps that save
+	// off globalTheme. null until the first successful save; before that, the
+	// globalTheme init() loaded is the best known server value. This is what a
+	// failed newest save falls back to: the earlier save's PUT already changed
+	// the server, so forgetting it would leave the select showing a theme the
+	// server no longer holds until the next reload.
+	let lastConfirmed: ThemeId | null = null;
+
 	function applyToDOM(t: ThemeId) {
 		document.documentElement.setAttribute('data-theme', t);
 		syncBrowserThemeColor();
@@ -175,12 +184,33 @@ function createThemeStore() {
 		const previous = lastSave;
 		const outcome = previous.then(() => api.theme.setGlobal(id));
 		lastSave = outcome.catch(() => {});
-		await outcome;
+		try {
+			await outcome;
+		} catch (err) {
+			// The newest save failed. If an earlier save in this batch went
+			// through, the server holds *its* value — the stale guard kept it
+			// off globalTheme while this save was pending. Now that the newest
+			// pick has failed, reconcile to the last confirmed value so the
+			// select matches what is actually persisted. The rejection still
+			// propagates: the caller shows the error, the store owns the value.
+			if (attempt === globalSaves && lastConfirmed !== null && lastConfirmed !== globalTheme) {
+				globalWrites = attempt;
+				globalTheme = lastConfirmed;
+				if (!hasUserPreference()) {
+					current = lastConfirmed;
+					applyToDOM(current);
+				}
+			}
+			throw err;
+		}
+		// Confirmed on the server — remember it even if a newer save has since
+		// started, so that save's failure can fall back to what is persisted.
+		lastConfirmed = id;
 		// The guard keys on the save *starting*, not on an earlier write
 		// having landed: a save that began before a newer one is stale the
 		// moment the newer one starts, so it must not apply even if it is the
-		// first to complete — and even if the newer save then fails, that
-		// failure owns the UI, not this stale success.
+		// first to complete — while the newer save is still pending, its
+		// outcome owns the UI, not this stale success.
 		if (attempt !== globalSaves) return;
 		globalWrites = attempt;
 		globalTheme = id;

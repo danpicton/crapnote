@@ -356,6 +356,54 @@ describe('Settings — Global theme (admin)', () => {
 		expect(screen.queryByText('Failed to save the global theme.')).toBeNull();
 	});
 
+	// The failure side of the same race: the first pick's save succeeds, the
+	// newer pick's save fails. The first value is what the server now holds,
+	// so the select must revert to *it* — not to the theme stored before
+	// either pick — while the newer save's error stays visible. The mock
+	// mirrors the fixed store: saves are serialised, a stale success is
+	// recorded but not applied, and the newest save's failure reconciles
+	// globalTheme to the last confirmed value before rethrowing
+	// (theme.svelte.test.ts, 'falls back to an earlier confirmed save when the
+	// newest save fails').
+	it('reverts the select to the earlier confirmed save when the newest save fails', async () => {
+		mockTheme.globalTheme = 'rosso';
+		let gateResolve: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			gateResolve = resolve;
+		});
+		let saves = 0;
+		let confirmed: string | null = null;
+		mockTheme.setGlobal = vi.fn().mockImplementation(async (id: string) => {
+			const attempt = ++saves;
+			await gate;
+			if (id === 'verdana') {
+				// Newest save fails: fall back to the last confirmed value.
+				if (attempt === saves) mockTheme.globalTheme = confirmed;
+				throw new Error('boom');
+			}
+			confirmed = id;
+			if (attempt !== saves) return; // stale success: recorded, not applied
+			mockTheme.globalTheme = id;
+		});
+		render(SettingsPage);
+		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
+
+		await fireEvent.change(select, { target: { value: 'bianco' } });
+		await fireEvent.change(select, { target: { value: 'verdana' } });
+		await waitFor(() => {
+			expect(select.value).toBe('verdana');
+		});
+
+		gateResolve();
+		await waitFor(() => {
+			expect(screen.getByText('Failed to save the global theme.')).toBeInTheDocument();
+		});
+
+		// bianco reached the server before verdana failed, so bianco — not the
+		// pre-pick 'rosso' — is what the select must show.
+		expect(select.value).toBe('bianco');
+	});
+
 });
 
 describe('Settings — Change password', () => {
