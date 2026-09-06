@@ -38,7 +38,15 @@ const PRECACHE = [
 sw.addEventListener('install', (event) => {
 	event.waitUntil(
 		(async () => {
-			const cache = await caches.open(CACHE_NAME);
+			let cache: Cache;
+			try {
+				cache = await caches.open(CACHE_NAME);
+			} catch {
+				// Storage may be disabled by browser policy. Install without offline
+				// support rather than rejecting the service worker lifecycle.
+				await sw.skipWaiting();
+				return;
+			}
 
 			// Pre-cache every immutable build asset. Using addAll so a single
 			// failure aborts the install — better to leave the previous SW in

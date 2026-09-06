@@ -42,6 +42,17 @@ function dispatchFetch(request: Request): Promise<Response> | undefined {
 	return responded;
 }
 
+function dispatchExtendable(type: 'install' | 'activate'): Promise<unknown> | undefined {
+	let lifetime: Promise<unknown> | undefined;
+	const event = Object.assign(new Event(type), {
+		waitUntil: (promise: Promise<unknown>) => {
+			lifetime = promise;
+		},
+	});
+	window.dispatchEvent(event);
+	return lifetime;
+}
+
 function req(path: string, init: { method?: string; mode?: RequestMode } = {}): Request {
 	return {
 		url: new URL(path, location.origin).href,
@@ -54,6 +65,17 @@ beforeEach(() => {
 	vi.mocked(navigationCacheFirst).mockClear();
 	vi.mocked(cacheFirst).mockClear();
 	vi.mocked(networkOnly).mockClear();
+});
+
+describe('service worker lifecycle', () => {
+	it('does not reject installation when Cache Storage is disabled', async () => {
+		vi.stubGlobal('caches', {
+			open: vi.fn().mockRejectedValue(new Error('SecurityError: storage disabled')),
+		});
+		vi.stubGlobal('skipWaiting', vi.fn().mockResolvedValue(undefined));
+
+		await expect(dispatchExtendable('install')).resolves.toBeUndefined();
+	});
 });
 
 describe('service worker fetch listener', () => {
