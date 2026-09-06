@@ -161,7 +161,10 @@ func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("update note rows affected: %w", err)
+	}
 	if rows == 0 {
 		// Get preserves the same visibility rules as Update, while identifying
 		// a visible note rejected by the locked predicate.
@@ -262,7 +265,10 @@ func (r *Repo) SetPinned(ctx context.Context, id, userID int64, pinned bool) err
 	if err != nil {
 		return fmt.Errorf("set pinned: %w", err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set pinned rows affected: %w", err)
+	}
 	if rows == 0 {
 		return ErrNotFound
 	}
@@ -387,7 +393,10 @@ func (r *Repo) setBool(ctx context.Context, col string, id, userID int64, val bo
 	if err != nil {
 		return fmt.Errorf("set %s: %w", col, err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set %s rows affected: %w", col, err)
+	}
 	if rows == 0 {
 		return ErrNotFound
 	}
@@ -408,7 +417,10 @@ func (r *Repo) SoftDelete(ctx context.Context, id, userID int64) error {
 	if err != nil {
 		return fmt.Errorf("soft delete: %w", err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("soft delete rows affected: %w", err)
+	}
 	if rows == 0 {
 		// IsLocked reports ErrNotFound for a missing or another user's note.
 		locked, err := r.IsLocked(ctx, id, userID)
@@ -438,7 +450,10 @@ func (r *Repo) Unarchive(ctx context.Context, id, userID int64) error {
 	if err != nil {
 		return fmt.Errorf("unarchive: %w", err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("unarchive rows affected: %w", err)
+	}
 	if rows == 0 {
 		return ErrNotFound
 	}
@@ -479,7 +494,10 @@ func (r *Repo) HardDelete(ctx context.Context, id, userID int64) error {
 	if err != nil {
 		return fmt.Errorf("hard delete: %w", err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("hard delete rows affected: %w", err)
+	}
 	if rows == 0 {
 		return ErrNotFound
 	}
