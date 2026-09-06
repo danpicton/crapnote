@@ -119,6 +119,17 @@ func (s *Service) ClearAutomaticLockouts(username string) {
 	s.attempts.clearUsername(username)
 }
 
+// AutomaticLockoutCount reports how many client addresses are currently
+// serving an automatic cool-down against a username. The admin user list
+// surfaces it so an operator can see an account being brute-forced: automatic
+// lockout is a property of an (address, username) pair, not of the account, so
+// the user row shows nothing (issue #110).
+//
+// It is a count, not a list of addresses — see lockoutTracker.lockedCount.
+func (s *Service) AutomaticLockoutCount(username string) int {
+	return s.attempts.lockedCount(username)
+}
+
 // SeedAdmin creates the initial admin user if no users exist yet.
 // It is a no-op if users already exist.
 func (s *Service) SeedAdmin(ctx context.Context, username, password string) error {

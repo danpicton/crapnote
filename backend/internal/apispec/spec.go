@@ -462,6 +462,13 @@ func Registry() []Operation {
 			},
 		},
 		{
+			Name: "admin_user_clear_cooldowns", Method: "POST", Path: "/api/admin/users/{id}/clear-cooldowns", Scope: ScopeWrite, AdminOnly: true,
+			Description: "Clear the automatic failed-login cool-downs held against a user, leaving any admin lock in place.",
+			Params: []Param{
+				{Name: "id", In: InPath, Type: TypeInteger, Required: true, Description: "User ID."},
+			},
+		},
+		{
 			Name: "admin_users_invite", Method: "POST", Path: "/api/admin/users/invite", Scope: ScopeWrite, AdminOnly: true,
 			Description: "Invite a user; returns a one-time setup link.",
 			Params: []Param{

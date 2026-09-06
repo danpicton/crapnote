@@ -134,3 +134,35 @@ func TestLockoutTracker_IsBoundedAgainstUsernameCycling(t *testing.T) {
 		t.Fatalf("one address cycling usernames grew the table past its cap: %d > %d", got, maxLockoutEntries)
 	}
 }
+
+func TestLockoutTracker_CountsActiveLocksForUsername(t *testing.T) {
+	tr := newLockoutTracker()
+	base := time.Now()
+	tr.now = func() time.Time { return base }
+
+	// Two addresses cooling down against alice, one still short of the limit,
+	// and an unrelated username locked out entirely.
+	for i := 0; i < 3; i++ {
+		tr.recordFailure(newLockoutKey("10.0.0.1", "alice"), 3, time.Minute)
+		tr.recordFailure(newLockoutKey("10.0.0.2", "Alice"), 3, time.Minute)
+		tr.recordFailure(newLockoutKey("10.0.0.9", "bob"), 3, time.Minute)
+	}
+	tr.recordFailure(newLockoutKey("10.0.0.3", "alice"), 3, time.Minute)
+
+	if got := tr.lockedCount("alice"); got != 2 {
+		t.Fatalf("expected 2 addresses cooling down against alice, got %d", got)
+	}
+	if got := tr.lockedCount("ALICE"); got != 2 {
+		t.Fatalf("lookup must fold case like the key does, got %d", got)
+	}
+	if got := tr.lockedCount("carol"); got != 0 {
+		t.Fatalf("expected no cool-downs for an untouched username, got %d", got)
+	}
+
+	// Once the cool-downs lapse the count goes back to zero without needing a
+	// sweep to have run.
+	tr.now = func() time.Time { return base.Add(2 * time.Minute) }
+	if got := tr.lockedCount("alice"); got != 0 {
+		t.Fatalf("expected lapsed cool-downs to stop counting, got %d", got)
+	}
+}

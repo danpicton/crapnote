@@ -986,6 +986,26 @@
       "response": "json"
     },
     {
+      "name": "admin_user_clear_cooldowns",
+      "method": "POST",
+      "path": "/api/admin/users/{id}/clear-cooldowns",
+      "scope": "write",
+      "admin_only": true,
+      "cookie_only": false,
+      "description": "Clear the automatic failed-login cool-downs held against a user, leaving any admin lock in place.",
+      "params": [
+        {
+          "name": "id",
+          "in": "path",
+          "type": "integer",
+          "required": true,
+          "description": "User ID."
+        }
+      ],
+      "request": "json",
+      "response": "json"
+    },
+    {
       "name": "admin_users_invite",
       "method": "POST",
       "path": "/api/admin/users/invite",

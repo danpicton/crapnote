@@ -117,6 +117,7 @@ func newMux(
 		"admin_user_set_password":      adminHandler.SetUserPassword,
 		"admin_user_lock":              adminHandler.LockUser,
 		"admin_user_unlock":            adminHandler.UnlockUser,
+		"admin_user_clear_cooldowns":   adminHandler.ClearCooldowns,
 		"admin_users_invite":           adminHandler.InviteUser,
 		"admin_user_regenerate_invite": adminHandler.RegenerateInvite,
 		"admin_theme_set":              settingsHandler.SetTheme,

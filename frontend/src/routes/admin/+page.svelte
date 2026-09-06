@@ -25,6 +25,11 @@
 		locked: boolean;
 		locked_at?: string;
 		pending_setup?: boolean;
+		// Client addresses currently serving an automatic failed-login
+		// cool-down against this username. Separate from `locked`, which is an
+		// admin-initiated account lock: the automatic lockout is per
+		// (address, username) and never touches the account.
+		active_cooldowns?: number;
 		created_at: string;
 	}
 
@@ -188,6 +193,36 @@
 			users = users.map((u) => (u.id === updated.id ? updated : u));
 		} else {
 			alert('Failed to update API token permission.');
+		}
+	}
+
+	// Wording for the cool-down pill's tooltip. The addresses themselves are
+	// deliberately not exposed by the API — only how many are cooling down.
+	function cooldownTitle(n: number) {
+		return `${n} address${n === 1 ? '' : 'es'} currently serving an automatic failed-login cool-down. Clearing releases all of them and leaves any account lock in place; locking the account bars every address instead.`;
+	}
+
+	function lockLabel(user: AdminUser) {
+		return user.locked ? `Unlock ${user.username}` : `Lock ${user.username}`;
+	}
+
+	// Clearing cool-downs is its own action, on its own endpoint: the two
+	// controls point in opposite directions. Releasing a cool-down helps
+	// whoever tripped it, and locking is the containment move an admin reaches
+	// for on seeing a brute force, so neither may hide or imply the other.
+	// /clear-cooldowns leaves the account row alone, where /unlock would drop
+	// an admin lock as well — an admin relieving an innocent address behind a
+	// shared NAT gateway must not silently release the account too.
+	async function clearCooldowns(user: AdminUser) {
+		const res = await fetch(`/api/admin/users/${user.id}/clear-cooldowns`, {
+			method: 'POST',
+			credentials: 'include',
+		});
+		if (res.ok) {
+			const updated = (await res.json()) as AdminUser;
+			users = users.map((u) => (u.id === updated.id ? updated : u));
+		} else {
+			alert('Failed to clear the cool-down.');
 		}
 	}
 
@@ -386,6 +421,12 @@
 									<td class="col-username">{user.username}</td>
 									<td class="col-role">{user.is_admin ? 'Admin' : 'User'}</td>
 									<td class="col-status">
+										{#if user.active_cooldowns}
+											<span
+												class="status-pill cooldown-pill"
+												title={cooldownTitle(user.active_cooldowns)}
+											>Cooling down ({user.active_cooldowns})</span>
+										{/if}
 										{#if user.locked}
 											<span class="status-pill locked-pill">Locked</span>
 										{:else if user.pending_setup}
@@ -426,12 +467,24 @@
 										>
 											<Mail size={14} />
 										</button>
+										<!-- Clearing your own cool-down is allowed; locking or deleting
+										     yourself is not. -->
+										{#if user.active_cooldowns}
+											<button
+												class="icon-btn icon-cooldown"
+												onclick={() => clearCooldowns(user)}
+												title={`Clear cool-down for ${user.username}`}
+												aria-label={`Clear cool-down for ${user.username}`}
+											>
+												<LockOpen size={14} />
+											</button>
+										{/if}
 										{#if user.id !== auth.user?.id}
 											<button
 												class="icon-btn icon-lock"
 												onclick={() => toggleLock(user)}
-												title={user.locked ? `Unlock ${user.username}` : `Lock ${user.username}`}
-												aria-label={user.locked ? `Unlock ${user.username}` : `Lock ${user.username}`}
+												title={lockLabel(user)}
+												aria-label={lockLabel(user)}
 											>
 												{#if user.locked}
 													<LockOpen size={14} />
@@ -467,6 +520,12 @@
 									<div class="mob-user-info">
 										<div class="mob-user-name-row">
 											<span class="mob-user-name">{user.username}</span>
+											{#if user.active_cooldowns}
+												<span
+													class="mob-status-pill mob-status-cooldown"
+													title={cooldownTitle(user.active_cooldowns)}
+												>Cooling down ({user.active_cooldowns})</span>
+											{/if}
 											{#if user.locked}
 												<span class="mob-status-pill mob-status-locked">Locked</span>
 											{:else if user.pending_setup}
@@ -496,8 +555,13 @@
 												<Webhook size={15} /> {user.api_tokens_enabled ? 'Disable API' : 'Enable API'}
 											</button>
 										{/if}
+										{#if user.active_cooldowns}
+											<button class="mob-user-action-btn" onclick={() => clearCooldowns(user)} aria-label={`Clear cool-down for ${user.username}`}>
+												<LockOpen size={15} /> Clear cool-down
+											</button>
+										{/if}
 										{#if user.id !== auth.user?.id}
-											<button class="mob-user-action-btn" onclick={() => toggleLock(user)}>
+											<button class="mob-user-action-btn" onclick={() => toggleLock(user)} aria-label={lockLabel(user)}>
 												{#if user.locked}<LockOpen size={15} /> Unlock{:else}<Lock size={15} /> Lock{/if}
 											</button>
 											<button class="mob-user-action-btn mob-user-action-danger" onclick={() => deleteUser(user.id)}>
@@ -812,6 +876,7 @@
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
 	}
+	.cooldown-pill { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-bd); }
 	.locked-pill { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-bd); }
 	.active-pill { background: var(--bg-hover); color: var(--text-3); border: 1px solid var(--border); }
 	.pending-pill { background: var(--accent-lt); color: var(--accent-tx); border: 1px solid var(--accent); }
@@ -1099,6 +1164,7 @@
 		}
 		.mob-status-active { background: var(--bg-hover); color: var(--text-3); }
 		.mob-status-invited { background: var(--accent-lt); color: var(--accent); border: 1px solid var(--accent); }
+		.mob-status-cooldown { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-bd); }
 		.mob-status-locked { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-bd); }
 		.mob-user-sub {
 			font-size: 12px;
