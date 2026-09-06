@@ -387,7 +387,10 @@ func (r *Repo) setBool(ctx context.Context, col string, id, userID int64, val bo
 	if err != nil {
 		return fmt.Errorf("set %s: %w", col, err)
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("set %s rows affected: %w", col, err)
+	}
 	if rows == 0 {
 		return ErrNotFound
 	}
