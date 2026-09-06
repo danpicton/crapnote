@@ -313,19 +313,28 @@ describe('Settings — Global theme (admin)', () => {
 		expect(screen.queryByText('Failed to save the global theme.')).toBeNull();
 	});
 
-	// The mirror case: an older request that *succeeds* late must not clear the
-	// newest attempt's error or pull the select off the newest value.
-	it('ignores a stale success that lands after a newer save failed', async () => {
+	// The mirror case: an older request that *succeeds* late must not pull the
+	// select off the newer, saved pick. The select follows theme.globalTheme, so
+	// the mock mirrors the real store's own ordering guard — a save that resolves
+	// after a newer one has already written leaves globalTheme alone
+	// (theme.svelte.test.ts, 'an older setGlobal() resolving after a newer one
+	// does not resurrect its value'). Without that store guard globalTheme would
+	// land on 'bianco' here and drag the select back with it.
+	it('ignores a stale success that lands after a newer save succeeded', async () => {
 		mockTheme.globalTheme = 'rosso';
 		let resolveFirst: () => void = () => {};
+		let saves = 0;
+		let writes = 0;
 		mockTheme.setGlobal = vi.fn().mockImplementation(async (id: string) => {
+			const attempt = ++saves;
 			if (id === 'bianco') {
 				await new Promise<void>((resolve) => {
 					resolveFirst = resolve;
 				});
-				return;
 			}
-			throw new Error('boom');
+			if (attempt < writes) return;
+			writes = attempt;
+			mockTheme.globalTheme = id;
 		});
 		render(SettingsPage);
 		const select = screen.getByRole('combobox', { name: /global theme/i }) as HTMLSelectElement;
@@ -333,18 +342,18 @@ describe('Settings — Global theme (admin)', () => {
 		await fireEvent.change(select, { target: { value: 'bianco' } });
 		await fireEvent.change(select, { target: { value: 'verdana' } });
 		await waitFor(() => {
-			expect(screen.getByText('Failed to save the global theme.')).toBeInTheDocument();
+			expect(select.value).toBe('verdana');
 		});
-		expect(select.value).toBe('rosso');
 
 		resolveFirst();
 		await waitFor(() => {
 			expect(mockTheme.setGlobal).toHaveBeenCalledTimes(2);
 		});
 
-		expect(screen.getByText('Failed to save the global theme.')).toBeInTheDocument();
-		expect(select.value).toBe('rosso');
+		expect(select.value).toBe('verdana');
+		expect(screen.queryByText('Failed to save the global theme.')).toBeNull();
 	});
+
 });
 
 describe('Settings — Change password', () => {

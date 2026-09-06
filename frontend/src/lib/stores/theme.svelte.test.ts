@@ -361,6 +361,56 @@ describe('theme store — global (admin-set) theme', () => {
 		expect(theme.globalTheme).toBe('rosso');
 		expect(theme.current).toBe('rosso');
 	});
+
+	// Two saves in flight at once: the newest pick is the one the admin last
+	// asked for, so an older save resolving afterwards must not resurrect its
+	// value — the settings select follows globalTheme, so a late older write
+	// would visibly move it back off the newer pick.
+	it('an older setGlobal() resolving after a newer one does not resurrect its value', async () => {
+		let resolveFirst!: () => void;
+		mockApi.theme.setGlobal.mockImplementation((id: string) =>
+			id === 'bianco'
+				? new Promise<void>((resolve) => {
+						resolveFirst = resolve;
+					})
+				: Promise.resolve(undefined),
+		);
+
+		const theme = await freshTheme();
+		const first = theme.setGlobal('bianco');
+		await theme.setGlobal('verdana');
+		expect(theme.globalTheme).toBe('verdana');
+
+		resolveFirst();
+		await first;
+
+		expect(theme.globalTheme).toBe('verdana');
+		expect(theme.current).toBe('verdana');
+		expect(document.documentElement.getAttribute('data-theme')).toBe('verdana');
+	});
+
+	// The guard is about ordering, not about suppressing everything that
+	// overlaps: a newer save that lands last is still the one that applies.
+	it('a newer setGlobal() still applies when it resolves after an older one', async () => {
+		let resolveSecond!: () => void;
+		mockApi.theme.setGlobal.mockImplementation((id: string) =>
+			id === 'verdana'
+				? new Promise<void>((resolve) => {
+						resolveSecond = resolve;
+					})
+				: Promise.resolve(undefined),
+		);
+
+		const theme = await freshTheme();
+		await theme.setGlobal('bianco');
+		const second = theme.setGlobal('verdana');
+		expect(theme.globalTheme).toBe('bianco');
+
+		resolveSecond();
+		await second;
+
+		expect(theme.globalTheme).toBe('verdana');
+	});
 });
 
 describe('browser theme-color', () => {

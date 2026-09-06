@@ -50,12 +50,16 @@ function createThemeStore() {
 	let current = $state<ThemeId>('light');
 	let globalTheme = $state<ThemeId | null>(null);
 
-	// Bumped every time setGlobal() writes the global theme. init() snapshots it
-	// before its fetch starts and discards the response if the count has moved
-	// on, so a slow GET can never resurrect a value the admin has just replaced.
-	// A counter rather than a "has ever been written" flag: the test is whether
-	// *this* fetch is older than the latest write, so an init() started after a
-	// save is still free to apply what it reads.
+	// Sequence number of every setGlobal() call, in the order they were made.
+	let globalSaves = 0;
+
+	// The sequence number of the newest setGlobal() that has actually written
+	// the global theme — 0 before any has. Moves whenever a write lands, so
+	// init() can snapshot it before its fetch starts and discard the response
+	// if it has changed: a slow GET can never resurrect a value the admin has
+	// just replaced. A counter rather than a "has ever been written" flag: the
+	// test is whether *this* fetch is older than the latest write, so an init()
+	// started after a save is still free to apply what it reads.
 	let globalWrites = 0;
 
 	function applyToDOM(t: ThemeId) {
@@ -152,8 +156,15 @@ function createThemeStore() {
 	 *  this device has its own user-level preference. */
 	async function setGlobal(id: ThemeId) {
 		if (!isThemeId(id)) return;
+		const attempt = ++globalSaves;
 		await api.theme.setGlobal(id);
-		globalWrites++;
+		// Two saves can be in flight at once — the admin picked twice inside one
+		// request window. Only apply this one if no newer save has already
+		// written: an older PUT resolving last must not resurrect its value.
+		// Ordering, not exclusion — a newer save landing after an older one has
+		// applied is still the one that wins.
+		if (attempt < globalWrites) return;
+		globalWrites = attempt;
 		globalTheme = id;
 		if (!hasUserPreference()) {
 			current = id;
