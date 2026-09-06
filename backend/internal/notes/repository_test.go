@@ -179,8 +179,8 @@ func TestNoteRepo_Update_LockedArchivedNoteIsNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	note, _ := repo.Create(ctx, userID, "Locked and archived", "body")
-	repo.SetLocked(ctx, note.ID, userID, true) //nolint:errcheck
 	repo.Archive(ctx, note.ID, userID)         //nolint:errcheck
+	repo.SetLocked(ctx, note.ID, userID, true) //nolint:errcheck
 
 	_, err := repo.Update(ctx, note.ID, userID, strPtr("Changed"), nil)
 	if err != notes.ErrNotFound {

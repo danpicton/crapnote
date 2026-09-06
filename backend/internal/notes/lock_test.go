@@ -117,11 +117,11 @@ func TestNoteRepo_ListArchivedIncludesLockedFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
-		t.Fatalf("SetLocked: %v", err)
-	}
 	if err := repo.Archive(ctx, note.ID, userID); err != nil {
 		t.Fatalf("Archive: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
 	}
 
 	list, err := repo.ListArchived(ctx, userID, 0, 0)
@@ -344,8 +344,8 @@ func TestService_Delete_RejectsLockedNote(t *testing.T) {
 	}
 }
 
-// Star, pin and archive are metadata rather than content, so they stay
-// available while a note is locked.
+// Star and pin are metadata rather than content, so they stay available while
+// a note is locked.
 func TestService_MetadataOpsAllowedOnLockedNote(t *testing.T) {
 	svc, userID := newTestService(t)
 	ctx := context.Background()
@@ -363,12 +363,6 @@ func TestService_MetadataOpsAllowedOnLockedNote(t *testing.T) {
 	}
 	if _, err := svc.TogglePin(ctx, note.ID, userID); err != nil {
 		t.Fatalf("TogglePin on locked note: %v", err)
-	}
-	if err := svc.Archive(ctx, note.ID, userID); err != nil {
-		t.Fatalf("Archive on locked note: %v", err)
-	}
-	if err := svc.Unarchive(ctx, note.ID, userID); err != nil {
-		t.Fatalf("Unarchive on locked note: %v", err)
 	}
 }
 
@@ -603,6 +597,28 @@ func TestNoteRepo_SoftDelete_RejectsLockedNote(t *testing.T) {
 	}
 	if trashed != 0 {
 		t.Fatalf("locked note was trashed: %d rows", trashed)
+	}
+}
+
+func TestNoteRepo_Archive_RejectsLockedNote(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, err := repo.Create(ctx, userID, "Locked", "body")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := repo.SetLocked(ctx, note.ID, userID, true); err != nil {
+		t.Fatalf("SetLocked: %v", err)
+	}
+
+	if err := repo.Archive(ctx, note.ID, userID); !errors.Is(err, notes.ErrLocked) {
+		t.Fatalf("expected ErrLocked, got %v", err)
+	}
+	if _, err := repo.Get(ctx, note.ID, userID); err != nil {
+		t.Fatalf("locked note should remain in the main list: %v", err)
 	}
 }
 
