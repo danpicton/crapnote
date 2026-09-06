@@ -199,11 +199,25 @@
 	// Wording for the cool-down pill's tooltip. The addresses themselves are
 	// deliberately not exposed by the API — only how many are cooling down.
 	function cooldownTitle(n: number) {
-		return `${n} address${n === 1 ? '' : 'es'} currently serving an automatic failed-login cool-down. Unlocking the user clears them.`;
+		return `${n} address${n === 1 ? '' : 'es'} currently serving an automatic failed-login cool-down. Use the clear action to release them.`;
+	}
+
+	// Unlock covers both an admin lock and any automatic cool-downs, so a user
+	// who is only cooling down gets the unlock action too — locking them first
+	// would revoke the sessions of someone who may have done nothing wrong
+	// (the cool-down is per address, and addresses are shared behind NAT).
+	function lockAction(user: AdminUser): 'lock' | 'unlock' {
+		return user.locked || user.active_cooldowns ? 'unlock' : 'lock';
+	}
+
+	function lockLabel(user: AdminUser) {
+		if (user.locked) return `Unlock ${user.username}`;
+		if (user.active_cooldowns) return `Clear cool-down for ${user.username}`;
+		return `Lock ${user.username}`;
 	}
 
 	async function toggleLock(user: AdminUser) {
-		const action = user.locked ? 'unlock' : 'lock';
+		const action = lockAction(user);
 		const res = await fetch(`/api/admin/users/${user.id}/${action}`, {
 			method: 'POST',
 			credentials: 'include',
@@ -443,19 +457,23 @@
 										>
 											<Mail size={14} />
 										</button>
-										{#if user.id !== auth.user?.id}
+										<!-- Clearing your own cool-down is allowed; locking or deleting
+										     yourself is not. -->
+										{#if user.id !== auth.user?.id || user.active_cooldowns}
 											<button
 												class="icon-btn icon-lock"
 												onclick={() => toggleLock(user)}
-												title={user.locked ? `Unlock ${user.username}` : `Lock ${user.username}`}
-												aria-label={user.locked ? `Unlock ${user.username}` : `Lock ${user.username}`}
+												title={lockLabel(user)}
+												aria-label={lockLabel(user)}
 											>
-												{#if user.locked}
+												{#if lockAction(user) === 'unlock'}
 													<LockOpen size={14} />
 												{:else}
 													<Lock size={14} />
 												{/if}
 											</button>
+										{/if}
+										{#if user.id !== auth.user?.id}
 											<button
 												class="icon-btn icon-delete"
 												onclick={() => deleteUser(user.id)}
@@ -519,10 +537,12 @@
 												<Webhook size={15} /> {user.api_tokens_enabled ? 'Disable API' : 'Enable API'}
 											</button>
 										{/if}
-										{#if user.id !== auth.user?.id}
-											<button class="mob-user-action-btn" onclick={() => toggleLock(user)}>
-												{#if user.locked}<LockOpen size={15} /> Unlock{:else}<Lock size={15} /> Lock{/if}
+										{#if user.id !== auth.user?.id || user.active_cooldowns}
+											<button class="mob-user-action-btn" onclick={() => toggleLock(user)} aria-label={lockLabel(user)}>
+												{#if user.locked}<LockOpen size={15} /> Unlock{:else if user.active_cooldowns}<LockOpen size={15} /> Clear cool-down{:else}<Lock size={15} /> Lock{/if}
 											</button>
+										{/if}
+										{#if user.id !== auth.user?.id}
 											<button class="mob-user-action-btn mob-user-action-danger" onclick={() => deleteUser(user.id)}>
 												<Trash2 size={15} /> Delete
 											</button>

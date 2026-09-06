@@ -102,6 +102,40 @@ describe('Admin page', () => {
 		expect(screen.queryByText('Locked')).not.toBeInTheDocument();
 	});
 
+	it('clears a cool-down without locking the account first', async () => {
+		const cooling = { id: 2, username: 'alice', is_admin: false, locked: false, active_cooldowns: 2, created_at: '' };
+		const cleared = { ...cooling, active_cooldowns: 0 };
+		mockFetch
+			.mockResolvedValueOnce(ok([mockUsers[0], cooling]))
+			.mockResolvedValueOnce(ok(cleared));
+
+		render(AdminPage);
+		await waitFor(() => screen.getAllByText('alice'));
+		await fireEvent.click(screen.getAllByRole('button', { name: /clear cool-down for alice/i })[0]);
+
+		await waitFor(() => {
+			const call = mockFetch.mock.calls.find((c) => typeof c[0] === 'string' && c[0].endsWith('/2/unlock'));
+			expect(call).toBeTruthy();
+		});
+		// Never locks on the way, which would revoke the user's sessions.
+		expect(mockFetch.mock.calls.some((c) => typeof c[0] === 'string' && c[0].endsWith('/lock'))).toBe(false);
+		await waitFor(() => expect(screen.queryByText(/cooling down/i)).not.toBeInTheDocument());
+	});
+
+	it('lets an admin clear a cool-down on their own account', async () => {
+		mockFetch.mockResolvedValue(
+			ok([
+				{ id: 1, username: 'admin', is_admin: true, locked: false, active_cooldowns: 1, created_at: '' },
+				mockUsers[1],
+			])
+		);
+		render(AdminPage);
+		await waitFor(() => screen.getAllByText('admin'));
+		expect(screen.getAllByRole('button', { name: /clear cool-down for admin/i }).length).toBeGreaterThan(0);
+		// Still no lock or delete action against yourself.
+		expect(screen.queryByRole('button', { name: /lock admin/i })).not.toBeInTheDocument();
+	});
+
 	it('shows locked state for a locked user', async () => {
 		mockFetch.mockResolvedValue(
 			ok([
