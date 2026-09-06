@@ -149,6 +149,29 @@ func TestNoteRepo_Update(t *testing.T) {
 	}
 }
 
+func TestNoteRepo_Update_ArchivedNoteDoesNotWrite(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	note, _ := repo.Create(ctx, userID, "Archived", "original body")
+	repo.Archive(ctx, note.ID, userID) //nolint:errcheck
+
+	_, err := repo.Update(ctx, note.ID, userID, strPtr("Changed"), strPtr("changed body"))
+	if err != notes.ErrNotFound {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+
+	archived, err := repo.ListArchived(ctx, userID, 0, 0)
+	if err != nil {
+		t.Fatalf("ListArchived: %v", err)
+	}
+	if len(archived) != 1 || archived[0].Title != "Archived" || archived[0].Body != "original body" {
+		t.Fatalf("archived note was changed: %+v", archived)
+	}
+}
+
 func TestNoteRepo_Update_WrongUser(t *testing.T) {
 	database := openTestDB(t)
 	userID := seedUser(t, database)

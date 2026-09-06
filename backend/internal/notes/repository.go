@@ -154,7 +154,7 @@ func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string
 		SET title      = CASE WHEN ? IS NOT NULL THEN ? ELSE title END,
 		    body       = CASE WHEN ? IS NOT NULL THEN ? ELSE body  END,
 		    updated_at = ?
-		WHERE id = ? AND user_id = ? AND locked = 0`,
+		WHERE id = ? AND user_id = ? AND archived = 0 AND locked = 0`,
 		title, title, body, body, now, id, userID,
 	)
 	if err != nil {
