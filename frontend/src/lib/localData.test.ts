@@ -110,6 +110,22 @@ describe('session user persistence', () => {
 		localStorage.setItem('crapnote:session-user', 'not json');
 		expect(readSessionUser()).toBeNull();
 	});
+
+	it('degrades safely when localStorage access is denied', () => {
+		const denied = () => {
+			throw new Error('SecurityError: storage disabled');
+		};
+		vi.stubGlobal('localStorage', {
+			getItem: denied,
+			setItem: denied,
+			removeItem: denied,
+		});
+		const user = { id: 5, username: 'alice', is_admin: false, created_at: '' };
+
+		expect(() => persistSessionUser(user)).not.toThrow();
+		expect(readSessionUser()).toBeNull();
+		expect(() => clearSessionUser()).not.toThrow();
+	});
 });
 
 describe('ensureOfflineOwner', () => {

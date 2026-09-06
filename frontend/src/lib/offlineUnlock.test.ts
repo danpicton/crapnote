@@ -134,6 +134,22 @@ describe('offline unlock passcode', () => {
 		expect(hasUnlockPasscode(7)).toBe(false);
 		expect(await verifyUnlockPasscode(7, 'pw')).toBe(false);
 	});
+
+	it('fails closed without throwing when localStorage access is denied', async () => {
+		const denied = () => {
+			throw new Error('SecurityError: storage disabled');
+		};
+		vi.stubGlobal('localStorage', {
+			getItem: denied,
+			setItem: denied,
+			removeItem: denied,
+		});
+
+		await expect(storeUnlockPasscode(7, 'pw')).resolves.toBeUndefined();
+		expect(hasUnlockPasscode(7)).toBe(false);
+		await expect(verifyUnlockPasscode(7, 'pw')).resolves.toBe(false);
+		expect(() => clearUnlockPasscode()).not.toThrow();
+	});
 });
 
 describe('offline unlock throttle', () => {
