@@ -81,6 +81,21 @@ describe('service worker lifecycle', () => {
 		await expect(dispatchExtendable('install')).resolves.toBeUndefined();
 	});
 
+	it('does not reject installation when precache writes are denied', async () => {
+		vi.stubGlobal('caches', {
+			open: vi.fn().mockResolvedValue({
+				addAll: vi.fn().mockRejectedValue(
+					new DOMException('Cache write denied', 'SecurityError')
+				),
+			}),
+		});
+		const skipWaiting = vi.fn().mockResolvedValue(undefined);
+		vi.stubGlobal('skipWaiting', skipWaiting);
+
+		await expect(dispatchExtendable('install')).resolves.toBeUndefined();
+		expect(skipWaiting).toHaveBeenCalledOnce();
+	});
+
 	it('still claims clients when Cache Storage is disabled during activation', async () => {
 		vi.stubGlobal('caches', {
 			keys: vi.fn().mockRejectedValue(new Error('SecurityError: storage disabled')),
