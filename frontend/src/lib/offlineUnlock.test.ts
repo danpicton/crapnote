@@ -182,6 +182,20 @@ describe('offline unlock throttle', () => {
 		expect(unlockLockoutRemainingMs(1_000)).toBeGreaterThan(0);
 	});
 
+	it('grants no attempts after reload when the counter cannot be persisted', () => {
+		const readableStorage = localStorage;
+		vi.stubGlobal('localStorage', {
+			getItem: readableStorage.getItem.bind(readableStorage),
+			setItem: () => {
+				throw new Error('SecurityError: storage write denied');
+			},
+			removeItem: readableStorage.removeItem.bind(readableStorage),
+		});
+
+		// No volatile failures exist here, matching a fresh module after reload.
+		expect(unlockLockoutRemainingMs(1_000)).toBeGreaterThan(0);
+	});
+
 	it('locks out in memory when attempt-counter writes are denied', () => {
 		const readableStorage = localStorage;
 		vi.stubGlobal('localStorage', {
