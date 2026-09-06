@@ -443,6 +443,24 @@ describe('syncOfflineChanges — offline deletes', () => {
 		expect(api.notes.archive).not.toHaveBeenCalled();
 	});
 
+	it('a locked delete clears a stale archive intent instead of archiving on the next sync', async () => {
+		const note = fakeCachedNote({ id: 7, deleted_offline: true, archived_offline: true });
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.delete).mockRejectedValue(new ApiError(423, 'note is locked'));
+
+		const result = await syncOfflineChanges('online', 1);
+
+		expect(offlineDB.upsertNote).toHaveBeenCalledWith(fakeDB, expect.objectContaining({
+			id: 7,
+			locked: true,
+			deleted_offline: false,
+			archived_offline: false,
+		}));
+		expect(offlineDB.deleteNote).not.toHaveBeenCalled();
+		expect(result.locked).toBe(1);
+		expect(result.errors).toBe(0);
+	});
+
 	it('keeps the flagged note for retry when the delete call fails', async () => {
 		const note = fakeCachedNote({ id: 7, deleted_offline: true });
 		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);

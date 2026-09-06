@@ -211,14 +211,20 @@ async function syncDeletedNote(db: IDBDatabase, note: CachedNote, result: SyncRe
  * another device), so forcing the delete through would defeat it.
  *
  * Keep the note, mark it locked so the UI stops presenting it as freely
- * editable, and clear the delete intent so it leaves the dirty queue instead
- * of being retried on every heartbeat. Any other pending work on the entry
+ * editable, and clear both removal intents so it leaves the dirty queue instead
+ * of retrying the delete or falling through to a stale archive intent on the
+ * next heartbeat. Any other pending work on the entry
  * (content edits, flag toggles) is left alone: the next run replays it
  * through the normal phases, which already resolve a 423 by preserving the
  * local edit as a "[sync conflict]" note.
  */
 async function abandonLockedDelete(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<void> {
-	await upsertNote(db, { ...note, locked: true, deleted_offline: false });
+	await upsertNote(db, {
+		...note,
+		locked: true,
+		deleted_offline: false,
+		archived_offline: false,
+	});
 	result.locked++;
 }
 
