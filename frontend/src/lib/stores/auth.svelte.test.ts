@@ -133,6 +133,48 @@ describe('offline store ownership stamping', () => {
 	});
 });
 
+// The two `setImageCacheIdentity` calls in loadSession look interchangeable and
+// are not: the root layout withholds its children until the session check
+// resolves, so whether a call is awaited is a first-paint cost. These pin which
+// is which, because the asymmetry is invisible from the call sites alone.
+describe('image-cache identity handshake', () => {
+	it('does not block the session check on the revoke sent on the way in', async () => {
+		vi.mocked(api.auth.me).mockResolvedValue(fakeUser);
+		// Models the worst case: a controlling worker that predates this
+		// protocol and never acks, leaving only the page's 1s fallback timer.
+		vi.mocked(setImageCacheIdentity).mockReturnValueOnce(new Promise(() => {}));
+
+		await auth.init();
+
+		expect(setImageCacheIdentity).toHaveBeenNthCalledWith(1, null);
+		expect(auth.user).toEqual(fakeUser);
+		expect(auth.loading).toBe(false);
+	});
+
+	it('withholds the resolved session until the worker holds the granted proof', async () => {
+		vi.mocked(api.auth.me).mockResolvedValue(fakeUser);
+		let grantAcked!: () => void;
+		vi.mocked(setImageCacheIdentity)
+			.mockResolvedValueOnce(undefined)
+			.mockReturnValueOnce(new Promise((resolve) => { grantAcked = () => resolve(); }));
+
+		let settled = false;
+		const ready = auth.init().then(() => { settled = true; });
+		await vi.waitFor(() => expect(setImageCacheIdentity).toHaveBeenCalledTimes(2));
+
+		// An image requested here would be decided unproved, and offline that
+		// is a 503 an <img> never retries — so the layout must still be held.
+		expect(settled).toBe(false);
+		expect(auth.loading).toBe(true);
+
+		grantAcked();
+		await ready;
+
+		expect(setImageCacheIdentity).toHaveBeenNthCalledWith(2, 3);
+		expect(auth.loading).toBe(false);
+	});
+});
+
 describe('offline session restore', () => {
 	it('persists the user on a successful session check', async () => {
 		vi.mocked(api.auth.me).mockResolvedValue(fakeUser);

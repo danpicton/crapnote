@@ -64,7 +64,16 @@ async function loadSession(): Promise<void> {
 	loading = true;
 	// A reload must not inherit this client's previous worker authorisation
 	// while the new server/offline session decision is still pending.
-	await setImageCacheIdentity(null);
+	//
+	// Deliberately NOT awaited, unlike the grant in the `finally` below. A
+	// revoke has nothing to race: this runs once per document, and a document
+	// the worker has never seen holds no authorisation to withdraw — the
+	// worker keys proofs by client id, and `imageCacheUserId` starts null.
+	// Awaiting it bought nothing and cost a worker round trip (a full second
+	// when the controlling worker predates this protocol and never acks) in
+	// front of every protected first paint, because the root layout withholds
+	// its children until this function resolves.
+	void setImageCacheIdentity(null);
 	try {
 		user = await api.auth.me();
 		// The server vouched for this session, so there is nothing to unlock —
@@ -127,6 +136,11 @@ async function loadSession(): Promise<void> {
 	} finally {
 		// This is sent only after the server vouched for the session or a valid
 		// browsing-session proof was recovered. A locked/null result revokes.
+		//
+		// Awaited, unlike the revoke on the way in: `loading` going false
+		// releases the layout's children, and a note image requested before
+		// the worker holds this proof is decided unproved. Offline that is a
+		// 503 an <img> never retries, so the grant has to land first.
 		await setImageCacheIdentity(user !== null && !locked ? user.id : null);
 		loading = false;
 	}
