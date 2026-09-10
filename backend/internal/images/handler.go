@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/ratelimit"
@@ -226,7 +227,16 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", mimeType)
-	w.Header().Set("Cache-Control", "private, max-age=31536000, immutable")
+	// The service worker partitions cached images by its locally proved user
+	// and accepts a network response only when the server confirms that the
+	// authenticated owner still matches (the session cookie can change in a
+	// different tab while a request is in flight).
+	w.Header().Set("X-Crapnote-Image-Owner", strconv.FormatInt(userID, 10))
+	// Do not leave a second, unowned copy in the browser HTTP cache. The
+	// service worker explicitly stores authorized responses in its owner-
+	// partitioned Cache Storage; without a controlling worker every request
+	// must reach this handler and repeat the session/ownership checks.
+	w.Header().Set("Cache-Control", "private, no-store")
 	w.Write(data) //nolint:errcheck
 }
 

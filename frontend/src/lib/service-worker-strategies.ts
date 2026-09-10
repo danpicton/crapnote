@@ -9,7 +9,8 @@
 // Strategy summary:
 //   - Navigations: cache-first on the app shell, deliberately without
 //     background revalidation (see navigationCacheFirst).
-//   - /api/images/*: cache-first (image blobs are immutable per id).
+//   - /api/images/*: cache-first only for a client whose identity has been
+//     proved and matches the offline-store owner; otherwise network-only.
 //   - All other /api/*: network only, NEVER served from cache. Stale API
 //     JSON served on network failure used to make the app believe it was
 //     online and fully synced while in airplane mode. Offline data lives in
@@ -32,6 +33,7 @@ export const OFFLINE_HEADER = 'X-Crapnote-Offline';
 export type FetchStrategy =
 	| 'passthrough'
 	| 'navigation-cache-first'
+	| 'image-cache-first'
 	| 'cache-first'
 	| 'network-only';
 
@@ -49,7 +51,7 @@ export function selectStrategy(request: Request, swOrigin: string): FetchStrateg
 		// Image blobs are immutable per id — cache-first so note images keep
 		// rendering offline and don't refetch on every list render.
 		if (request.method === 'GET' && url.pathname.startsWith('/api/images/')) {
-			return 'cache-first';
+			return 'image-cache-first';
 		}
 		// Everything else on the API: network only, reads and writes alike.
 		// No SW-level cache or queue — the frontend owns offline note state in
@@ -111,9 +113,73 @@ export async function cacheFirst(request: Request, cacheName: string): Promise<R
 	}
 }
 
-export async function networkOnly(request: Request): Promise<Response> {
+/**
+ * Cache-first for a note image only after the requesting page has proved its
+ * identity and that identity matches the owner stamped on the offline store.
+ *
+ * When the gate is shut we deliberately go to the network instead of
+ * returning a synthetic denial immediately. An online request still receives
+ * the backend's normal session/ownership decision, while an offline direct
+ * URL cannot fall back to the previous user's cached bytes.
+ */
+export async function imageCacheFirst(
+	request: Request,
+	cacheName: string,
+	cacheOwner: () => Promise<number | null>
+): Promise<Response> {
+	let owner: number | null = null;
 	try {
-		return await fetch(request);
+		owner = await cacheOwner();
+	} catch {
+		// An unreadable owner record or unavailable IDB is uncertainty, and the
+		// local cache gate always fails closed on uncertainty.
+	}
+	// `no-store` matters here: the backend marks images private+immutable, so a
+	// plain fetch may be satisfied by the browser's HTTP cache and bypass the
+	// gate just as surely as Cache Storage did.
+	if (owner === null) return networkOnly(request, true);
+
+	// Cache entries are partitioned by owner. Besides making the ownership
+	// relationship explicit, this closes races where an old owner's in-flight
+	// response completes after logout/account-switch cleanup and repopulates a
+	// shared cache. A later user never consults that old owner's partition.
+	let cache: Cache | null = null;
+	try {
+		cache = await caches.open(`${cacheName}-images-${owner}`);
+		const cached = await cache.match(request);
+		if (cached) return cached;
+	} catch {
+		// Cache Storage is an optimisation. If it is unavailable, retain the
+		// backend's normal online behaviour rather than rejecting the request.
+	}
+	try {
+		const response = await fetch(request, { cache: 'no-store' });
+		if (response.ok) {
+			// The cookie can change in another tab between the local owner check
+			// and this fetch. Only accept/cache bytes when the backend confirms
+			// that its authenticated owner is the same identity that opened this
+			// partition; otherwise even the one in-flight response fails closed.
+			if (response.headers.get('X-Crapnote-Image-Owner') !== String(owner)) {
+				return new Response('Image owner changed', { status: 403 });
+			}
+			try {
+				await cache?.put(request, response.clone());
+			} catch {
+				// Quota/eviction failures must not replace valid online bytes with
+				// an "Offline" response. This image simply will not work offline.
+			}
+		}
+		return response;
+	} catch {
+		return new Response('Offline', { status: 503 });
+	}
+}
+
+export async function networkOnly(request: Request, bypassHttpCache = false): Promise<Response> {
+	try {
+		return bypassHttpCache
+			? await fetch(request, { cache: 'no-store' })
+			: await fetch(request);
 	} catch {
 		// No SW-level queueing or cache fallback: surface a marked 503 so the
 		// API client throws OfflineError and the caller's own offline handling

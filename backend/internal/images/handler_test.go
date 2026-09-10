@@ -7,6 +7,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -162,11 +163,14 @@ func TestServe_Success(t *testing.T) {
 	if w2.Body.Len() == 0 {
 		t.Fatal("expected image bytes in response body")
 	}
-	if cc := w2.Header().Get("Cache-Control"); cc == "" {
-		t.Fatal("expected Cache-Control header")
+	if cc := w2.Header().Get("Cache-Control"); cc != "private, no-store" {
+		t.Fatalf("expected browser HTTP caching disabled, got %q", cc)
 	}
 	if ct := w2.Header().Get("Content-Type"); ct == "" {
 		t.Fatal("expected Content-Type header")
+	}
+	if owner := w2.Header().Get("X-Crapnote-Image-Owner"); owner != strconv.FormatInt(user.ID, 10) {
+		t.Fatalf("expected authenticated image owner %d, got %q", user.ID, owner)
 	}
 }
 

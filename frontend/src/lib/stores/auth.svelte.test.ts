@@ -34,6 +34,10 @@ vi.mock('$lib/localData', () => ({
 	clearSessionUser: vi.fn(),
 }));
 
+vi.mock('$lib/sw-register', () => ({
+	setImageCacheIdentity: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('$lib/offlineUnlock', () => ({
 	storeUnlockPasscode: vi.fn().mockResolvedValue(undefined),
 	hasUnlockPasscode: vi.fn().mockReturnValue(true),
@@ -48,6 +52,7 @@ vi.mock('$lib/offlineUnlock', () => ({
 }));
 
 import { api, ApiError, OfflineError } from '$lib/api';
+import { setImageCacheIdentity } from '$lib/sw-register';
 import {
 	storeUnlockPasscode,
 	hasUnlockPasscode,
@@ -86,6 +91,7 @@ describe('auth.logout', () => {
 		await auth.logout();
 
 		expect(clearLocalData).toHaveBeenCalledTimes(1);
+		expect(setImageCacheIdentity).toHaveBeenCalledWith(null);
 		expect(auth.user).toBeNull();
 	});
 
@@ -107,6 +113,7 @@ describe('offline store ownership stamping', () => {
 		await auth.login('alice', 'pw');
 
 		expect(ensureOfflineOwner).toHaveBeenCalledWith(3);
+		expect(setImageCacheIdentity).toHaveBeenCalledWith(3);
 	});
 
 	it('init binds the offline store to the restored session user', async () => {
