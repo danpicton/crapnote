@@ -27,6 +27,11 @@ const sw = self as unknown as ServiceWorkerGlobalScope;
 
 const CACHE_NAME = `crapnote-${version}`;
 
+function isStorageDenied(error: unknown): boolean {
+	return error instanceof DOMException &&
+		(error.name === 'SecurityError' || error.name === 'QuotaExceededError');
+}
+
 // Assets that come bundled with the build — safe to cache aggressively.
 const PRECACHE = [
 	...build,         // hashed JS/CSS chunks under /_app/immutable/
@@ -38,12 +43,26 @@ const PRECACHE = [
 sw.addEventListener('install', (event) => {
 	event.waitUntil(
 		(async () => {
-			const cache = await caches.open(CACHE_NAME);
+			let cache: Cache;
+			try {
+				cache = await caches.open(CACHE_NAME);
+			} catch {
+				// Storage may be disabled by browser policy. Install without offline
+				// support rather than rejecting the service worker lifecycle.
+				await sw.skipWaiting();
+				return;
+			}
 
-			// Pre-cache every immutable build asset. Using addAll so a single
-			// failure aborts the install — better to leave the previous SW in
-			// charge than to ship a half-populated cache.
-			await cache.addAll(PRECACHE);
+			// Pre-cache every immutable build asset. Network failures still abort
+			// the install rather than shipping a half-populated cache. A browser
+			// policy or quota denial is different: install without offline support.
+			try {
+				await cache.addAll(PRECACHE);
+			} catch (error) {
+				if (!isStorageDenied(error)) throw error;
+				await sw.skipWaiting();
+				return;
+			}
 
 			// Also prime the app shell HTML so navigations work offline. We
 			// fetch '/' here because adapter-static emits a single fallback
@@ -67,8 +86,12 @@ sw.addEventListener('install', (event) => {
 sw.addEventListener('activate', (event) => {
 	event.waitUntil(
 		(async () => {
-			const keys = await caches.keys();
-			await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
+			try {
+				const keys = await caches.keys();
+				await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
+			} catch {
+				// Cache cleanup is best-effort when browser storage is unavailable.
+			}
 			await sw.clients.claim();
 		})(),
 	);

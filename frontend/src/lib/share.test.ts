@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
 	buildSharedNote,
 	hasShareContent,
@@ -85,7 +85,10 @@ describe('buildSharedNote', () => {
 });
 
 describe('stashing a share across login', () => {
-	beforeEach(() => sessionStorage.clear());
+	beforeEach(() => {
+		vi.unstubAllGlobals();
+		sessionStorage.clear();
+	});
 
 	it('round-trips a payload', () => {
 		const payload = { title: 'T', text: 'B', url: 'https://example.com' };
@@ -110,6 +113,21 @@ describe('stashing a share across login', () => {
 
 	it('survives corrupt storage without throwing', () => {
 		sessionStorage.setItem('crapnote.pendingShare', 'not json');
+		expect(takeStashedShare()).toBeNull();
+	});
+
+	it('degrades safely when sessionStorage access is denied', () => {
+		const denied = () => {
+			throw new Error('SecurityError: storage disabled');
+		};
+		vi.stubGlobal('sessionStorage', {
+			getItem: denied,
+			setItem: denied,
+			removeItem: denied,
+		});
+
+		expect(() => stashShare({ text: 'shared' })).not.toThrow();
+		expect(hasStashedShare()).toBe(false);
 		expect(takeStashedShare()).toBeNull();
 	});
 });

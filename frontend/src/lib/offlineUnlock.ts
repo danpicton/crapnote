@@ -207,24 +207,48 @@ export function clearUnlockPasscode(): void {
 	clearIdentityProof();
 	try {
 		localStorage.removeItem(RECORD_KEY);
-		localStorage.removeItem(ATTEMPTS_KEY);
 	} catch {
 		// Nothing to clear if storage is unavailable.
 	}
+	resetUnlockAttempts();
 }
 
+// Persistence can fail independently of reads (for example, quota or browser
+// policy changes). Keep the strongest counter seen in this page alive so a
+// denied write cannot turn repeated guesses into unlimited free attempts.
+let volatileAttempts: AttemptRecord = { failures: 0, lockedUntil: 0 };
+let attemptStorageReadable = true;
+let attemptStorageWritable = true;
+
 function readAttempts(): AttemptRecord {
+	let stored: AttemptRecord = { failures: 0, lockedUntil: 0 };
 	try {
 		const raw = localStorage.getItem(ATTEMPTS_KEY);
-		if (!raw) return { failures: 0, lockedUntil: 0 };
-		const rec = JSON.parse(raw) as AttemptRecord;
-		return {
-			failures: typeof rec?.failures === 'number' ? rec.failures : 0,
-			lockedUntil: typeof rec?.lockedUntil === 'number' ? rec.lockedUntil : 0,
-		};
+		if (raw) {
+			const rec = JSON.parse(raw) as AttemptRecord;
+			stored = {
+				failures: typeof rec?.failures === 'number' ? rec.failures : 0,
+				lockedUntil: typeof rec?.lockedUntil === 'number' ? rec.lockedUntil : 0,
+			};
+		}
+		attemptStorageReadable = true;
+		try {
+			// Reading an empty or stale counter is not enough: if this page cannot
+			// persist the next failure, a reload would otherwise restore free tries.
+			localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(stored));
+			attemptStorageWritable = true;
+		} catch {
+			attemptStorageWritable = false;
+		}
 	} catch {
-		return { failures: 0, lockedUntil: 0 };
+		// An unknown persisted lockout may be active. Callers fail closed rather
+		// than treating an unreadable counter as a fresh set of attempts.
+		attemptStorageReadable = false;
 	}
+	return {
+		failures: Math.max(stored.failures, volatileAttempts.failures),
+		lockedUntil: Math.max(stored.lockedUntil, volatileAttempts.lockedUntil),
+	};
 }
 
 /**
@@ -245,6 +269,7 @@ export function recordFailedUnlock(now: number = Date.now()): void {
 		over > 0
 			? now + Math.min(UNLOCK_BACKOFF_BASE_MS * 2 ** (over - 1), UNLOCK_BACKOFF_MAX_MS)
 			: 0;
+	volatileAttempts = { failures, lockedUntil };
 	try {
 		localStorage.setItem(ATTEMPTS_KEY, JSON.stringify({ failures, lockedUntil }));
 	} catch {
@@ -254,11 +279,14 @@ export function recordFailedUnlock(now: number = Date.now()): void {
 
 /** Milliseconds left before another attempt is accepted (0 when allowed). */
 export function unlockLockoutRemainingMs(now: number = Date.now()): number {
-	return Math.max(0, readAttempts().lockedUntil - now);
+	const attempts = readAttempts();
+	if (!attemptStorageReadable || !attemptStorageWritable) return UNLOCK_BACKOFF_MAX_MS;
+	return Math.max(0, attempts.lockedUntil - now);
 }
 
 /** Clears the failure count after a successful unlock. */
 export function resetUnlockAttempts(): void {
+	volatileAttempts = { failures: 0, lockedUntil: 0 };
 	try {
 		localStorage.removeItem(ATTEMPTS_KEY);
 	} catch {

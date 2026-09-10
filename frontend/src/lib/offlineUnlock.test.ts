@@ -23,6 +23,7 @@ beforeEach(() => {
 	vi.unstubAllGlobals();
 	localStorage.clear();
 	sessionStorage.clear();
+	resetUnlockAttempts();
 });
 
 describe('offline unlock passcode', () => {
@@ -133,6 +134,22 @@ describe('offline unlock passcode', () => {
 		expect(hasUnlockPasscode(7)).toBe(false);
 		expect(await verifyUnlockPasscode(7, 'pw')).toBe(false);
 	});
+
+	it('fails closed without throwing when localStorage access is denied', async () => {
+		const denied = () => {
+			throw new Error('SecurityError: storage disabled');
+		};
+		vi.stubGlobal('localStorage', {
+			getItem: denied,
+			setItem: denied,
+			removeItem: denied,
+		});
+
+		await expect(storeUnlockPasscode(7, 'pw')).resolves.toBeUndefined();
+		expect(hasUnlockPasscode(7)).toBe(false);
+		await expect(verifyUnlockPasscode(7, 'pw')).resolves.toBe(false);
+		expect(() => clearUnlockPasscode()).not.toThrow();
+	});
 });
 
 describe('offline unlock throttle', () => {
@@ -151,6 +168,47 @@ describe('offline unlock throttle', () => {
 		recordFailedUnlock(1_000 + first);
 		const second = unlockLockoutRemainingMs(1_000 + first);
 		expect(second).toBeGreaterThan(first);
+	});
+
+	it('grants no attempts when the persisted counter cannot be read', () => {
+		vi.stubGlobal('localStorage', {
+			getItem: () => {
+				throw new Error('SecurityError: storage read denied');
+			},
+			setItem: vi.fn(),
+			removeItem: vi.fn(),
+		});
+
+		expect(unlockLockoutRemainingMs(1_000)).toBeGreaterThan(0);
+	});
+
+	it('grants no attempts after reload when the counter cannot be persisted', () => {
+		const readableStorage = localStorage;
+		vi.stubGlobal('localStorage', {
+			getItem: readableStorage.getItem.bind(readableStorage),
+			setItem: () => {
+				throw new Error('SecurityError: storage write denied');
+			},
+			removeItem: readableStorage.removeItem.bind(readableStorage),
+		});
+
+		// No volatile failures exist here, matching a fresh module after reload.
+		expect(unlockLockoutRemainingMs(1_000)).toBeGreaterThan(0);
+	});
+
+	it('locks out in memory when attempt-counter writes are denied', () => {
+		const readableStorage = localStorage;
+		vi.stubGlobal('localStorage', {
+			getItem: readableStorage.getItem.bind(readableStorage),
+			setItem: () => {
+				throw new Error('SecurityError: storage write denied');
+			},
+			removeItem: readableStorage.removeItem.bind(readableStorage),
+		});
+
+		for (let i = 0; i < UNLOCK_FREE_ATTEMPTS + 1; i++) recordFailedUnlock(1_000);
+
+		expect(unlockLockoutRemainingMs(1_000)).toBeGreaterThan(0);
 	});
 
 	it('caps the backoff so the owner is never locked out for ever', () => {
