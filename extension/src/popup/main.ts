@@ -30,7 +30,7 @@ async function popupContext(): Promise<PopupContext> {
 }
 
 void (async () => {
-	const settings = await loadSettings(syncStore());
+	const settings = await loadSettings(syncStore(), localStore());
 	await initPopup(document, {
 		settings,
 		client: new CrapNoteClient(settings),

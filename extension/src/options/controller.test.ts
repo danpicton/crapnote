@@ -35,7 +35,7 @@ describe('options page', () => {
 		document.getElementById('options-form')!.dispatchEvent(new Event('submit'));
 		await new Promise((r) => setTimeout(r));
 
-		const saved = await loadSettings(store);
+		const saved = await loadSettings(store, store);
 		expect(saved.serverUrl).toBe('https://n.example.com');
 		expect(saved.apiToken).toBe('tok');
 		expect(saved.defaultLinkTag).toBe('Bookmarks');

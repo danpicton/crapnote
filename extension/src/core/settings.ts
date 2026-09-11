@@ -27,8 +27,12 @@ const SYNC_KEYS = [
 ] as const satisfies readonly (keyof Settings)[];
 const LOCAL_KEYS = ['apiToken', 'readeckToken'] as const satisfies readonly (keyof Settings)[];
 
-export async function loadSettings(store: KVStore): Promise<Settings> {
-	const stored = await store.get(KEYS);
+export async function loadSettings(sync: KVStore, local: KVStore): Promise<Settings> {
+	const [synced, localValues] = await Promise.all([
+		sync.get([...SYNC_KEYS]),
+		local.get([...LOCAL_KEYS]),
+	]);
+	const stored = { ...synced, ...localValues };
 	const settings = { ...DEFAULT_SETTINGS };
 	for (const key of KEYS) {
 		const value = stored[key];

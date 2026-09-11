@@ -27,8 +27,29 @@ describe('settings', () => {
 		});
 	});
 
+	it('loads tokens locally and preferences from sync storage', async () => {
+		const sync = memoryStore({
+			serverUrl: 'https://notes.example.com',
+			apiToken: 'wrong-sync-token',
+			defaultLinkTag: 'Bookmarks',
+			defaultClipTag: 'Clips',
+			readeckUrl: 'https://readeck.example.com',
+			readeckToken: 'wrong-sync-readeck-token',
+		});
+		const local = memoryStore({ apiToken: 'local-token', readeckToken: 'local-readeck-token' });
+
+		expect(await loadSettings(sync, local)).toEqual({
+			serverUrl: 'https://notes.example.com',
+			apiToken: 'local-token',
+			defaultLinkTag: 'Bookmarks',
+			defaultClipTag: 'Clips',
+			readeckUrl: 'https://readeck.example.com',
+			readeckToken: 'local-readeck-token',
+		});
+	});
+
 	it('returns defaults when nothing is stored', async () => {
-		const settings = await loadSettings(memoryStore());
+		const settings = await loadSettings(memoryStore(), memoryStore());
 		expect(settings.serverUrl).toBe('');
 		expect(settings.apiToken).toBe('');
 		expect(settings.defaultLinkTag).toBe('Links');
@@ -47,7 +68,7 @@ describe('settings', () => {
 			readeckUrl: 'https://readeck.example.com',
 			readeckToken: 'rd456',
 		});
-		const settings = await loadSettings(store);
+		const settings = await loadSettings(store, store);
 		expect(settings.serverUrl).toBe('https://notes.example.com');
 		expect(settings.defaultLinkTag).toBe('Bookmarks');
 		expect(settings.readeckToken).toBe('rd456');
@@ -55,7 +76,7 @@ describe('settings', () => {
 
 	it('strips a trailing slash from the server URL on load', async () => {
 		const store = memoryStore({ serverUrl: 'https://notes.example.com/' });
-		const settings = await loadSettings(store);
+		const settings = await loadSettings(store, memoryStore());
 		expect(settings.serverUrl).toBe('https://notes.example.com');
 	});
 });

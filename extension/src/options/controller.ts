@@ -3,7 +3,7 @@ import type { KVStore } from '../core/storage';
 
 export async function initOptions(doc: Document, sync: KVStore, local: KVStore): Promise<void> {
 	const input = (id: string) => doc.getElementById(id) as HTMLInputElement;
-	const settings = await loadSettings(sync);
+	const settings = await loadSettings(sync, local);
 
 	input('server-url').value = settings.serverUrl;
 	input('api-token').value = settings.apiToken;
