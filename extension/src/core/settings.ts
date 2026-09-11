@@ -29,10 +29,21 @@ const LOCAL_KEYS = ['apiToken', 'readeckToken'] as const satisfies readonly (key
 
 export async function loadSettings(sync: KVStore, local: KVStore): Promise<Settings> {
 	const [synced, localValues] = await Promise.all([
-		sync.get([...SYNC_KEYS]),
+		sync.get(KEYS),
 		local.get([...LOCAL_KEYS]),
 	]);
-	const stored = { ...synced, ...localValues };
+	const migrated: Record<string, unknown> = {};
+	for (const key of LOCAL_KEYS) {
+		if (!(key in localValues) && typeof synced[key] === 'string') {
+			migrated[key] = synced[key];
+		}
+	}
+	if (Object.keys(migrated).length > 0) await local.set(migrated);
+
+	const syncedTokenKeys = LOCAL_KEYS.filter((key) => key in synced);
+	if (syncedTokenKeys.length > 0) await sync.remove([...syncedTokenKeys]);
+
+	const stored = { ...synced, ...migrated, ...localValues };
 	const settings = { ...DEFAULT_SETTINGS };
 	for (const key of KEYS) {
 		const value = stored[key];

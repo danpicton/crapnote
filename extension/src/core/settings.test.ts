@@ -48,6 +48,25 @@ describe('settings', () => {
 		});
 	});
 
+	it('migrates synced tokens to local storage and removes the synced copies', async () => {
+		const sync = memoryStore({
+			serverUrl: 'https://notes.example.com',
+			apiToken: 'old-api-token',
+			readeckToken: 'old-readeck-token',
+		});
+		const local = memoryStore();
+
+		const settings = await loadSettings(sync, local);
+
+		expect(settings.apiToken).toBe('old-api-token');
+		expect(settings.readeckToken).toBe('old-readeck-token');
+		expect(await local.get(['apiToken', 'readeckToken'])).toEqual({
+			apiToken: 'old-api-token',
+			readeckToken: 'old-readeck-token',
+		});
+		expect(await sync.get(['apiToken', 'readeckToken'])).toEqual({});
+	});
+
 	it('returns defaults when nothing is stored', async () => {
 		const settings = await loadSettings(memoryStore(), memoryStore());
 		expect(settings.serverUrl).toBe('');

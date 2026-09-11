@@ -3,6 +3,7 @@
 export interface KVStore {
 	get(keys: string[]): Promise<Record<string, unknown>>;
 	set(items: Record<string, unknown>): Promise<void>;
+	remove(keys: string[]): Promise<void>;
 }
 
 export function memoryStore(initial: Record<string, unknown> = {}): KVStore {
@@ -17,6 +18,9 @@ export function memoryStore(initial: Record<string, unknown> = {}): KVStore {
 		},
 		async set(items) {
 			Object.assign(data, items);
+		},
+		async remove(keys) {
+			for (const key of keys) delete data[key];
 		},
 	};
 }
