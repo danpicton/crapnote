@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './settings';
 import { memoryStore } from './storage';
 
@@ -46,6 +46,11 @@ describe('settings', () => {
 			readeckUrl: 'https://readeck.example.com',
 			readeckToken: 'local-readeck-token',
 		});
+		expect(await local.get(['apiToken', 'readeckToken'])).toEqual({
+			apiToken: 'local-token',
+			readeckToken: 'local-readeck-token',
+		});
+		expect(await sync.get(['apiToken', 'readeckToken'])).toEqual({});
 	});
 
 	it('migrates synced tokens to local storage and removes the synced copies', async () => {
@@ -65,6 +70,22 @@ describe('settings', () => {
 			readeckToken: 'old-readeck-token',
 		});
 		expect(await sync.get(['apiToken', 'readeckToken'])).toEqual({});
+	});
+
+	it('does no migration writes after tokens have been migrated', async () => {
+		const sync = memoryStore({ apiToken: 'old-api-token' });
+		const local = memoryStore();
+		const setLocal = vi.spyOn(local, 'set');
+		const removeSynced = vi.spyOn(sync, 'remove');
+		await loadSettings(sync, local);
+		setLocal.mockClear();
+		removeSynced.mockClear();
+
+		const settings = await loadSettings(sync, local);
+
+		expect(settings.apiToken).toBe('old-api-token');
+		expect(setLocal).not.toHaveBeenCalled();
+		expect(removeSynced).not.toHaveBeenCalled();
 	});
 
 	it('returns defaults when nothing is stored', async () => {
