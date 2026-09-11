@@ -119,6 +119,18 @@ describe('api.notes', () => {
 	});
 });
 
+describe('api.tags', () => {
+	it('list: fetches every page', async () => {
+		const tag = { id: 1, name: 'tag', note_count: 1 };
+		mockFetch
+			.mockResolvedValueOnce(ok(Array.from({ length: 100 }, (_, index) => ({ ...tag, id: index + 1 }))))
+			.mockResolvedValueOnce(ok([{ ...tag, id: 101 }]));
+
+		await expect(api.tags.list()).resolves.toHaveLength(101);
+		expect(mockFetch.mock.calls[1][0]).toBe('/api/tags?limit=100&offset=100');
+	});
+});
+
 describe('api.trash', () => {
 	it('list: fetches every page', async () => {
 		const entry = { note_id: 1, title: 'T', deleted_at: '', permanent_delete_at: '' };

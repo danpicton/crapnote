@@ -197,7 +197,7 @@ export const api = {
 	},
 
 	tags: {
-		list: () => request<Tag[]>('GET', '/api/tags?limit=100'),
+		list: () => requestAllPages<Tag>('/api/tags'),
 		create: (name: string) => request<Tag>('POST', '/api/tags', { name }),
 		rename: (id: number, name: string) => request<Tag>('PUT', `/api/tags/${id}`, { name }),
 		delete: (id: number) => request<void>('DELETE', `/api/tags/${id}`),
