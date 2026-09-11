@@ -801,6 +801,30 @@ describe('Offline mode', () => {
 		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalled());
 	});
 
+	it('does not evict a cached pinned note returned after the first server page', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		const allPages = Array.from({ length: 101 }, (_, index) => mockNote({
+			id: index + 1,
+			title: `Note ${index + 1}`,
+			pinned: index === 100,
+		}));
+		vi.mocked(api.notes.list).mockResolvedValue(allPages);
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ id: 101, title: 'Note 101', body: '', starred: false, pinned: true, tags: [],
+			  server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			  is_dirty: false, is_new: false },
+		]);
+
+		render(Page);
+		await waitFor(() => expect(screen.getByText('Note 101')).toBeInTheDocument());
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ id: 101 }),
+		));
+
+		expect(offlineDB.deleteNote).not.toHaveBeenCalledWith(expect.anything(), 101);
+	});
+
 	it('falls back to IndexedDB if the API call throws while apparently online', async () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: true });
 		vi.mocked(api.notes.list).mockRejectedValue(new Error('Network error'));
@@ -951,8 +975,8 @@ describe('Offline mode', () => {
 		await waitFor(() => expect(api.notes.list).toHaveBeenCalled());
 		await new Promise((r) => setTimeout(r, 50));
 
-		// The offline-created note should still be visible
-		expect(screen.getByText('Offline Created')).toBeInTheDocument();
+		// The offline-created note should still be visible exactly once.
+		expect(screen.getAllByText('Offline Created')).toHaveLength(1);
 	});
 
 	it('heartbeat is bidirectional — runs syncOfflineChanges and then api.notes.list', async () => {
