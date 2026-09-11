@@ -108,7 +108,8 @@ async function request<T>(
 	method: string,
 	path: string,
 	body?: unknown,
-	timeoutMs?: number
+	timeoutMs?: number,
+	signal?: AbortSignal,
 ): Promise<T> {
 	const headers: Record<string, string> = {};
 	if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -127,12 +128,16 @@ async function request<T>(
 			headers,
 			body: body !== undefined ? JSON.stringify(body) : undefined,
 			credentials: 'include',
-			signal: controller?.signal,
+			signal: controller?.signal ?? signal,
 		});
-	} catch {
-		// fetch rejects only on network-level failure (offline, DNS, CORS) or
-		// on our own abort — there is no HTTP response to inspect, and both
-		// mean the same thing to every caller: the server is not reachable.
+	} catch (error) {
+		// An explicit caller cancellation is control flow, not an offline
+		// failure. Preserve its AbortError so a superseded list load does not
+		// mark the app offline.
+		if (signal?.aborted) throw signal.reason ?? error;
+		// fetch otherwise rejects only on network-level failure (offline, DNS,
+		// CORS) or on our session-check timeout. Both mean the same thing to
+		// callers: the server is not reachable.
 		throw new OfflineError();
 	} finally {
 		if (timer !== undefined) clearTimeout(timer);
@@ -153,6 +158,29 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
 	return '?' + new URLSearchParams(entries.map(([k, v]) => [k, String(v)])).toString();
 }
 
+const PAGE_SIZE = 100;
+
+async function requestAllPages<T>(
+	path: string,
+	params: Record<string, string | number | boolean | undefined> = {},
+	signal?: AbortSignal,
+): Promise<T[]> {
+	const results: T[] = [];
+	for (let offset = 0; ; offset += PAGE_SIZE) {
+		signal?.throwIfAborted();
+		const page = await request<T[]>(
+			'GET',
+			path + buildQuery({ ...params, limit: PAGE_SIZE, offset }),
+			undefined,
+			undefined,
+			signal,
+		);
+		signal?.throwIfAborted();
+		results.push(...page);
+		if (page.length < PAGE_SIZE) return results;
+	}
+}
+
 export const api = {
 	auth: {
 		login: (username: string, password: string) =>
@@ -164,11 +192,8 @@ export const api = {
 	},
 
 	notes: {
-		list: (params?: { starred?: boolean; tag_id?: number; search?: string }) =>
-			request<Note[]>(
-				'GET',
-				'/api/notes' + buildQuery({ limit: 100, ...(params ?? {}) }),
-			),
+		list: (params?: { starred?: boolean; tag?: number; search?: string }, signal?: AbortSignal) =>
+			requestAllPages<Note>('/api/notes', params, signal),
 		create: (title?: string, body?: string) =>
 			request<Note>('POST', '/api/notes', { title, body }),
 		get: (id: number) => request<Note>('GET', `/api/notes/${id}`),
@@ -182,11 +207,11 @@ export const api = {
 		toggleLock: (id: number) => request<Note>('PATCH', `/api/notes/${id}/lock`),
 		archive: (id: number) => request<void>('PATCH', `/api/notes/${id}/archive`),
 		unarchive: (id: number) => request<void>('PATCH', `/api/notes/${id}/unarchive`),
-		listArchived: () => request<Note[]>('GET', '/api/archive?limit=100'),
+		listArchived: () => requestAllPages<Note>('/api/archive'),
 	},
 
 	tags: {
-		list: () => request<Tag[]>('GET', '/api/tags?limit=100'),
+		list: () => requestAllPages<Tag>('/api/tags'),
 		create: (name: string) => request<Tag>('POST', '/api/tags', { name }),
 		rename: (id: number, name: string) => request<Tag>('PUT', `/api/tags/${id}`, { name }),
 		delete: (id: number) => request<void>('DELETE', `/api/tags/${id}`),
@@ -239,7 +264,7 @@ export const api = {
 	},
 
 	trash: {
-		list: () => request<TrashEntry[]>('GET', '/api/trash?limit=100'),
+		list: () => requestAllPages<TrashEntry>('/api/trash'),
 		restore: (id: number) => request<void>('POST', `/api/trash/${id}/restore`),
 		deleteOne: (id: number) => request<void>('DELETE', `/api/trash/${id}`),
 		empty: () => request<void>('DELETE', '/api/trash'),

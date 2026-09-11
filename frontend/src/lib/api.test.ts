@@ -65,6 +65,39 @@ describe('api.notes', () => {
 		expect(url).toContain('search=hello');
 	});
 
+	it('list: fetches every page and preserves filters', async () => {
+		const firstPage = Array.from({ length: 100 }, (_, index) => ({ ...note, id: index + 1 }));
+		const secondPage = [{ ...note, id: 101 }];
+		mockFetch.mockResolvedValueOnce(ok(firstPage)).mockResolvedValueOnce(ok(secondPage));
+
+		const result = await api.notes.list({ search: 'hello' });
+
+		expect(result).toHaveLength(101);
+		expect(mockFetch).toHaveBeenCalledTimes(2);
+		expect(mockFetch.mock.calls[0][0]).toContain('offset=0');
+		expect(mockFetch.mock.calls[1][0]).toContain('offset=100');
+		expect(mockFetch.mock.calls[1][0]).toContain('search=hello');
+	});
+
+	it('list: stops before requesting another page when cancelled', async () => {
+		const controller = new AbortController();
+		const firstPage = Array.from({ length: 100 }, (_, index) => ({ ...note, id: index + 1 }));
+		mockFetch
+			.mockResolvedValueOnce({
+				...ok(firstPage),
+				json: async () => {
+					controller.abort();
+					return firstPage;
+				},
+			})
+			.mockResolvedValueOnce(ok([]));
+
+		await expect(api.notes.list(undefined, controller.signal)).rejects.toMatchObject({
+			name: 'AbortError',
+		});
+		expect(mockFetch).toHaveBeenCalledTimes(1);
+	});
+
 	it('create: POST /api/notes', async () => {
 		mockFetch.mockResolvedValueOnce(ok(note));
 		await api.notes.create('T', 'B');
@@ -93,6 +126,39 @@ describe('api.notes', () => {
 		mockFetch.mockResolvedValueOnce(ok({ ...note, starred: true }));
 		const result = await api.notes.toggleStar(1);
 		expect(result.starred).toBe(true);
+	});
+
+	it('listArchived: fetches every page', async () => {
+		mockFetch
+			.mockResolvedValueOnce(ok(Array.from({ length: 100 }, (_, index) => ({ ...note, id: index + 1 }))))
+			.mockResolvedValueOnce(ok([{ ...note, id: 101 }]));
+
+		await expect(api.notes.listArchived()).resolves.toHaveLength(101);
+		expect(mockFetch.mock.calls[1][0]).toBe('/api/archive?limit=100&offset=100');
+	});
+});
+
+describe('api.tags', () => {
+	it('list: fetches every page', async () => {
+		const tag = { id: 1, name: 'tag', note_count: 1 };
+		mockFetch
+			.mockResolvedValueOnce(ok(Array.from({ length: 100 }, (_, index) => ({ ...tag, id: index + 1 }))))
+			.mockResolvedValueOnce(ok([{ ...tag, id: 101 }]));
+
+		await expect(api.tags.list()).resolves.toHaveLength(101);
+		expect(mockFetch.mock.calls[1][0]).toBe('/api/tags?limit=100&offset=100');
+	});
+});
+
+describe('api.trash', () => {
+	it('list: fetches every page', async () => {
+		const entry = { note_id: 1, title: 'T', deleted_at: '', permanent_delete_at: '' };
+		mockFetch
+			.mockResolvedValueOnce(ok(Array.from({ length: 100 }, (_, index) => ({ ...entry, note_id: index + 1 }))))
+			.mockResolvedValueOnce(ok([{ ...entry, note_id: 101 }]));
+
+		await expect(api.trash.list()).resolves.toHaveLength(101);
+		expect(mockFetch.mock.calls[1][0]).toBe('/api/trash?limit=100&offset=100');
 	});
 });
 
