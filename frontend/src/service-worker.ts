@@ -19,13 +19,101 @@ import { build, files, version, prerendered } from '$service-worker';
 import {
 	selectStrategy,
 	navigationCacheFirst,
+	imageCacheFirst,
 	cacheFirst,
 	networkOnly,
 } from '$lib/service-worker-strategies';
+import { getOfflineOwner, openOfflineDB } from '$lib/offlineDB';
 
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
 const CACHE_NAME = `crapnote-${version}`;
+
+/**
+ * Identity proofs are scoped to a particular window client, not held as one
+ * global "unlocked" bit. A new tab (or a tab opened after the browser was
+ * closed) therefore starts unable to read cached note images. The page sends
+ * this only after a live session check or successful local unlock.
+ *
+ * This map intentionally lives only in service-worker memory. If the worker
+ * restarts, clients re-authorise via sw-register's controllerchange handler;
+ * failing closed briefly is preferable to persisting an unlock beside the
+ * cache it is supposed to protect.
+ */
+const provedImageClients = new Map<string, number>();
+const pendingIdentityRequests = new Map<
+	string,
+	{ promise: Promise<void>; resolve: () => void }
+>();
+
+sw.addEventListener('message', (event) => {
+	const data = event.data as { type?: unknown; userId?: unknown } | null;
+	if (data?.type !== 'crapnote:image-cache-identity') return;
+
+	const source = event.source;
+	if (!source || !('id' in source) || typeof source.id !== 'string') return;
+	if (typeof data.userId === 'number' && Number.isSafeInteger(data.userId)) {
+		provedImageClients.set(source.id, data.userId);
+	} else if (data.userId === null) {
+		provedImageClients.delete(source.id);
+	} else {
+		return;
+	}
+	// Let the page keep its protected children withheld until the worker has
+	// applied the new state, avoiding an unlock-vs-image-fetch race offline.
+	event.ports[0]?.postMessage('ok');
+	pendingIdentityRequests.get(source.id)?.resolve();
+});
+
+/**
+ * Service-worker globals may be terminated while their controlled pages stay
+ * open. Ask that exact page to resend its in-memory identity when our map was
+ * lost; a direct image navigation has no existing client and remains denied.
+ */
+async function recoverClientIdentity(clientId: string): Promise<void> {
+	if (!clientId || provedImageClients.has(clientId)) return;
+	const existing = pendingIdentityRequests.get(clientId);
+	if (existing) return existing.promise;
+
+	let resolve!: () => void;
+	const promise = new Promise<void>((done) => { resolve = done; });
+	pendingIdentityRequests.set(clientId, { promise, resolve });
+	// A newly activated worker may control a page still running an older bundle
+	// with no recovery listener. Bound that compatibility case rather than
+	// leaving its fetch pending forever; current clients normally reply at once.
+	const timeout = setTimeout(resolve, 5000);
+	try {
+		const client = await sw.clients.get(clientId);
+		client?.postMessage({ type: 'crapnote:request-image-cache-identity' });
+		if (!client) resolve();
+	} catch {
+		resolve();
+	}
+	await promise;
+	clearTimeout(timeout);
+	pendingIdentityRequests.delete(clientId);
+}
+
+/** Returns the owner id only when this exact page client proved ownership. */
+async function clientImageCacheOwner(clientId: string): Promise<number | null> {
+	await recoverClientIdentity(clientId);
+	const provedUserId = provedImageClients.get(clientId);
+	if (provedUserId === undefined) return null;
+
+	let db: IDBDatabase;
+	try {
+		db = await openOfflineDB();
+	} catch {
+		return null;
+	}
+	try {
+		return (await getOfflineOwner(db)) === provedUserId ? provedUserId : null;
+	} catch {
+		return null;
+	} finally {
+		db.close();
+	}
+}
 
 // Assets that come bundled with the build — safe to cache aggressively.
 const PRECACHE = [
@@ -68,7 +156,11 @@ sw.addEventListener('activate', (event) => {
 	event.waitUntil(
 		(async () => {
 			const keys = await caches.keys();
-			await Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)));
+			await Promise.all(
+				keys
+					.filter((k) => k !== CACHE_NAME && !k.startsWith(`${CACHE_NAME}-images-`))
+					.map((k) => caches.delete(k))
+			);
 			await sw.clients.claim();
 		})(),
 	);
@@ -87,6 +179,11 @@ sw.addEventListener('fetch', (event) => {
 			return;
 		case 'navigation-cache-first':
 			event.respondWith(navigationCacheFirst(request, CACHE_NAME));
+			return;
+		case 'image-cache-first':
+			event.respondWith(
+				imageCacheFirst(request, CACHE_NAME, () => clientImageCacheOwner(event.clientId))
+			);
 			return;
 		case 'cache-first':
 			event.respondWith(cacheFirst(request, CACHE_NAME));

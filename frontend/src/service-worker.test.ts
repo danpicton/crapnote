@@ -4,14 +4,27 @@
 // keep type-checking; removing these two lines breaks `npm run check`.
 /// <reference lib="dom" />
 /// <reference lib="dom.iterable" />
+import 'fake-indexeddb/auto';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { cacheFirst, navigationCacheFirst, networkOnly } from '$lib/service-worker-strategies';
+import {
+	cacheFirst,
+	imageCacheFirst,
+	navigationCacheFirst,
+	networkOnly,
+} from '$lib/service-worker-strategies';
+import { openOfflineDB, setOfflineOwner } from '$lib/offlineDB';
 
 // The strategies themselves are covered in service-worker-strategies.test.ts.
 // What is untestable from there — and what these tests pin — is the wiring in
 // the SW's fetch listener: that each strategy *name* reaches the matching
 // strategy *function*, and that a passthrough never calls respondWith at all.
 // Swapping two cases in that switch is invisible to the strategy unit tests.
+const mockClientGet = vi.fn().mockResolvedValue(undefined);
+Object.defineProperty(window, 'clients', {
+	configurable: true,
+	value: { get: mockClientGet },
+});
+
 vi.mock('$lib/service-worker-strategies', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('$lib/service-worker-strategies')>();
 	return {
@@ -19,6 +32,7 @@ vi.mock('$lib/service-worker-strategies', async (importOriginal) => {
 		// selectStrategy stays real: the routing table is tested for real, only
 		// the strategy implementations are stood in for so the call is visible.
 		navigationCacheFirst: vi.fn(async () => new Response('nav')),
+		imageCacheFirst: vi.fn(async () => new Response('image')),
 		cacheFirst: vi.fn(async () => new Response('cache')),
 		networkOnly: vi.fn(async () => new Response('net')),
 	};
@@ -34,12 +48,22 @@ function dispatchFetch(request: Request): Promise<Response> | undefined {
 	let responded: Promise<Response> | undefined;
 	const event = Object.assign(new Event('fetch'), {
 		request,
+		clientId: 'test-client',
 		respondWith: (response: Promise<Response>) => {
 			responded = response;
 		},
 	});
 	window.dispatchEvent(event);
 	return responded;
+}
+
+function dispatchImageIdentity(userId: number | null, clientId = 'test-client'): void {
+	const event = Object.assign(new Event('message'), {
+		data: { type: 'crapnote:image-cache-identity', userId },
+		source: { id: clientId },
+		ports: [{ postMessage: vi.fn() }],
+	});
+	window.dispatchEvent(event);
 }
 
 function req(path: string, init: { method?: string; mode?: RequestMode } = {}): Request {
@@ -52,8 +76,11 @@ function req(path: string, init: { method?: string; mode?: RequestMode } = {}): 
 
 beforeEach(() => {
 	vi.mocked(navigationCacheFirst).mockClear();
+	vi.mocked(imageCacheFirst).mockClear();
 	vi.mocked(cacheFirst).mockClear();
 	vi.mocked(networkOnly).mockClear();
+	mockClientGet.mockReset().mockResolvedValue(undefined);
+	dispatchImageIdentity(null);
 });
 
 describe('service worker fetch listener', () => {
@@ -66,6 +93,59 @@ describe('service worker fetch listener', () => {
 		expect(networkOnly).toHaveBeenCalledWith(request);
 		expect(cacheFirst).not.toHaveBeenCalled();
 		expect(navigationCacheFirst).not.toHaveBeenCalled();
+	});
+
+	it('gates an image request through imageCacheFirst', async () => {
+		const request = req('/api/images/7');
+
+		const responded = dispatchFetch(request);
+
+		expect(await responded?.then((r) => r.text())).toBe('image');
+		expect(imageCacheFirst).toHaveBeenCalledWith(request, 'crapnote-test', expect.any(Function));
+		expect(cacheFirst).not.toHaveBeenCalled();
+		expect(networkOnly).not.toHaveBeenCalled();
+	});
+
+	it('opens the image gate only for a proved client matching the store owner', async () => {
+		const db = await openOfflineDB();
+		await setOfflineOwner(db, 7);
+		db.close();
+
+		dispatchImageIdentity(7);
+		dispatchFetch(req('/api/images/7'));
+		const matchingOwner = vi.mocked(imageCacheFirst).mock.calls[0][2];
+		expect(await matchingOwner()).toBe(7);
+
+		vi.mocked(imageCacheFirst).mockClear();
+		dispatchImageIdentity(8);
+		dispatchFetch(req('/api/images/7'));
+		const differentOwner = vi.mocked(imageCacheFirst).mock.calls[0][2];
+		expect(await differentOwner()).toBeNull();
+	});
+
+	it('keeps a fresh or explicitly revoked client out of the image cache', async () => {
+		dispatchFetch(req('/api/images/7'));
+		const revokedClient = vi.mocked(imageCacheFirst).mock.calls[0][2];
+		expect(await revokedClient()).toBeNull();
+	});
+
+	it('recovers identity after the service-worker global restarts', async () => {
+		const db = await openOfflineDB();
+		await setOfflineOwner(db, 7);
+		db.close();
+		mockClientGet.mockResolvedValue({
+			postMessage: (message: { type?: string }) => {
+				if (message.type === 'crapnote:request-image-cache-identity') {
+					dispatchImageIdentity(7);
+				}
+			},
+		});
+
+		dispatchFetch(req('/api/images/7'));
+		const recoveredClient = vi.mocked(imageCacheFirst).mock.calls[0][2];
+
+		expect(await recoveredClient()).toBe(7);
+		expect(mockClientGet).toHaveBeenCalledWith('test-client');
 	});
 
 	it('answers a navigation with navigationCacheFirst, passing the cache name', async () => {
@@ -96,6 +176,7 @@ describe('service worker fetch listener', () => {
 		// No respondWith at all — the browser handles it as if no SW existed.
 		expect(responded).toBeUndefined();
 		expect(networkOnly).not.toHaveBeenCalled();
+		expect(imageCacheFirst).not.toHaveBeenCalled();
 		expect(cacheFirst).not.toHaveBeenCalled();
 		expect(navigationCacheFirst).not.toHaveBeenCalled();
 	});

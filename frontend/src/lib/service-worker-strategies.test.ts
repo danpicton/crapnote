@@ -3,6 +3,7 @@ import {
 	OFFLINE_HEADER,
 	selectStrategy,
 	navigationCacheFirst,
+	imageCacheFirst,
 	cacheFirst,
 	networkOnly,
 	type FetchStrategy,
@@ -65,8 +66,8 @@ let cacheStorage: FakeCacheStorage;
 let mockFetch: ReturnType<typeof vi.fn>;
 
 /** Seed the version-keyed cache the strategies write to. */
-async function seed(key: CacheKey, response: Response): Promise<void> {
-	const cache = await cacheStorage.open(CACHE_NAME);
+async function seed(key: CacheKey, response: Response, name = CACHE_NAME): Promise<void> {
+	const cache = await cacheStorage.open(name);
 	await cache.put(key, response);
 }
 
@@ -247,11 +248,124 @@ describe('navigationCacheFirst', () => {
 	});
 });
 
+// ─── imageCacheFirst ─────────────────────────────────────────────────────────
+
+describe('imageCacheFirst', () => {
+	it('serves cached image bytes once the client and owner gate passes', async () => {
+		const request = req('/api/images/7');
+		await seed(request, new Response('cached-bytes', { status: 200 }), `${CACHE_NAME}-images-7`);
+
+		const res = await imageCacheFirst(request, CACHE_NAME, async () => 7);
+
+		expect(await res.text()).toBe('cached-bytes');
+		expect(mockFetch).not.toHaveBeenCalled();
+	});
+
+	it('never reads an image cached in a different owner partition', async () => {
+		const request = req('/api/images/7');
+		await seed(request, new Response('alice-bytes', { status: 200 }), `${CACHE_NAME}-images-7`);
+		mockFetch.mockResolvedValueOnce(new Response('bob-backend-response', {
+			status: 200,
+			headers: { 'X-Crapnote-Image-Owner': '8' },
+		}));
+
+		const res = await imageCacheFirst(request, CACHE_NAME, async () => 8);
+
+		expect(await res.text()).toBe('bob-backend-response');
+		expect(mockFetch).toHaveBeenCalledWith(request, { cache: 'no-store' });
+		expect(
+			cacheStorage.opened.get(`${CACHE_NAME}-images-8`)?.store.get(request.url)
+		).toBeDefined();
+	});
+
+	it('returns valid online bytes when writing Cache Storage fails', async () => {
+		const request = req('/api/images/7');
+		const ownerCache = await cacheStorage.open(`${CACHE_NAME}-images-7`);
+		vi.spyOn(ownerCache, 'put').mockRejectedValueOnce(new Error('quota exceeded'));
+		mockFetch.mockResolvedValueOnce(new Response('online-bytes', {
+			status: 200,
+			headers: { 'X-Crapnote-Image-Owner': '7' },
+		}));
+
+		const res = await imageCacheFirst(request, CACHE_NAME, async () => 7);
+
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe('online-bytes');
+	});
+
+	it('falls back to the backend when Cache Storage cannot be opened', async () => {
+		const request = req('/api/images/7');
+		vi.spyOn(cacheStorage, 'open').mockRejectedValueOnce(new Error('cache unavailable'));
+		mockFetch.mockResolvedValueOnce(new Response('online-bytes', {
+			status: 200,
+			headers: { 'X-Crapnote-Image-Owner': '7' },
+		}));
+
+		const res = await imageCacheFirst(request, CACHE_NAME, async () => 7);
+
+		expect(res.status).toBe(200);
+		expect(await res.text()).toBe('online-bytes');
+	});
+
+	it('rejects an in-flight response when the server session changed owners', async () => {
+		const request = req('/api/images/7');
+		mockFetch.mockResolvedValueOnce(new Response('bob-private-bytes', {
+			status: 200,
+			headers: { 'X-Crapnote-Image-Owner': '8' },
+		}));
+
+		const res = await imageCacheFirst(request, CACHE_NAME, async () => 7);
+
+		expect(res.status).toBe(403);
+		expect(await res.text()).not.toContain('bob-private-bytes');
+		expect(
+			cacheStorage.opened.get(`${CACHE_NAME}-images-7`)?.store.size
+		).toBe(0);
+	});
+
+	it('does not serve cached bytes while the identity gate is shut', async () => {
+		const request = req('/api/images/7');
+		await seed(request, new Response('previous-user-bytes', { status: 200 }));
+		mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+		const res = await imageCacheFirst(request, CACHE_NAME, async () => null);
+
+		expect(res.status).toBe(503);
+		expect(await res.text()).not.toContain('previous-user-bytes');
+		expect(mockFetch).toHaveBeenCalledWith(request, { cache: 'no-store' });
+	});
+
+	it('uses the backend response online instead of a forbidden cache hit', async () => {
+		const request = req('/api/images/7');
+		await seed(request, new Response('previous-user-bytes', { status: 200 }));
+		mockFetch.mockResolvedValueOnce(new Response('not authenticated', { status: 401 }));
+
+		const res = await imageCacheFirst(request, CACHE_NAME, async () => null);
+
+		expect(res.status).toBe(401);
+		expect(await res.text()).toBe('not authenticated');
+		expect(mockFetch).toHaveBeenCalledWith(request, { cache: 'no-store' });
+	});
+
+	it('fails closed when the ownership check rejects', async () => {
+		const request = req('/api/images/7');
+		await seed(request, new Response('previous-user-bytes', { status: 200 }));
+		mockFetch.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+		const res = await imageCacheFirst(request, CACHE_NAME, async () => {
+			throw new Error('IndexedDB unavailable');
+		});
+
+		expect(res.status).toBe(503);
+		expect(mockFetch).toHaveBeenCalledWith(request, { cache: 'no-store' });
+	});
+});
+
 // ─── cacheFirst ──────────────────────────────────────────────────────────────
 
 describe('cacheFirst', () => {
 	it('returns the cached response without touching the network', async () => {
-		const request = req('/api/images/7');
+		const request = req('/_app/immutable/chunk.cached.js');
 		await seed(request, new Response('cached-bytes', { status: 200 }));
 
 		const res = await cacheFirst(request, CACHE_NAME);
@@ -304,8 +418,8 @@ describe('selectStrategy', () => {
 		['cross-origin navigation', 'passthrough', req('https://example.com/', { mode: 'navigate' })],
 
 		// Images are immutable per id.
-		['GET /api/images/<id>', 'cache-first', req('/api/images/7')],
-		['GET /api/images/<id> with query', 'cache-first', req('/api/images/7?w=200')],
+		['GET /api/images/<id>', 'image-cache-first', req('/api/images/7')],
+		['GET /api/images/<id> with query', 'image-cache-first', req('/api/images/7?w=200')],
 
 		// Every other API call, read or write.
 		['GET /api/notes', 'network-only', req('/api/notes')],

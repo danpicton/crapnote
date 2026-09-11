@@ -6,6 +6,7 @@ import {
 	readSessionUser,
 	clearSessionUser,
 } from '$lib/localData';
+import { setImageCacheIdentity } from '$lib/sw-register';
 import {
 	storeUnlockPasscode,
 	hasUnlockPasscode,
@@ -61,6 +62,18 @@ function startSessionCheck(): Promise<void> {
  */
 async function loadSession(): Promise<void> {
 	loading = true;
+	// A reload must not inherit this client's previous worker authorisation
+	// while the new server/offline session decision is still pending.
+	//
+	// Deliberately NOT awaited, unlike the grant in the `finally` below. A
+	// revoke has nothing to race: this runs once per document, and a document
+	// the worker has never seen holds no authorisation to withdraw — the
+	// worker keys proofs by client id, and `imageCacheUserId` starts null.
+	// Awaiting it bought nothing and cost a worker round trip (a full second
+	// when the controlling worker predates this protocol and never acks) in
+	// front of every protected first paint, because the root layout withholds
+	// its children until this function resolves.
+	void setImageCacheIdentity(null);
 	try {
 		user = await api.auth.me();
 		// The server vouched for this session, so there is nothing to unlock —
@@ -121,6 +134,14 @@ async function loadSession(): Promise<void> {
 			}
 		}
 	} finally {
+		// This is sent only after the server vouched for the session or a valid
+		// browsing-session proof was recovered. A locked/null result revokes.
+		//
+		// Awaited, unlike the revoke on the way in: `loading` going false
+		// releases the layout's children, and a note image requested before
+		// the worker holds this proof is decided unproved. Offline that is a
+		// 503 an <img> never retries, so the grant has to land first.
+		await setImageCacheIdentity(user !== null && !locked ? user.id : null);
 		loading = false;
 	}
 }
@@ -176,10 +197,12 @@ export const auth = {
 		if (user && (await verifyUnlockPasscode(user.id, password))) {
 			resetUnlockAttempts();
 			lockoutMs = 0;
+			// Keep the layout locked until the worker has the proof too. If
+			// children rendered first, their image requests could fail offline
+			// before the authorisation message arrived and would not retry.
+			await markIdentityProved(user.id);
+			await setImageCacheIdentity(user.id);
 			locked = false;
-			// Proved for the rest of this browsing session, so reloading
-			// while still offline doesn't ask again.
-			if (user) await markIdentityProved(user.id);
 			return true;
 		}
 		recordFailedUnlock();
@@ -188,6 +211,11 @@ export const auth = {
 	},
 
 	async login(username: string, password: string) {
+		// /login is intentionally usable while the initial /auth/me check is in
+		// flight. Serialize behind that check so its delayed result cannot
+		// overwrite this newer login, re-stamp the old owner, or re-authorise the
+		// wrong image-cache partition.
+		if (sessionCheck) await sessionCheck;
 		user = await api.auth.login(username, password);
 		locked = false;
 		// Order matters: the session proof is authenticated with the unlock
@@ -203,8 +231,11 @@ export const auth = {
 		checked = true;
 		persistSessionUser(user);
 		await ensureOfflineOwner(user.id);
+		await setImageCacheIdentity(user.id);
 	},
 	async logout() {
+		// Same ordering guarantee for programmatic logout during initialization.
+		if (sessionCheck) await sessionCheck;
 		try {
 			await api.auth.logout();
 		} finally {
@@ -214,6 +245,7 @@ export const auth = {
 			user = null;
 			locked = false;
 			lockoutMs = 0;
+			await setImageCacheIdentity(null);
 			await clearLocalData();
 		}
 	},
