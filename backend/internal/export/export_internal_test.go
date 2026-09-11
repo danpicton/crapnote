@@ -2,9 +2,43 @@
 package export
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/danpicton/crapnote/internal/notes"
 )
+
+type failAfterWriter struct {
+	remaining int
+}
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if w.remaining <= 0 {
+		return 0, errors.New("writer failed")
+	}
+	if len(p) > w.remaining {
+		n := w.remaining
+		w.remaining = 0
+		return n, errors.New("writer failed")
+	}
+	w.remaining -= len(p)
+	return len(p), nil
+}
+
+func TestBuild_SurfacesWriterFailure(t *testing.T) {
+	w := &failAfterWriter{remaining: 20}
+	err := Build(w, []*notes.Note{{Title: "Backup", Body: strings.Repeat("content ", 100)}}, nil, "")
+	if err == nil {
+		t.Fatal("expected writer failure, got nil")
+	}
+	if !strings.Contains(err.Error(), "writer failed") {
+		t.Fatalf("expected underlying writer error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "finalise zip") {
+		t.Fatalf("expected failure stage in error, got %v", err)
+	}
+}
 
 func TestSanitiseFilename(t *testing.T) {
 	tests := []struct {
