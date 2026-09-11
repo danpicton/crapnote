@@ -42,6 +42,18 @@ Both builds share the same TypeScript source; only the manifest differs
 2. In the extension options, set your server URL and paste the token.
    Optionally set the Readeck URL/token and change the default tags.
 
+## Settings storage
+
+The extension keeps bearer credentials (`apiToken` and `readeckToken`) in
+`storage.local`, so the browser does not copy them to the vendor's profile-sync
+cloud or other signed-in browser profiles. The non-secret preferences
+(`serverUrl`, `defaultLinkTag`, `defaultClipTag`, and `readeckUrl`) remain in
+`storage.sync` so they can follow the user's browser profile.
+
+On the first settings load after upgrading, credentials saved by an older
+version are copied from `storage.sync` to `storage.local` (unless a local value
+already exists) and then removed from `storage.sync`.
+
 ## Build
 
 ```bash
