@@ -79,6 +79,25 @@ describe('api.notes', () => {
 		expect(mockFetch.mock.calls[1][0]).toContain('search=hello');
 	});
 
+	it('list: stops before requesting another page when cancelled', async () => {
+		const controller = new AbortController();
+		const firstPage = Array.from({ length: 100 }, (_, index) => ({ ...note, id: index + 1 }));
+		mockFetch
+			.mockResolvedValueOnce({
+				...ok(firstPage),
+				json: async () => {
+					controller.abort();
+					return firstPage;
+				},
+			})
+			.mockResolvedValueOnce(ok([]));
+
+		await expect(api.notes.list(undefined, controller.signal)).rejects.toMatchObject({
+			name: 'AbortError',
+		});
+		expect(mockFetch).toHaveBeenCalledTimes(1);
+	});
+
 	it('create: POST /api/notes', async () => {
 		mockFetch.mockResolvedValueOnce(ok(note));
 		await api.notes.create('T', 'B');

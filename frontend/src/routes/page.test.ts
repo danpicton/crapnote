@@ -633,10 +633,13 @@ describe('Offline mode', () => {
 
 		render(Page);
 		await waitFor(() => expect(api.notes.list).toHaveBeenCalledTimes(1));
+		const olderSignal = vi.mocked(api.notes.list).mock.calls[0][1];
+		expect(olderSignal).toBeInstanceOf(AbortSignal);
 
 		const searchInputs = screen.getAllByPlaceholderText(/search/i);
 		await fireEvent.input(searchInputs[searchInputs.length - 1], { target: { value: 'new' } });
 		await waitFor(() => expect(screen.getByText('New Search Result')).toBeInTheDocument());
+		expect(olderSignal?.aborted).toBe(true);
 
 		resolveOlderLoad([mockNote({ id: 1, title: 'Stale First Page' })]);
 		await new Promise((resolve) => setTimeout(resolve, 0));

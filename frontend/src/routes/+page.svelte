@@ -208,7 +208,7 @@
 		const previous = notes;
 		// Optimistic: the list snaps into place, then the order is persisted.
 		notes = reorderPinned(notes, from, to);
-		listVersion++; // in-flight list loads carry the old order
+		invalidateList(); // in-flight list loads carry the old order
 		try {
 			await api.notes.reorderPins(pinnedIds());
 		} catch {
@@ -620,9 +620,17 @@
 	// deleted note in the UI (the mount load and the sync heartbeat both fetch
 	// the list concurrently with user actions).
 	let listVersion = 0;
+	let listRequestController: AbortController | null = null;
+
+	function invalidateList() {
+		listVersion++;
+		listRequestController?.abort();
+		listRequestController = null;
+	}
 
 	async function loadNotes() {
-		const version = ++listVersion;
+		invalidateList();
+		const version = listVersion;
 
 		// Paint whatever IndexedDB has *immediately* — don't make the first
 		// render wait for a network round-trip (or, worse, for the network to
@@ -646,8 +654,10 @@
 		if (search) params.search = search;
 		if (activeTagId !== null) params.tag = activeTagId;
 		if (starredOnly) params.starred = true;
+		const controller = new AbortController();
+		listRequestController = controller;
 		try {
-			const fetched = await api.notes.list(params);
+			const fetched = await api.notes.list(params, controller.signal);
 			isOnline = true;
 			const merged = await mergeServerWithCache(fetched);
 			if (version !== listVersion) return; // stale — newer load/mutation won
@@ -658,9 +668,12 @@
 				cacheNotesForOffline(fetched); // fire-and-forget
 			}
 		} catch {
+			if (version !== listVersion) return; // cancelled by a newer load/mutation
 			// Network failed despite navigator.onLine — server is unreachable.
 			isOnline = false;
 			await cachePaint;
+		} finally {
+			if (listRequestController === controller) listRequestController = null;
 		}
 	}
 
@@ -951,7 +964,7 @@
 			starred: false, pinned: false, archived: false, locked: false,
 			created_at: now, updated_at: now,
 		};
-		listVersion++; // invalidate in-flight list loads that predate the note
+		invalidateList(); // invalidate in-flight list loads that predate the note
 		notes = [offlineNote, ...notes];
 		selectedId = tempId;
 		noteTags = [];
@@ -966,7 +979,7 @@
 		}
 		try {
 			const note = await api.notes.create(defaultNoteTitle());
-			listVersion++; // invalidate in-flight list loads that predate the note
+			invalidateList(); // invalidate in-flight list loads that predate the note
 			const firstUnpinned = notes.findIndex((n) => !n.pinned);
 			if (firstUnpinned === -1) {
 				notes = [...notes, note];
@@ -1234,7 +1247,7 @@
 			updated = await toggleFlagOffline(err, id, 'starred');
 		}
 		if (!updated) return;
-		listVersion++; // invalidate in-flight list loads carrying the old state
+		invalidateList(); // invalidate in-flight list loads carrying the old state
 		notes = notes.map((n) => (n.id === updated.id ? updated : n));
 	}
 
@@ -1246,7 +1259,7 @@
 			updated = await toggleFlagOffline(err, id, 'pinned');
 		}
 		if (!updated) return;
-		listVersion++; // invalidate in-flight list loads carrying the old state
+		invalidateList(); // invalidate in-flight list loads carrying the old state
 		// A freshly pinned note claims the top slot — server-side when online,
 		// via nextPinOrder when not — so re-sorting on the shared comparator
 		// puts it at the top and leaves the rest as they were.
@@ -1264,13 +1277,13 @@
 			updated = await toggleFlagOffline(err, id, 'locked');
 		}
 		if (!updated) return;
-		listVersion++; // invalidate in-flight list loads carrying the old state
+		invalidateList(); // invalidate in-flight list loads carrying the old state
 		notes = notes.map((n) => (n.id === updated.id ? updated : n));
 	}
 
 	/** Remove a note from the visible list after an archive/delete. */
 	function removeNoteFromList(id: number) {
-		listVersion++; // invalidate any in-flight list load fetched pre-removal
+		invalidateList(); // invalidate any in-flight list load fetched pre-removal
 		notes = notes.filter((n) => n.id !== id);
 		if (selectedId === id) {
 			selectedId = notes.length > 0 ? notes[0].id : null;
