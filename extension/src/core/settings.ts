@@ -19,6 +19,13 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 const KEYS = Object.keys(DEFAULT_SETTINGS) as (keyof Settings)[];
+const SYNC_KEYS = [
+	'serverUrl',
+	'defaultLinkTag',
+	'defaultClipTag',
+	'readeckUrl',
+] as const satisfies readonly (keyof Settings)[];
+const LOCAL_KEYS = ['apiToken', 'readeckToken'] as const satisfies readonly (keyof Settings)[];
 
 export async function loadSettings(store: KVStore): Promise<Settings> {
 	const stored = await store.get(KEYS);
@@ -32,6 +39,13 @@ export async function loadSettings(store: KVStore): Promise<Settings> {
 	return settings;
 }
 
-export async function saveSettings(store: KVStore, settings: Settings): Promise<void> {
-	await store.set({ ...settings });
+export async function saveSettings(
+	sync: KVStore,
+	local: KVStore,
+	settings: Settings,
+): Promise<void> {
+	await Promise.all([
+		sync.set(Object.fromEntries(SYNC_KEYS.map((key) => [key, settings[key]]))),
+		local.set(Object.fromEntries(LOCAL_KEYS.map((key) => [key, settings[key]]))),
+	]);
 }

@@ -16,7 +16,7 @@ const input = (id: string) => document.getElementById(id) as HTMLInputElement;
 describe('options page', () => {
 	it('prefills the form with stored settings and defaults', async () => {
 		const store = memoryStore({ serverUrl: 'https://n.example.com' });
-		await initOptions(document, store);
+		await initOptions(document, store, memoryStore());
 
 		expect(input('server-url').value).toBe('https://n.example.com');
 		expect(input('default-link-tag').value).toBe('Links');
@@ -25,7 +25,7 @@ describe('options page', () => {
 
 	it('persists edited settings on submit', async () => {
 		const store = memoryStore();
-		await initOptions(document, store);
+		await initOptions(document, store, store);
 
 		input('server-url').value = 'https://n.example.com/';
 		input('api-token').value = 'tok';

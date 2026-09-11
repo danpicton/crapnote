@@ -1,8 +1,32 @@
 import { describe, it, expect } from 'vitest';
-import { loadSettings, saveSettings } from './settings';
+import { DEFAULT_SETTINGS, loadSettings, saveSettings } from './settings';
 import { memoryStore } from './storage';
 
 describe('settings', () => {
+	it('saves tokens locally and preferences in sync storage', async () => {
+		const sync = memoryStore();
+		const local = memoryStore();
+		await saveSettings(sync, local, {
+			serverUrl: 'https://notes.example.com',
+			apiToken: 'tok123',
+			defaultLinkTag: 'Bookmarks',
+			defaultClipTag: 'Clips',
+			readeckUrl: 'https://readeck.example.com',
+			readeckToken: 'rd456',
+		});
+
+		expect(await sync.get(Object.keys(DEFAULT_SETTINGS))).toEqual({
+			serverUrl: 'https://notes.example.com',
+			defaultLinkTag: 'Bookmarks',
+			defaultClipTag: 'Clips',
+			readeckUrl: 'https://readeck.example.com',
+		});
+		expect(await local.get(Object.keys(DEFAULT_SETTINGS))).toEqual({
+			apiToken: 'tok123',
+			readeckToken: 'rd456',
+		});
+	});
+
 	it('returns defaults when nothing is stored', async () => {
 		const settings = await loadSettings(memoryStore());
 		expect(settings.serverUrl).toBe('');
@@ -15,7 +39,7 @@ describe('settings', () => {
 
 	it('round-trips saved settings', async () => {
 		const store = memoryStore();
-		await saveSettings(store, {
+		await saveSettings(store, store, {
 			serverUrl: 'https://notes.example.com',
 			apiToken: 'tok123',
 			defaultLinkTag: 'Bookmarks',
