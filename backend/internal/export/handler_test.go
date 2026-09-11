@@ -3,6 +3,7 @@ package export_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/db"
 	"github.com/danpicton/crapnote/internal/export"
+	"github.com/danpicton/crapnote/internal/httpx"
 	"github.com/danpicton/crapnote/internal/notes"
 )
 
@@ -189,6 +191,43 @@ func TestExport_IncludesImagesReferencedOnlyByArchivedNotes(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "![archived]("+imageName+")") {
 		t.Fatalf("expected rewritten image path in archived note, got %q", body)
+	}
+}
+
+func TestExport_DoesNotPaginateArchivedNotes(t *testing.T) {
+	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	user, err := auth.NewUserRepo(database).Create(context.Background(), "many-archived", "$2a$12$x", false)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	notesSvc := notes.NewService(notes.NewRepo(database))
+	want := httpx.MaxPageSize + 1
+	for i := 0; i < want; i++ {
+		note, err := notesSvc.Create(context.Background(), user.ID, fmt.Sprintf("Archived %d", i), "body")
+		if err != nil {
+			t.Fatalf("create note %d: %v", i, err)
+		}
+		if err := notesSvc.Archive(context.Background(), note.ID, user.ID); err != nil {
+			t.Fatalf("archive note %d: %v", i, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/export", strings.NewReader(`{}`))
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	export.NewHandler(notesSvc, database).Export(w, req)
+
+	zr, err := yzip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if err != nil {
+		t.Fatalf("parse zip: %v", err)
+	}
+	if len(zr.File) != want {
+		t.Fatalf("expected all %d archived notes, got %d", want, len(zr.File))
 	}
 }
 
