@@ -624,6 +624,27 @@ describe('Offline mode', () => {
 		await waitFor(() => expect(screen.getByText('Fresh Server Note')).toBeInTheDocument());
 	});
 
+	it('discards an older paginated load when a newer search finishes first', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		let resolveOlderLoad!: (notes: ReturnType<typeof mockNote>[]) => void;
+		vi.mocked(api.notes.list)
+			.mockReturnValueOnce(new Promise((resolve) => { resolveOlderLoad = resolve; }))
+			.mockResolvedValueOnce([mockNote({ id: 2, title: 'New Search Result' })]);
+
+		render(Page);
+		await waitFor(() => expect(api.notes.list).toHaveBeenCalledTimes(1));
+
+		const searchInputs = screen.getAllByPlaceholderText(/search/i);
+		await fireEvent.input(searchInputs[searchInputs.length - 1], { target: { value: 'new' } });
+		await waitFor(() => expect(screen.getByText('New Search Result')).toBeInTheDocument());
+
+		resolveOlderLoad([mockNote({ id: 1, title: 'Stale First Page' })]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(screen.queryByText('Stale First Page')).not.toBeInTheDocument();
+		expect(screen.getByText('New Search Result')).toBeInTheDocument();
+	});
+
 	it('deletes a note offline: queues the replay and removes it from the list', async () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: false });
 		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
