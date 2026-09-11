@@ -40,6 +40,11 @@ func (s *Service) List(ctx context.Context, userID int64, filter ListFilter) ([]
 	return s.repo.List(ctx, userID, filter)
 }
 
+// ListForExport returns all non-trashed notes, including archived notes.
+func (s *Service) ListForExport(ctx context.Context, userID int64) ([]*Note, error) {
+	return s.repo.ListForExport(ctx, userID)
+}
+
 // Update performs a partial update. Only non-nil fields are written.
 // If title is provided as an empty string it is replaced with a timestamp default.
 // Returns ErrLocked if the note is locked — the repo's UPDATE enforces that in

@@ -24,8 +24,9 @@ func NewHandler(notesSvc *notes.Service, db *sql.DB) *Handler {
 }
 
 // Export handles POST /api/export
-// Streams a ZIP file containing all non-trashed notes as .md files,
-// with any referenced images bundled under images/ and src paths rewritten.
+// Streams a ZIP file containing all non-trashed notes, including archived
+// notes, as .md files, with any referenced images bundled under images/ and
+// src paths rewritten.
 // An optional password in the JSON body encrypts the ZIP.
 func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	u := auth.UserFromContext(r.Context())
@@ -43,7 +44,7 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 	password := body.Password
 
-	noteList, err := h.notes.List(r.Context(), u.ID, notes.ListFilter{})
+	noteList, err := h.notes.ListForExport(r.Context(), u.ID)
 	if err != nil {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return

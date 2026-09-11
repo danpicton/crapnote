@@ -693,7 +693,7 @@
       "scope": "read",
       "admin_only": false,
       "cookie_only": false,
-      "description": "Export all non-trashed notes as a ZIP of markdown files with bundled images. Optionally password-encrypted.",
+      "description": "Export all non-trashed notes, including archived notes, as a ZIP of markdown files with bundled images. Optionally password-encrypted.",
       "params": [
         {
           "name": "password",
