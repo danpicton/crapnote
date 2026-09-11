@@ -17,6 +17,14 @@ export default defineConfig({
 		environment: 'jsdom',
 		globals: true,
 		setupFiles: ['./src/test-setup.ts'],
-		include: ['src/**/*.{test,spec}.{js,ts}']
+		include: ['src/**/*.{test,spec}.{js,ts}'],
+		coverage: {
+			provider: 'v8',
+			reporter: ['text', 'html'],
+			include: ['src/**/*.{ts,svelte}'],
+			// Mocks and the jsdom setup file are test scaffolding, not product
+			// code — counting them flatters the numbers.
+			exclude: ['src/**/__mocks__/**', 'src/test-setup.ts', 'src/**/*.d.ts'],
+		},
 	}
 });
