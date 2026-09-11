@@ -128,6 +128,31 @@ func TestNoteRepo_List_FilterStarred(t *testing.T) {
 	}
 }
 
+func TestNoteRepo_ListForExport_IncludesArchivedAndExcludesTrashed(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	live, _ := repo.Create(ctx, userID, "Live", "")
+	archived, _ := repo.Create(ctx, userID, "Archived", "")
+	repo.Archive(ctx, archived.ID, userID) //nolint:errcheck
+	trashed, _ := repo.Create(ctx, userID, "Trashed", "")
+	repo.SoftDelete(ctx, trashed.ID, userID) //nolint:errcheck
+
+	list, err := repo.ListForExport(ctx, userID)
+	if err != nil {
+		t.Fatalf("ListForExport: %v", err)
+	}
+	got := make(map[int64]bool)
+	for _, note := range list {
+		got[note.ID] = true
+	}
+	if len(got) != 2 || !got[live.ID] || !got[archived.ID] || got[trashed.ID] {
+		t.Fatalf("expected live and archived notes but not trashed note, got %v", got)
+	}
+}
+
 func TestNoteRepo_Update(t *testing.T) {
 	database := openTestDB(t)
 	userID := seedUser(t, database)

@@ -139,6 +139,25 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 	return scanNotes(rows)
 }
 
+// ListForExport returns every non-trashed note for a user, whether live or
+// archived, in one query so an archive-state transition cannot omit or
+// duplicate a note between separate reads.
+func (r *Repo) ListForExport(ctx context.Context, userID int64) ([]*Note, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,
+		       n.pin_order, n.created_at, n.updated_at
+		FROM notes n
+		WHERE n.user_id = ?
+		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)
+		ORDER BY n.updated_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list notes for export: %w", err)
+	}
+	defer rows.Close()
+
+	return scanNotes(rows)
+}
+
 // Update performs a partial update of a note's title and/or body. Only non-nil
 // fields are written; the other field keeps its current value.
 // Returns ErrNotFound if the note does not exist, belongs to a different user,
@@ -483,8 +502,7 @@ func (r *Repo) Unarchive(ctx context.Context, id, userID int64) error {
 }
 
 // ListArchived returns archived, non-trashed notes for a user ordered by
-// updated_at DESC. limit <= 0 disables pagination (only used in trusted
-// contexts such as full exports).
+// updated_at DESC. limit <= 0 disables pagination.
 func (r *Repo) ListArchived(ctx context.Context, userID int64, limit, offset int) ([]*Note, error) {
 	query := `
 		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,

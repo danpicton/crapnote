@@ -44,17 +44,11 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	}
 	password := body.Password
 
-	noteList, err := h.notes.List(r.Context(), u.ID, notes.ListFilter{})
+	noteList, err := h.notes.ListForExport(r.Context(), u.ID)
 	if err != nil {
 		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
 		return
 	}
-	archived, err := h.notes.ListArchived(r.Context(), u.ID, 0, 0)
-	if err != nil {
-		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
-		return
-	}
-	noteList = append(noteList, archived...)
 
 	// Collect every image ID referenced across all notes.
 	var allIDs []string
