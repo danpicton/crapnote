@@ -108,6 +108,15 @@ describe('api.notes', () => {
 		const result = await api.notes.toggleStar(1);
 		expect(result.starred).toBe(true);
 	});
+
+	it('listArchived: fetches every page', async () => {
+		mockFetch
+			.mockResolvedValueOnce(ok(Array.from({ length: 100 }, (_, index) => ({ ...note, id: index + 1 }))))
+			.mockResolvedValueOnce(ok([{ ...note, id: 101 }]));
+
+		await expect(api.notes.listArchived()).resolves.toHaveLength(101);
+		expect(mockFetch.mock.calls[1][0]).toBe('/api/archive?limit=100&offset=100');
+	});
 });
 
 describe('ApiError', () => {

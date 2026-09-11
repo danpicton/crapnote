@@ -193,7 +193,7 @@ export const api = {
 		toggleLock: (id: number) => request<Note>('PATCH', `/api/notes/${id}/lock`),
 		archive: (id: number) => request<void>('PATCH', `/api/notes/${id}/archive`),
 		unarchive: (id: number) => request<void>('PATCH', `/api/notes/${id}/unarchive`),
-		listArchived: () => request<Note[]>('GET', '/api/archive?limit=100'),
+		listArchived: () => requestAllPages<Note>('/api/archive'),
 	},
 
 	tags: {
