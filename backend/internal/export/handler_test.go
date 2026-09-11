@@ -83,6 +83,47 @@ func TestExport_NoPassword(t *testing.T) {
 	}
 }
 
+func TestExport_IncludesArchivedNotes(t *testing.T) {
+	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	t.Cleanup(func() { database.Close() })
+
+	user, err := auth.NewUserRepo(database).Create(context.Background(), "archiver", "$2a$12$x", false)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	notesSvc := notes.NewService(notes.NewRepo(database))
+	if _, err := notesSvc.Create(context.Background(), user.ID, "Live Note", "live body"); err != nil {
+		t.Fatalf("create live note: %v", err)
+	}
+	archived, err := notesSvc.Create(context.Background(), user.ID, "Archived Note", "archived body")
+	if err != nil {
+		t.Fatalf("create archived note: %v", err)
+	}
+	if err := notesSvc.Archive(context.Background(), archived.ID, user.ID); err != nil {
+		t.Fatalf("archive note: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/export", strings.NewReader(`{}`))
+	req = withUser(req, user)
+	w := httptest.NewRecorder()
+	export.NewHandler(notesSvc, database).Export(w, req)
+
+	zr, err := yzip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	if err != nil {
+		t.Fatalf("parse zip: %v", err)
+	}
+	names := make(map[string]bool)
+	for _, file := range zr.File {
+		names[file.Name] = true
+	}
+	if !names["live-note.md"] || !names["archived-note.md"] {
+		t.Fatalf("expected live and archived notes, got %v", names)
+	}
+}
+
 func TestExport_WithPassword(t *testing.T) {
 	h, user := setup(t)
 
