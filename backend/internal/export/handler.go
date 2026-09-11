@@ -1,9 +1,12 @@
 package export
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -16,11 +19,12 @@ import (
 type Handler struct {
 	notes *notes.Service
 	db    *sql.DB
+	build func(io.Writer, []*notes.Note, map[string]images.Data, string) error
 }
 
 // NewHandler creates a new export Handler.
 func NewHandler(notesSvc *notes.Service, db *sql.DB) *Handler {
-	return &Handler{notes: notesSvc, db: db}
+	return &Handler{notes: notesSvc, db: db, build: Build}
 }
 
 // Export handles POST /api/export
@@ -68,15 +72,23 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var archive bytes.Buffer
+	if err := h.build(&archive, noteList, imageData, password); err != nil {
+		slog.Error("export archive build failed",
+			"event", "export_build_failed",
+			"user_id", u.ID,
+			"stage", "build_archive",
+			"error", err,
+		)
+		http.Error(w, `{"error":"internal error"}`, http.StatusInternalServerError)
+		return
+	}
+
 	filename := fmt.Sprintf("crapnote-export-%s.zip",
 		time.Now().UTC().Format("2006-01-02"))
 
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition",
 		fmt.Sprintf(`attachment; filename="%s"`, filename))
-
-	if err := Build(w, noteList, imageData, password); err != nil {
-		// Headers already sent; can't return a clean HTTP error.
-		_ = err
-	}
+	_, _ = archive.WriteTo(w)
 }
