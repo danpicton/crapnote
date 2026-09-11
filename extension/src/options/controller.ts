@@ -1,9 +1,9 @@
 import { loadSettings, saveSettings } from '../core/settings';
 import type { KVStore } from '../core/storage';
 
-export async function initOptions(doc: Document, store: KVStore): Promise<void> {
+export async function initOptions(doc: Document, sync: KVStore, local: KVStore): Promise<void> {
 	const input = (id: string) => doc.getElementById(id) as HTMLInputElement;
-	const settings = await loadSettings(store);
+	const settings = await loadSettings(sync, local);
 
 	input('server-url').value = settings.serverUrl;
 	input('api-token').value = settings.apiToken;
@@ -15,7 +15,7 @@ export async function initOptions(doc: Document, store: KVStore): Promise<void> 
 	doc.getElementById('options-form')!.addEventListener('submit', (e) => {
 		e.preventDefault();
 		void (async () => {
-			await saveSettings(store, {
+			await saveSettings(sync, local, {
 				serverUrl: input('server-url').value.trim().replace(/\/+$/, ''),
 				apiToken: input('api-token').value.trim(),
 				defaultLinkTag: input('default-link-tag').value.trim(),

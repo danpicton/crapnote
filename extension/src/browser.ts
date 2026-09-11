@@ -11,6 +11,7 @@ export function syncStore(): KVStore {
 	return {
 		get: (keys) => ext.storage.sync.get(keys),
 		set: (items) => ext.storage.sync.set(items),
+		remove: (keys) => ext.storage.sync.remove(keys),
 	};
 }
 
@@ -18,5 +19,6 @@ export function localStore(): KVStore {
 	return {
 		get: (keys) => ext.storage.local.get(keys),
 		set: (items) => ext.storage.local.set(items),
+		remove: (keys) => ext.storage.local.remove(keys),
 	};
 }
