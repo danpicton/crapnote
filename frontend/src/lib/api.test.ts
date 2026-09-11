@@ -65,6 +65,20 @@ describe('api.notes', () => {
 		expect(url).toContain('search=hello');
 	});
 
+	it('list: fetches every page and preserves filters', async () => {
+		const firstPage = Array.from({ length: 100 }, (_, index) => ({ ...note, id: index + 1 }));
+		const secondPage = [{ ...note, id: 101 }];
+		mockFetch.mockResolvedValueOnce(ok(firstPage)).mockResolvedValueOnce(ok(secondPage));
+
+		const result = await api.notes.list({ search: 'hello' });
+
+		expect(result).toHaveLength(101);
+		expect(mockFetch).toHaveBeenCalledTimes(2);
+		expect(mockFetch.mock.calls[0][0]).toContain('offset=0');
+		expect(mockFetch.mock.calls[1][0]).toContain('offset=100');
+		expect(mockFetch.mock.calls[1][0]).toContain('search=hello');
+	});
+
 	it('create: POST /api/notes', async () => {
 		mockFetch.mockResolvedValueOnce(ok(note));
 		await api.notes.create('T', 'B');

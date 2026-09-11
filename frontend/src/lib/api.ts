@@ -153,6 +153,20 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
 	return '?' + new URLSearchParams(entries.map(([k, v]) => [k, String(v)])).toString();
 }
 
+const PAGE_SIZE = 100;
+
+async function requestAllPages<T>(
+	path: string,
+	params: Record<string, string | number | boolean | undefined> = {},
+): Promise<T[]> {
+	const results: T[] = [];
+	for (let offset = 0; ; offset += PAGE_SIZE) {
+		const page = await request<T[]>('GET', path + buildQuery({ ...params, limit: PAGE_SIZE, offset }));
+		results.push(...page);
+		if (page.length < PAGE_SIZE) return results;
+	}
+}
+
 export const api = {
 	auth: {
 		login: (username: string, password: string) =>
@@ -164,11 +178,8 @@ export const api = {
 	},
 
 	notes: {
-		list: (params?: { starred?: boolean; tag_id?: number; search?: string }) =>
-			request<Note[]>(
-				'GET',
-				'/api/notes' + buildQuery({ limit: 100, ...(params ?? {}) }),
-			),
+		list: (params?: { starred?: boolean; tag?: number; search?: string }) =>
+			requestAllPages<Note>('/api/notes', params),
 		create: (title?: string, body?: string) =>
 			request<Note>('POST', '/api/notes', { title, body }),
 		get: (id: number) => request<Note>('GET', `/api/notes/${id}`),
