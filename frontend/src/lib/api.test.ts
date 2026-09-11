@@ -119,6 +119,18 @@ describe('api.notes', () => {
 	});
 });
 
+describe('api.trash', () => {
+	it('list: fetches every page', async () => {
+		const entry = { note_id: 1, title: 'T', deleted_at: '', permanent_delete_at: '' };
+		mockFetch
+			.mockResolvedValueOnce(ok(Array.from({ length: 100 }, (_, index) => ({ ...entry, note_id: index + 1 }))))
+			.mockResolvedValueOnce(ok([{ ...entry, note_id: 101 }]));
+
+		await expect(api.trash.list()).resolves.toHaveLength(101);
+		expect(mockFetch.mock.calls[1][0]).toBe('/api/trash?limit=100&offset=100');
+	});
+});
+
 describe('ApiError', () => {
 	it('has status and message', () => {
 		const err = new ApiError(404, 'not found');

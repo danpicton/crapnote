@@ -250,7 +250,7 @@ export const api = {
 	},
 
 	trash: {
-		list: () => request<TrashEntry[]>('GET', '/api/trash?limit=100'),
+		list: () => requestAllPages<TrashEntry>('/api/trash'),
 		restore: (id: number) => request<void>('POST', `/api/trash/${id}/restore`),
 		deleteOne: (id: number) => request<void>('DELETE', `/api/trash/${id}`),
 		empty: () => request<void>('DELETE', '/api/trash'),
