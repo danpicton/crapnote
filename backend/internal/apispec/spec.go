@@ -358,7 +358,7 @@ func Registry() []Operation {
 		// ── Export ──────────────────────────────────────────────────────
 		{
 			Name: "export", Method: "POST", Path: "/api/export", Scope: ScopeRead,
-			Description: "Export all non-trashed notes as a ZIP of markdown files with bundled images. Optionally password-encrypted.",
+			Description: "Export all non-trashed notes, including archived notes, as a ZIP of markdown files with bundled images. Optionally password-encrypted.",
 			Response:    ResponseBinary,
 			Params: []Param{
 				{Name: "password", In: InBody, Type: TypeString, Description: "Optional password to encrypt the ZIP."},

@@ -1,6 +1,7 @@
 package apispec
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -94,6 +95,18 @@ func TestRegistry_Invariants(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestRegistry_ExportDescriptionIncludesArchivedNotes(t *testing.T) {
+	for _, op := range Registry() {
+		if op.Name == "export" {
+			if !strings.Contains(strings.ToLower(op.Description), "archived") {
+				t.Fatalf("export description does not state that archived notes are included: %q", op.Description)
+			}
+			return
+		}
+	}
+	t.Fatal("export operation not found")
 }
 
 func bodyParams(op Operation) []Param {
