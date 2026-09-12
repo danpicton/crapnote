@@ -240,7 +240,14 @@ test.describe('Shared browser: cached notes need the password, not just a matchi
     const pageB = await contextB.newPage();
     await watchForLeak(pageB, TITLE);
 
+    // Let the app's initial session check finish before restoring the profile.
+    // A real 401 correctly clears the remembered-user marker; seeding while
+    // that request is still in flight makes whichever write lands last win.
+    const sessionRejected = pageB.waitForResponse(
+      (response) => response.url().endsWith('/api/auth/me') && response.status() === 401,
+    );
     await pageB.goto('/login');
+    await sessionRejected;
     await expect(pageB.getByRole('button', { name: /log in/i })).toBeVisible();
 
     // The WHOLE profile carries over — store, identity marker and unlock
