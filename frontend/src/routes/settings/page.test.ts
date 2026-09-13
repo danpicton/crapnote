@@ -87,20 +87,21 @@ describe('Settings page', () => {
 // A previous bug returned {status:"ok"} from POST /api/auth/login, so on a
 // fresh login the SPA stored a user object with no is_admin field and the
 // link stayed hidden until refresh. These tests guard the gate itself.
-describe('Settings — Account & app', () => {
+describe('Settings — account footer', () => {
 	beforeEach(() => {
 		mockAuth.user = { id: 1, username: 'alice', is_admin: false, created_at: '' };
 		mockApi.version.get.mockResolvedValue({ version: 'v2.1.0', update_available: false });
 	});
 
-	it('shows the logged-in user and running version near the top', async () => {
+	it('shows account and version information in a footer after the settings sections', async () => {
 		const { container } = render(SettingsPage);
 
 		expect(await screen.findByText('v2.1.0')).toBeInTheDocument();
 		expect(screen.getByText('alice')).toBeInTheDocument();
-		const accountSection = screen.getByRole('heading', { name: /account & app/i }).closest('section');
-		const exportSection = screen.getByRole('heading', { name: /^export$/i }).closest('section');
-		expect(accountSection && exportSection && (accountSection.compareDocumentPosition(exportSection) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
+		expect(screen.queryByRole('heading', { name: /account & app/i })).toBeNull();
+		const footer = screen.getByRole('contentinfo');
+		const developerSection = screen.getByRole('heading', { name: /developer/i }).closest('section');
+		expect(developerSection && (developerSection.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
 		expect(container.textContent).not.toContain('· User');
 		expect(screen.queryByText('Update available')).toBeNull();
 	});
@@ -111,7 +112,7 @@ describe('Settings — Account & app', () => {
 		expect(await screen.findByText('Admin')).toBeInTheDocument();
 	});
 
-	it('shows an update badge only when a newer release is available', async () => {
+	it('shows the available version unobtrusively when a newer release exists', async () => {
 		mockApi.version.get.mockResolvedValue({
 			version: 'v2.1.0',
 			latest_version: 'v2.2.0',
@@ -119,8 +120,8 @@ describe('Settings — Account & app', () => {
 		});
 		render(SettingsPage);
 
-		expect(await screen.findByText('Update available')).toBeInTheDocument();
-		expect(screen.getByText('Latest: v2.2.0')).toBeInTheDocument();
+		expect(await screen.findByText('v2.2.0 available')).toBeInTheDocument();
+		expect(screen.queryByText('Update available')).toBeNull();
 	});
 });
 
