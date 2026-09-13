@@ -45,6 +45,16 @@ describe('api.auth', () => {
 	});
 });
 
+describe('api.version', () => {
+	it('GET /api/version returns deployment status', async () => {
+		const status = { version: 'v2.1.0', latest_version: 'v2.2.0', update_available: true };
+		mockFetch.mockResolvedValueOnce(ok(status));
+
+		await expect(api.version.get()).resolves.toEqual(status);
+		expect(mockFetch).toHaveBeenCalledWith('/api/version', expect.objectContaining({ method: 'GET' }));
+	});
+});
+
 describe('api.notes', () => {
 	const note = { id: 1, title: 'T', body: 'B', starred: false, pinned: false, archived: false, created_at: '', updated_at: '' };
 

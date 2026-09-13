@@ -23,11 +23,14 @@ import (
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/tokens"
 	"github.com/danpicton/crapnote/internal/trash"
+	appversion "github.com/danpicton/crapnote/internal/version"
 )
 
 // Compiled-in defaults for the env vars the server reads. They are named
 // rather than inlined so the deploy manifests and the README can be checked
 // against them (issue #114) instead of against a hand-transcribed list.
+var version = "dev"
+
 const (
 	defaultPort               = "8080"
 	defaultDatabasePath       = "notes.db"
@@ -140,6 +143,13 @@ func main() {
 	settingsSvc := settings.NewService(settings.NewRepo(database))
 	settingsHandler := settings.NewHandler(settingsSvc)
 	seedDefaultTheme(context.Background(), settingsSvc, os.Getenv("DEFAULT_THEME"), logger)
+
+	versionChecker := appversion.NewChecker(
+		version,
+		"https://api.github.com/repos/danpicton/crapnote/tags?per_page=100",
+		&http.Client{Timeout: 3 * time.Second},
+	)
+	versionHandler := appversion.NewHandler(versionChecker)
 
 	// Seed initial admin if no users exist.
 	adminUser := os.Getenv("ADMIN_USERNAME")
@@ -290,7 +300,7 @@ func main() {
 	observe := func(h http.Handler) http.Handler {
 		return middleware.Metrics()(middleware.Logging(logger)(middleware.SecurityHeaders()(h)))
 	}
-	mux := newMux(authHandler, adminHandler, setupHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, tokensHandler, settingsHandler, loginLimiter, bearerLimiter, observe)
+	mux := newMux(authHandler, adminHandler, setupHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, tokensHandler, settingsHandler, versionHandler, loginLimiter, bearerLimiter, observe)
 
 	handler := observe(mux)
 

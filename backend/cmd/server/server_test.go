@@ -19,6 +19,7 @@ import (
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/tokens"
 	"github.com/danpicton/crapnote/internal/trash"
+	appversion "github.com/danpicton/crapnote/internal/version"
 )
 
 // permissiveLoginLimiter is a login limiter large enough that no test hits it
@@ -64,6 +65,7 @@ func newTestMux(t *testing.T) *http.ServeMux {
 		images.NewHandler(database),
 		tokens.NewHandler(tokensSvc),
 		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
+		appversion.NewHandler(appversion.NewChecker("dev", "http://invalid", http.DefaultClient)),
 		permissiveLoginLimiter(),
 		permissiveBearerLimiter(),
 		nil,
@@ -110,6 +112,7 @@ func newAuthedMux(t *testing.T, observe ...func(http.Handler) http.Handler) (*ht
 		images.NewHandler(database),
 		tokens.NewHandler(tokensSvc),
 		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
+		appversion.NewHandler(appversion.NewChecker("dev", "http://invalid", http.DefaultClient)),
 		permissiveLoginLimiter(),
 		permissiveBearerLimiter(),
 		observeOrNil(observe),
@@ -197,6 +200,7 @@ var protectedRoutes = []struct {
 	{http.MethodDelete, "/api/trash"},
 	{http.MethodPost, "/api/auth/logout"},
 	{http.MethodGet, "/api/auth/me"},
+	{http.MethodGet, "/api/version"},
 	{http.MethodGet, "/api/tokens"},
 	{http.MethodPost, "/api/tokens"},
 	{http.MethodDelete, "/api/tokens/1"},
@@ -320,6 +324,7 @@ func TestLogin_RateLimited(t *testing.T) {
 		images.NewHandler(database),
 		tokens.NewHandler(tokensSvc),
 		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
+		appversion.NewHandler(appversion.NewChecker("dev", "http://invalid", http.DefaultClient)),
 		tightLimiter,
 		permissiveBearerLimiter(),
 		nil,
@@ -372,6 +377,7 @@ func TestLogin_RateLimited_SpoofedForwardedForDoesNotBypass(t *testing.T) {
 		images.NewHandler(database),
 		tokens.NewHandler(tokensSvc),
 		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
+		appversion.NewHandler(appversion.NewChecker("dev", "http://invalid", http.DefaultClient)),
 		tightLimiter,
 		permissiveBearerLimiter(),
 		nil,

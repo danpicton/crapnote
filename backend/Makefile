@@ -1,5 +1,6 @@
 TAGS        := sqlite_fts5
-BUILD_FLAGS := -tags $(TAGS)
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+BUILD_FLAGS := -tags $(TAGS) -ldflags "-X main.version=$(VERSION)"
 export GOTOOLCHAIN := local
 
 FRONTEND_DIR := ../frontend

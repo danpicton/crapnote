@@ -181,6 +181,11 @@ func Registry() []Operation {
 			Description: "Return the authenticated user (id, username, admin flag).",
 		},
 		{
+			Name: "version_get", Method: "GET", Path: "/api/version", Scope: ScopeRead,
+			Description: "Return the running Crapnote version and whether a newer release is available.",
+			MCPWaived:   "deployment metadata is only used by the settings UI",
+		},
+		{
 			Name: "auth_change_password", Method: "POST", Path: "/api/auth/password", Scope: ScopeRead,
 			CookieOnly:  true,
 			Description: "Change your own password (cookie sessions only — a leaked token must not hijack the account).",

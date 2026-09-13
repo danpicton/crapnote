@@ -6,6 +6,12 @@ export interface User {
 	created_at: string;
 }
 
+export interface VersionStatus {
+	version: string;
+	latest_version?: string;
+	update_available: boolean;
+}
+
 export interface InviteResult {
 	user: User & { pending_setup: boolean };
 	setup_url: string;
@@ -182,6 +188,10 @@ async function requestAllPages<T>(
 }
 
 export const api = {
+	version: {
+		get: () => request<VersionStatus>('GET', '/api/version'),
+	},
+
 	auth: {
 		login: (username: string, password: string) =>
 			request<User>('POST', '/api/auth/login', { username, password }),
