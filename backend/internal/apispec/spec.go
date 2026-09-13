@@ -182,8 +182,8 @@ func Registry() []Operation {
 		},
 		{
 			Name: "version_get", Method: "GET", Path: "/api/version", Scope: ScopeRead,
-			Description: "Return the running Crapnote version and whether a newer release is available.",
-			MCPWaived:   "deployment metadata is only used by the settings UI",
+			CookieOnly:  true,
+			Description: "Return deployment version status to the browser settings UI.",
 		},
 		{
 			Name: "auth_change_password", Method: "POST", Path: "/api/auth/password", Scope: ScopeRead,

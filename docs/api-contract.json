@@ -129,11 +129,10 @@
       "path": "/api/version",
       "scope": "read",
       "admin_only": false,
-      "cookie_only": false,
-      "description": "Return the running Crapnote version and whether a newer release is available.",
+      "cookie_only": true,
+      "description": "Return deployment version status to the browser settings UI.",
       "request": "json",
-      "response": "json",
-      "mcp_waived": "deployment metadata is only used by the settings UI"
+      "response": "json"
     },
     {
       "name": "auth_change_password",
