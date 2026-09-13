@@ -16,6 +16,7 @@ import (
 	"github.com/danpicton/crapnote/internal/tags"
 	"github.com/danpicton/crapnote/internal/tokens"
 	"github.com/danpicton/crapnote/internal/trash"
+	appversion "github.com/danpicton/crapnote/internal/version"
 )
 
 func newMux(
@@ -29,6 +30,7 @@ func newMux(
 	imagesHandler *images.Handler,
 	tokensHandler *tokens.Handler,
 	settingsHandler *settings.Handler,
+	versionHandler *appversion.Handler,
 	loginLimiter *ratelimit.Limiter,
 	bearerLimiter *ratelimit.Limiter,
 	observe func(http.Handler) http.Handler,
@@ -69,6 +71,7 @@ func newMux(
 		"auth_logout":          authHandler.Logout,
 		"auth_me":              authHandler.Me,
 		"auth_change_password": authHandler.ChangePassword,
+		"version_get":          versionHandler.Get,
 
 		"setup_get":      setupHandler.Get,
 		"setup_complete": setupHandler.Complete,

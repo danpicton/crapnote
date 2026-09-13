@@ -13,9 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev l
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
+ARG VERSION=dev
 # Copy frontend build output into the go:embed target directory (must be after COPY backend/ to avoid .gitkeep overwrite)
 COPY --from=frontend-builder /app/frontend/build ./cmd/server/ui/build/
-RUN CGO_ENABLED=1 GOOS=linux go build -tags sqlite_fts5 -o /app/server ./cmd/server
+RUN CGO_ENABLED=1 GOOS=linux go build -tags sqlite_fts5 -ldflags "-X main.version=${VERSION}" -o /app/server ./cmd/server
 
 # Stage 3 — Final image (needs libc for CGO binary)
 FROM gcr.io/distroless/cc-debian12:nonroot

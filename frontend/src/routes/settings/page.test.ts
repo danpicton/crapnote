@@ -6,6 +6,7 @@ import SettingsPage from './+page.svelte';
 const mockApi = vi.hoisted(() => ({
 	auth: { changePassword: vi.fn() },
 	tokens: { list: vi.fn().mockResolvedValue([]) },
+	version: { get: vi.fn().mockResolvedValue({ version: 'v2.1.0', update_available: false }) },
 }));
 const mockAuth = vi.hoisted(() => ({
 	user: { id: 1, username: 'alice', is_admin: false, created_at: '' } as {
@@ -86,6 +87,43 @@ describe('Settings page', () => {
 // A previous bug returned {status:"ok"} from POST /api/auth/login, so on a
 // fresh login the SPA stored a user object with no is_admin field and the
 // link stayed hidden until refresh. These tests guard the gate itself.
+describe('Settings — Account & app', () => {
+	beforeEach(() => {
+		mockAuth.user = { id: 1, username: 'alice', is_admin: false, created_at: '' };
+		mockApi.version.get.mockResolvedValue({ version: 'v2.1.0', update_available: false });
+	});
+
+	it('shows the logged-in user and running version near the top', async () => {
+		const { container } = render(SettingsPage);
+
+		expect(await screen.findByText('v2.1.0')).toBeInTheDocument();
+		expect(screen.getByText('alice')).toBeInTheDocument();
+		const accountSection = screen.getByRole('heading', { name: /account & app/i }).closest('section');
+		const exportSection = screen.getByRole('heading', { name: /^export$/i }).closest('section');
+		expect(accountSection && exportSection && (accountSection.compareDocumentPosition(exportSection) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy();
+		expect(container.textContent).not.toContain('· User');
+		expect(screen.queryByText('Update available')).toBeNull();
+	});
+
+	it('labels an administrator', async () => {
+		mockAuth.user = { id: 1, username: 'admin', is_admin: true, created_at: '' };
+		render(SettingsPage);
+		expect(await screen.findByText('Admin')).toBeInTheDocument();
+	});
+
+	it('shows an update badge only when a newer release is available', async () => {
+		mockApi.version.get.mockResolvedValue({
+			version: 'v2.1.0',
+			latest_version: 'v2.2.0',
+			update_available: true,
+		});
+		render(SettingsPage);
+
+		expect(await screen.findByText('Update available')).toBeInTheDocument();
+		expect(screen.getByText('Latest: v2.2.0')).toBeInTheDocument();
+	});
+});
+
 describe('Settings — Administration link', () => {
 	it('shows the User management link when the user is an admin', () => {
 		mockAuth.user = { id: 1, username: 'admin', is_admin: true, created_at: '' };

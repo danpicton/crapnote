@@ -124,6 +124,17 @@
       "response": "json"
     },
     {
+      "name": "version_get",
+      "method": "GET",
+      "path": "/api/version",
+      "scope": "read",
+      "admin_only": false,
+      "cookie_only": true,
+      "description": "Return deployment version status to the browser settings UI.",
+      "request": "json",
+      "response": "json"
+    },
+    {
       "name": "auth_change_password",
       "method": "POST",
       "path": "/api/auth/password",

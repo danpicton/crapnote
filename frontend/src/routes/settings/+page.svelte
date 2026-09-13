@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { ChevronLeft, ChevronRight, Users } from 'lucide-svelte';
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
@@ -7,7 +8,7 @@
 	import PasswordInput from '$lib/components/PasswordInput.svelte';
 	import ShortcutEditor from '$lib/components/ShortcutEditor.svelte';
 	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
-	import { api, ApiError } from '$lib/api';
+	import { api, ApiError, type VersionStatus } from '$lib/api';
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape') {
@@ -29,6 +30,16 @@
 	let pwSubmitting = $state(false);
 
 	let globalThemeError = $state('');
+	let versionStatus = $state<VersionStatus | null>(null);
+
+	onMount(() => {
+		void api.version.get().then((status) => {
+			versionStatus = status;
+		}).catch(() => {
+			// Version information is supplementary; settings remain usable when
+			// the server cannot provide it.
+		});
+	});
 
 	// The value the global-theme <select> shows. It has to be state this
 	// component owns rather than `theme.globalTheme` read straight into the
@@ -145,8 +156,41 @@
 			<h1 class="page-title">Settings<span class="accent-dot" aria-hidden="true">.</span></h1>
 		</header>
 
-		<!-- Export -->
+		<!-- Account and deployment status stays above the longer settings lists. -->
 		<section class="section first-section">
+			<div class="section-label">
+				<h2>Account &amp; app</h2>
+				<p>Your session and this Crapnote deployment.</p>
+			</div>
+			<div class="section-body account-card">
+				<div class="account-row">
+					<span class="account-row-label">Logged in as</span>
+					<span class="account-row-value">
+						<strong class="account-name">{auth.user?.username}</strong>
+						{#if auth.user?.is_admin}<span class="admin-badge">Admin</span>{/if}
+					</span>
+				</div>
+				<div class="account-row">
+					<span class="account-row-label">Version</span>
+					<span class="account-row-value version-value">
+						{#if versionStatus}
+							<code>{versionStatus.version}</code>
+							{#if versionStatus.update_available}
+								<span class="update-badge">Update available</span>
+								{#if versionStatus.latest_version}
+									<span class="latest-version">Latest: {versionStatus.latest_version}</span>
+								{/if}
+							{/if}
+						{:else}
+							<span class="version-loading">Checking…</span>
+						{/if}
+					</span>
+				</div>
+			</div>
+		</section>
+
+		<!-- Export -->
+		<section class="section">
 			<div class="section-label">
 				<h2>Export</h2>
 				<p>Everything you've written, as Markdown.</p>
@@ -282,22 +326,6 @@
 			</div>
 		</section>
 
-		<!-- Account -->
-		<section class="section">
-			<div class="section-label">
-				<h2>Account</h2>
-				<p>You.</p>
-			</div>
-			<div class="section-body">
-				<p class="account-info">
-					Logged in as <strong class="account-name">{auth.user?.username}</strong>
-					<span class="account-meta">· {auth.user?.is_admin ? 'Admin' : 'User'}</span>
-				</p>
-			</div>
-		</section>
-
-		<!-- Mobile footer -->
-		<p class="mob-settings-footer">Crapnote · {auth.user?.username ?? ''}</p>
 	</div>
 	<MobileTabBar activeTab="settings" />
 </div>
@@ -524,13 +552,33 @@
 		font-family: var(--sans);
 	}
 
-.account-info { font-size: 0.875rem; color: var(--text); margin: 0; font-family: var(--sans); }
+	.account-card { display: flex; flex-direction: column; }
+	.account-row {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 1rem;
+		min-height: 2.25rem;
+		border-bottom: 1px solid var(--border);
+	}
+	.account-row:last-child { border-bottom: none; }
+	.account-row-label { color: var(--text-3); font-size: 0.8125rem; }
+	.account-row-value { display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
 	.account-name { font-family: var(--serif); font-size: 1rem; font-weight: 600; }
-	.account-meta { color: var(--text-3); font-size: 0.8125rem; margin-left: 0.5rem; }
+	.admin-badge, .update-badge {
+		font-size: 0.6875rem;
+		font-weight: 600;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
+		padding: 0.15rem 0.4rem;
+		background: var(--accent-lt);
+		color: var(--accent-dk);
+	}
+	.version-value code { font-family: var(--mono); font-size: 0.75rem; }
+	.latest-version, .version-loading { color: var(--text-3); font-size: 0.75rem; }
 
 	/* Desktop: hide mobile-only elements */
 	.mob-page-title-row { display: none; }
-	.mob-settings-footer { display: none; }
 
 	/* Responsive */
 	@media (max-width: 640px) {
@@ -613,8 +661,10 @@
 		.section-keyboard-shortcuts { display: none; }
 		.section-developer { display: none; }
 
-		/* Account info: add touch-friendly padding inside card */
-		.account-info { padding: 14px 16px; font-size: 15px; }
+		.account-card { padding: 0; }
+		.account-row { min-height: 48px; padding: 0 16px; }
+		.account-row-label { font-size: 14px; }
+		.account-row-value { font-size: 15px; }
 
 		/* Export row: flat input row, then button with breathing room */
 		.export-row { flex-direction: column; gap: 0; padding: 0; }
@@ -692,15 +742,5 @@
 		.field-label { font-size: 11px; color: var(--text-4); margin-bottom: 0; display: block; padding: 12px 16px 4px; text-transform: uppercase; letter-spacing: 0.06em; }
 		.pw-form .btn-primary { margin: 12px 16px; width: calc(100% - 32px); box-sizing: border-box; }
 
-		/* Mobile footer */
-		.mob-settings-footer {
-			display: block;
-			text-align: center;
-			font-family: var(--sans);
-			font-size: 12px;
-			color: var(--text-3);
-			padding: 24px 22px 8px;
-			margin: 0;
-		}
 	}
 </style>
