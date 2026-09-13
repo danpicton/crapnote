@@ -156,41 +156,8 @@
 			<h1 class="page-title">Settings<span class="accent-dot" aria-hidden="true">.</span></h1>
 		</header>
 
-		<!-- Account and deployment status stays above the longer settings lists. -->
-		<section class="section first-section">
-			<div class="section-label">
-				<h2>Account &amp; app</h2>
-				<p>Your session and this Crapnote deployment.</p>
-			</div>
-			<div class="section-body account-card">
-				<div class="account-row">
-					<span class="account-row-label">Logged in as</span>
-					<span class="account-row-value">
-						<strong class="account-name">{auth.user?.username}</strong>
-						{#if auth.user?.is_admin}<span class="admin-badge">Admin</span>{/if}
-					</span>
-				</div>
-				<div class="account-row">
-					<span class="account-row-label">Version</span>
-					<span class="account-row-value version-value">
-						{#if versionStatus}
-							<code>{versionStatus.version}</code>
-							{#if versionStatus.update_available}
-								<span class="update-badge">Update available</span>
-								{#if versionStatus.latest_version}
-									<span class="latest-version">Latest: {versionStatus.latest_version}</span>
-								{/if}
-							{/if}
-						{:else}
-							<span class="version-loading">Checking…</span>
-						{/if}
-					</span>
-				</div>
-			</div>
-		</section>
-
 		<!-- Export -->
-		<section class="section">
+		<section class="section first-section">
 			<div class="section-label">
 				<h2>Export</h2>
 				<p>Everything you've written, as Markdown.</p>
@@ -326,6 +293,25 @@
 			</div>
 		</section>
 
+		<footer class="account-footer">
+			<span>Signed in as <strong class="account-name">{auth.user?.username}</strong></span>
+			{#if auth.user?.is_admin}<span class="admin-badge">Admin</span>{/if}
+			<span class="footer-separator" aria-hidden="true">·</span>
+			<span>
+				Crapnote
+				{#if versionStatus}
+					<code>{versionStatus.version}</code>
+				{:else}
+					<span class="version-loading">Checking…</span>
+				{/if}
+			</span>
+			{#if versionStatus?.update_available}
+				<span class="footer-separator" aria-hidden="true">·</span>
+				<span class="update-available">
+					{versionStatus.latest_version ? `${versionStatus.latest_version} available` : 'Update available'}
+				</span>
+			{/if}
+		</footer>
 	</div>
 	<MobileTabBar activeTab="settings" />
 </div>
@@ -552,30 +538,30 @@
 		font-family: var(--sans);
 	}
 
-	.account-card { display: flex; flex-direction: column; }
-	.account-row {
+	.account-footer {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		gap: 1rem;
-		min-height: 2.25rem;
-		border-bottom: 1px solid var(--border);
+		justify-content: center;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+		padding: 1.75rem 0 2.5rem;
+		color: var(--text-3);
+		font-size: 0.75rem;
 	}
-	.account-row:last-child { border-bottom: none; }
-	.account-row-label { color: var(--text-3); font-size: 0.8125rem; }
-	.account-row-value { display: inline-flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
-	.account-name { font-family: var(--serif); font-size: 1rem; font-weight: 600; }
-	.admin-badge, .update-badge {
-		font-size: 0.6875rem;
+	.account-name { color: var(--text-2); font-weight: 600; }
+	.admin-badge {
+		font-size: 0.625rem;
 		font-weight: 600;
-		letter-spacing: 0.04em;
+		letter-spacing: 0.06em;
 		text-transform: uppercase;
-		padding: 0.15rem 0.4rem;
-		background: var(--accent-lt);
-		color: var(--accent-dk);
+		padding: 0.1rem 0.35rem;
+		border: 1px solid var(--border);
+		color: var(--text-2);
 	}
-	.version-value code { font-family: var(--mono); font-size: 0.75rem; }
-	.latest-version, .version-loading { color: var(--text-3); font-size: 0.75rem; }
+	.account-footer code { color: var(--text-2); font-family: var(--mono); font-size: 0.75rem; }
+	.footer-separator { color: var(--border-md); }
+	.update-available { color: var(--accent); }
+	.version-loading { color: var(--text-3); font-size: 0.75rem; }
 
 	/* Desktop: hide mobile-only elements */
 	.mob-page-title-row { display: none; }
@@ -661,10 +647,9 @@
 		.section-keyboard-shortcuts { display: none; }
 		.section-developer { display: none; }
 
-		.account-card { padding: 0; }
-		.account-row { min-height: 48px; padding: 0 16px; }
-		.account-row-label { font-size: 14px; }
-		.account-row-value { font-size: 15px; }
+		.account-footer {
+			padding: 1.5rem 1rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
+		}
 
 		/* Export row: flat input row, then button with breathing room */
 		.export-row { flex-direction: column; gap: 0; padding: 0; }
