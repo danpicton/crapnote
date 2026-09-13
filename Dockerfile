@@ -9,17 +9,13 @@ RUN npm run build
 # Stage 2 — Backend build (CGO required for go-sqlite3)
 FROM golang:1.24-bookworm AS backend-builder
 WORKDIR /app/backend
-RUN apt-get update && apt-get install -y --no-install-recommends gcc git libc6-dev libsqlite3-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev libsqlite3-dev && rm -rf /var/lib/apt/lists/*
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
-# Keep repository metadata in the builder only so release tags can be embedded
-# without coupling version stamping to a particular CI workflow.
-COPY .git /app/.git
 # Copy frontend build output into the go:embed target directory (must be after COPY backend/ to avoid .gitkeep overwrite)
 COPY --from=frontend-builder /app/frontend/build ./cmd/server/ui/build/
-RUN VERSION="$(git -C /app describe --tags --always)" && \
-    CGO_ENABLED=1 GOOS=linux go build -tags sqlite_fts5 -ldflags "-X main.version=${VERSION}" -o /app/server ./cmd/server
+RUN CGO_ENABLED=1 GOOS=linux go build -tags sqlite_fts5 -o /app/server ./cmd/server
 
 # Stage 3 — Final image (needs libc for CGO binary)
 FROM gcr.io/distroless/cc-debian12:nonroot
