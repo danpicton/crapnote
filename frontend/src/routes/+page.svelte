@@ -2715,7 +2715,7 @@
 		line-height: 1.08;
 		border: none;
 		outline: none;
-		padding: 0;
+		padding: 0.125rem 0;
 		background: transparent;
 		color: var(--text);
 	}
