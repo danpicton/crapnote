@@ -94,6 +94,32 @@ func TestFetchByIDs_MCPDoesNotFetchImagesReferencedByPrivateNotes(t *testing.T) 
 	}
 }
 
+func TestFetchByIDs_MCPRecognizesPercentEncodedPrivateImageReferences(t *testing.T) {
+	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	user, err := auth.NewUserRepo(database).Create(context.Background(), "encoded-fetcher", "hash", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const imageID = "encoded-private-image"
+	_, _ = database.Exec(`INSERT INTO images(id,user_id,mime_type,data) VALUES(?,?,?,?)`, imageID, user.ID, "image/png", []byte("secret bytes"))
+	_, _ = database.Exec(`INSERT INTO notes(user_id,title,body,private) VALUES(?,?,?,1)`, user.ID, "private", "unrelated malformed %zz ![secret](%2Fapi%2Fimages%2F"+imageID+")")
+	// The public reference proves that the encoded private reference, rather
+	// than absence from public content, is what must deny MCP access.
+	_, _ = database.Exec(`INSERT INTO notes(user_id,title,body) VALUES(?,?,?)`, user.ID, "public", "/api/images/"+imageID)
+
+	got, err := images.FetchByIDs(requestctx.WithMCP(context.Background()), database, user.ID, []string{imageID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got[imageID]; ok {
+		t.Fatal("MCP fetched image referenced by a percent-encoded private URL")
+	}
+}
+
 func TestUpload_Success(t *testing.T) {
 	h, user := newFixture(t)
 

@@ -236,6 +236,25 @@ describe('syncOfflineChanges — conflict', () => {
 		expect(api.notes.create).toHaveBeenCalledWith('[sync conflict] Private local', 'sensitive local', true);
 	});
 
+	it('does not republish an older public cache after the server note became private', async () => {
+		const note = fakeCachedNote({
+			id: 7, title: 'Older offline edit', body: 'private content edited offline', private: false,
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({
+			id: 7, title: 'Now private', body: 'server body', private: true,
+			updated_at: '2024-01-05T00:00:00Z',
+		}));
+		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 999, private: true }));
+
+		await syncOfflineChanges('heartbeat', 1);
+
+		expect(api.notes.create).toHaveBeenCalledWith(
+			'[sync conflict] Older offline edit', 'private content edited offline', true
+		);
+	});
+
 	it('preserves server privacy when the local version wins a conflict', async () => {
 		const note = fakeCachedNote({
 			id: 7, title: 'Local newer', body: 'local', private: false,

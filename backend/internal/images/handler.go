@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/ratelimit"
@@ -66,32 +67,80 @@ func FetchByIDs(ctx context.Context, db *sql.DB, userID int64, ids []string) (ma
 		var uid int64
 		var mime string
 		var data []byte
-		query := `SELECT user_id, mime_type, data FROM images WHERE id = ?` + mcpImageClause(ctx)
-		err := db.QueryRowContext(ctx, query, id).Scan(&uid, &mime, &data)
+		err := db.QueryRowContext(ctx,
+			`SELECT user_id, mime_type, data FROM images WHERE id = ?`, id,
+		).Scan(&uid, &mime, &data)
 		if err == sql.ErrNoRows || uid != userID {
 			continue
 		}
 		if err != nil {
 			return nil, fmt.Errorf("fetch image %s: %w", id, err)
 		}
+		allowed, err := mcpImageAllowed(ctx, db, userID, id)
+		if err != nil {
+			return nil, fmt.Errorf("authorize image %s: %w", id, err)
+		}
+		if !allowed {
+			continue
+		}
 		out[id] = Data{MimeType: mime, Bytes: data}
 	}
 	return out, nil
 }
 
-func mcpImageClause(ctx context.Context) string {
+// mcpImageAllowed requires an image to be referenced by a public note and by
+// no private note. References are URL-decoded before comparison because
+// browsers accept percent-encoded forms of the canonical image path.
+func mcpImageAllowed(ctx context.Context, db *sql.DB, userID int64, id string) (bool, error) {
 	if !requestctx.IsMCP(ctx) {
-		return ""
+		return true, nil
 	}
-	return ` AND EXISTS (
-		SELECT 1 FROM notes n
-		WHERE n.user_id=images.user_id AND n.private=0
-		  AND n.body LIKE '%/api/images/' || images.id || '%'
-	) AND NOT EXISTS (
-		SELECT 1 FROM notes n
-		WHERE n.user_id=images.user_id AND n.private=1
-		  AND n.body LIKE '%/api/images/' || images.id || '%'
-	)`
+
+	rows, err := db.QueryContext(ctx, `SELECT body, private FROM notes WHERE user_id=?`, userID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	canonical := "/api/images/" + id
+	publicReference := false
+	for rows.Next() {
+		var body string
+		var private bool
+		if err := rows.Scan(&body, &private); err != nil {
+			return false, err
+		}
+		body = decodePercentEscapes(body)
+		if !strings.Contains(body, canonical) {
+			continue
+		}
+		if private {
+			return false, nil
+		}
+		publicReference = true
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return publicReference, nil
+}
+
+// decodePercentEscapes decodes valid URL escapes without letting an unrelated
+// malformed percent sign elsewhere in Markdown suppress reference detection.
+func decodePercentEscapes(value string) string {
+	var decoded strings.Builder
+	decoded.Grow(len(value))
+	for i := 0; i < len(value); i++ {
+		if value[i] == '%' && i+2 < len(value) {
+			if b, err := strconv.ParseUint(value[i+1:i+3], 16, 8); err == nil {
+				decoded.WriteByte(byte(b))
+				i += 2
+				continue
+			}
+		}
+		decoded.WriteByte(value[i])
+	}
+	return decoded.String()
 }
 
 // Handler holds HTTP handlers for image upload and serving.
@@ -222,8 +271,9 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 	var mimeType string
 	var data []byte
 
-	query := `SELECT user_id, mime_type, data FROM images WHERE id = ?` + mcpImageClause(r.Context())
-	err := h.db.QueryRowContext(r.Context(), query, id).Scan(&userID, &mimeType, &data)
+	err := h.db.QueryRowContext(r.Context(),
+		`SELECT user_id, mime_type, data FROM images WHERE id = ?`, id,
+	).Scan(&userID, &mimeType, &data)
 
 	if err == sql.ErrNoRows {
 		http.NotFound(w, r)
@@ -236,6 +286,15 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 
 	// Users can only access their own images.
 	if userID != u.ID {
+		http.NotFound(w, r)
+		return
+	}
+	allowed, err := mcpImageAllowed(r.Context(), h.db, u.ID, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if !allowed {
 		http.NotFound(w, r)
 		return
 	}

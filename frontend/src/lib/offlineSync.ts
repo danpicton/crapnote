@@ -441,8 +441,12 @@ async function pushContentCheckpoint(
 		throw err;
 	}
 
-	const createConflict = async (title: string, body: string, privateNote: boolean | undefined) => {
-		if (privateNote) {
+	// A privacy change made on either side applies to both conflict copies.
+	// In particular, an older public cache must never republish content after
+	// another device has made the original note private.
+	const conflictPrivate = !!(note.private || serverNote.private);
+	const createConflict = async (title: string, body: string) => {
+		if (conflictPrivate) {
 			await api.notes.create(title, body, true);
 		} else {
 			await api.notes.create(title, body);
@@ -451,7 +455,7 @@ async function pushContentCheckpoint(
 
 	/** Accept the server's version, preserving the local edit as a conflict note. */
 	const preserveLocalAsConflict = async (): Promise<CachedNote> => {
-		await createConflict(`[sync conflict] ${note.title}`, note.body, note.private);
+		await createConflict(`[sync conflict] ${note.title}`, note.body);
 		const entry: CachedNote = {
 			...note,
 			title: serverNote.title,
@@ -498,7 +502,7 @@ async function pushContentCheckpoint(
 
 	if (localWins) {
 		// Preserve the server's version as the conflict note, then push local.
-		await createConflict(`[sync conflict] ${serverNote.title}`, serverNote.body, serverNote.private);
+		await createConflict(`[sync conflict] ${serverNote.title}`, serverNote.body);
 		let updated;
 		try {
 			updated = await api.notes.update(note.id, { title: note.title, body: note.body });
