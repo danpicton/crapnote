@@ -1080,9 +1080,7 @@
 		const note = notes.find(n => n.id === id);
 		if (!note) return;
 		showNoteMenu = false;
-		const dup = await api.notes.create((note.title || 'Untitled') + ' (copy)');
-		if (note.body) await api.notes.update(dup.id, { body: note.body });
-		dup.body = note.body;
+		const dup = await api.notes.create((note.title || 'Untitled') + ' (copy)', note.body, !!note.private);
 		const firstUnpinned = notes.findIndex(n => !n.pinned);
 		notes = firstUnpinned === -1 ? [...notes, dup] : [...notes.slice(0, firstUnpinned), dup, ...notes.slice(firstUnpinned)];
 		selectedId = dup.id;

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"strconv"
@@ -88,9 +89,12 @@ func FetchByIDs(ctx context.Context, db *sql.DB, userID int64, ids []string) (ma
 	return out, nil
 }
 
-// mcpImageAllowed requires an image to be referenced by a public note and by
-// no private note. References are URL-decoded before comparison because
-// browsers accept percent-encoded forms of the canonical image path.
+// mcpImageAllowed requires a public reference and denies any image identity
+// mentioned by a private note. Deliberately match the opaque ID, not the URL:
+// browsers resolve relative URLs, dot segments and repeated slashes, and a
+// canonical-path test would let an MCP-created carrier launder private bytes.
+// This conservative check may also deny an ID mentioned as plain text. It is
+// shared by image serving and export; direct REST access is unaffected.
 func mcpImageAllowed(ctx context.Context, db *sql.DB, userID int64, id string) (bool, error) {
 	if !requestctx.IsMCP(ctx) {
 		return true, nil
@@ -102,7 +106,6 @@ func mcpImageAllowed(ctx context.Context, db *sql.DB, userID int64, id string) (
 	}
 	defer rows.Close()
 
-	canonical := "/api/images/" + id
 	publicReference := false
 	for rows.Next() {
 		var body string
@@ -110,8 +113,10 @@ func mcpImageAllowed(ctx context.Context, db *sql.DB, userID int64, id string) (
 		if err := rows.Scan(&body, &private); err != nil {
 			return false, err
 		}
-		body = decodePercentEscapes(body)
-		if !strings.Contains(body, canonical) {
+		body = decodePercentEscapes(html.UnescapeString(body))
+		// Markdown permits backslash-escaped punctuation inside destinations.
+		body = strings.ReplaceAll(body, `\`, "")
+		if !strings.Contains(body, id) {
 			continue
 		}
 		if private {

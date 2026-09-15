@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import NotePage from './+page.svelte';
 
@@ -174,6 +174,10 @@ describe('/notes/[id] page', () => {
 		await fireEvent.click(toggle);
 		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(42, { private: false }));
 		expect(screen.getByRole('button', { name: 'Make note private' })).toHaveAttribute('aria-pressed', 'false');
+		cleanup();
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ private: false }));
+		render(NotePage);
+		expect(await screen.findByRole('button', { name: 'Make note private' })).toHaveAttribute('aria-pressed', 'false');
 	});
 
 	it('offers the private toggle in the mobile actions sheet', async () => {

@@ -320,7 +320,9 @@ async function runReplayPhases(db: IDBDatabase, note: CachedNote, result: SyncRe
  * carried by the create itself, so is_dirty clears.
  */
 async function syncNewNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<CachedNote> {
-	const serverNote = await api.notes.create(note.title, note.body);
+	const serverNote = note.private
+		? await api.notes.create(note.title, note.body, true)
+		: await api.notes.create(note.title, note.body);
 	await deleteNote(db, note.id);
 	const entry: CachedNote = {
 		...note,
@@ -399,6 +401,9 @@ async function reconcileFlagsCheckpoint(
 		// The server owns these now — in particular pin_order, where a note
 		// pinned offline carries only the client's guess (nextPinOrder).
 		...noteFlags(current, note),
+		// Privacy belongs to pending content, not just the latest flag response.
+		// Persist the stricter value across failed content pushes and retries.
+		...(note.is_dirty ? { private: !!(note.private || current.private) } : {}),
 		...(lockDeferred ? { locked: true } : {}),
 		flags_dirty: lockDeferred,
 		flags_toggled: lockDeferred ? { locked: true } : undefined,
@@ -453,6 +458,13 @@ async function pushContentCheckpoint(
 		}
 	};
 
+	// The original note can receive private offline content too, not just the
+	// conflict copy. Never clear server privacy as a side effect of content sync.
+	const pushLocalContent = () => api.notes.update(note.id, {
+		title: note.title, body: note.body,
+		...(conflictPrivate ? { private: true } : {}),
+	});
+
 	/** Accept the server's version, preserving the local edit as a conflict note. */
 	const preserveLocalAsConflict = async (): Promise<CachedNote> => {
 		await createConflict(`[sync conflict] ${note.title}`, note.body);
@@ -473,7 +485,7 @@ async function pushContentCheckpoint(
 		// No server-side change since we last synced — our version wins cleanly
 		let updated;
 		try {
-			updated = await api.notes.update(note.id, { title: note.title, body: note.body });
+			updated = await pushLocalContent();
 		} catch (err) {
 			if (!isLockedServerSide(err)) throw err;
 			result.locked++;
@@ -483,6 +495,7 @@ async function pushContentCheckpoint(
 			...note,
 			title: updated.title,
 			body: updated.body,
+			private: updated.private ?? conflictPrivate,
 			server_updated_at: updated.updated_at,
 			local_updated_at: updated.updated_at,
 			is_dirty: false,
@@ -505,7 +518,7 @@ async function pushContentCheckpoint(
 		await createConflict(`[sync conflict] ${serverNote.title}`, serverNote.body);
 		let updated;
 		try {
-			updated = await api.notes.update(note.id, { title: note.title, body: note.body });
+			updated = await pushLocalContent();
 		} catch (err) {
 			if (!isLockedServerSide(err)) throw err;
 			// Locked server-side — the local edit can't win after all. Keep
@@ -518,6 +531,7 @@ async function pushContentCheckpoint(
 			...note,
 			title: updated.title,
 			body: updated.body,
+			private: updated.private ?? conflictPrivate,
 			server_updated_at: updated.updated_at,
 			local_updated_at: updated.updated_at,
 			is_dirty: false,
