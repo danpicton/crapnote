@@ -32,7 +32,7 @@
 	import { wrapSelectedInBulletListCommand } from '$lib/milkdown/listedit';
 	import { EMPTY_FORMATS, type ActiveFormats } from '$lib/milkdown/formatState';
 	import { finishTitleDraft } from '$lib/titleDraft';
-	import { acknowledgeCachedSave, latestTimestamp, SaveRequests } from '$lib/noteSave';
+	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, SaveRequests } from '$lib/noteSave';
 
 	const noteId = $derived(Number($page.params.id));
 
@@ -420,34 +420,27 @@
 		const isLatestRequest = saveRequests.begin(source.id, field);
 		const tags = noteTags.map(({ id, name }) => ({ id, name }));
 		saving = true;
+		try {
+			if (!navigator.onLine || source.id < 0) {
+				await saveOfflineEdit(source, field, value);
+				return;
+			}
+			let updated: Note;
 			try {
-				if (!navigator.onLine || source.id < 0) {
-					await saveOfflineEdit(source, field, value);
-					return;
-				}
-				try {
-					const updated = await api.notes.update(source.id, { [field]: value });
-					if (note?.id === source.id) note = {
-						...note,
-						body: field === 'body' && isLatestRequest() ? updated.body : note.body,
-						updated_at: latestTimestamp(note.updated_at, updated.updated_at),
-					};
-					// Keep cache in sync — a refresh of server state, so a
-					// foreign store is skipped rather than reported.
-					const db = await openOwnedCache();
-					if (!db) return;
-					try {
-						await updateCachedNote(db, source.id, (existing) =>
-							acknowledgeCachedSave(existing, field, updated, isLatestRequest(), tags));
-					} finally {
-						db.close();
-					}
-				} catch {
-					// Server unreachable (network error or 503 from the SW) — save
-					// offline so the edit isn't lost. The home-page heartbeat will
-					// flush it once the server is reachable again.
-					await saveOfflineEdit(source, field, value);
-				}
+				updated = await api.notes.update(source.id, { [field]: value });
+			} catch {
+				// Only network/API failure requires an offline content retry.
+				await saveOfflineEdit(source, field, value);
+				return;
+			}
+			if (note?.id === source.id) note = {
+				...note,
+				body: field === 'body' && isLatestRequest() ? updated.body : note.body,
+				updated_at: latestTimestamp(note.updated_at, updated.updated_at),
+			};
+			if (!await cacheSavedNote(openOwnedCache, field, updated, isLatestRequest, tags)) {
+				offlineWriteError = CACHE_SAVE_WARNING;
+			}
 		} finally {
 			saving = false;
 		}

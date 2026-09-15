@@ -1,4 +1,4 @@
-import { noteFlags, type CachedNote, type NoteFlags } from './offlineDB';
+import { noteFlags, updateCachedNote, type CachedNote, type NoteFlags } from './offlineDB';
 
 type ContentField = 'title' | 'body';
 type SavedContent = { id: number; title: string; body: string; updated_at: string } & Partial<NoteFlags>;
@@ -34,13 +34,49 @@ export function acknowledgeCachedSave(
 	};
 	const next = isLatestRequest ? { ...current, [field]: updated[field] } : current;
 	const is_dirty = current.is_dirty && (next.title !== updated.title || next.body !== updated.body);
-	const server_updated_at = latestTimestamp(current.server_updated_at, updated.updated_at);
+	// This is a whole-note conflict baseline, not merely the last response time.
+	// A partial PUT cannot acknowledge a differing dirty sibling (or a newer
+	// same-field edit). Retain its baseline until all local content is accounted
+	// for; otherwise sync would silently overwrite concurrent remote changes.
+	const server_updated_at = is_dirty
+		? current.server_updated_at
+		: latestTimestamp(current.server_updated_at, updated.updated_at);
 	return {
 		...next,
 		is_dirty,
 		server_updated_at,
 		local_updated_at: is_dirty ? current.local_updated_at : server_updated_at,
 	};
+}
+
+export const CACHE_SAVE_WARNING =
+	'Saved to the server, but the offline cache could not be updated. Offline copies may be out of date.';
+
+/** Called only after a successful server PUT. Cache availability must not turn
+ * that success into a failed title commit or an unsynced-content retry. Keep
+ * ownership checks and transaction cleanup, but report a degraded cache via
+ * the return value rather than rejecting navigation/action waiters.
+ */
+export async function cacheSavedNote(
+	openCache: () => Promise<IDBDatabase | null>,
+	field: ContentField,
+	updated: SavedContent,
+	isLatestRequest: () => boolean,
+	tags: CachedNote['tags'] = [],
+): Promise<boolean> {
+	try {
+		const db = await openCache();
+		if (!db) return false;
+		try {
+			await updateCachedNote(db, updated.id, (current) =>
+				acknowledgeCachedSave(current, field, updated, isLatestRequest(), tags));
+		} finally {
+			db.close();
+		}
+		return true;
+	} catch {
+		return false;
+	}
 }
 
 /** Later same-field attempts (including offline fallbacks) supersede older

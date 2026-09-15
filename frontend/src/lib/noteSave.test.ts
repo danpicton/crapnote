@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
 import { openOfflineDB, upsertNote, updateCachedNote, getNote, deleteNote, type CachedNote } from './offlineDB';
-import { acknowledgeCachedSave, latestTimestamp, SaveRequests } from './noteSave';
+import { acknowledgeCachedSave, cacheSavedNote, latestTimestamp, SaveRequests } from './noteSave';
 
 const t0 = '2026-09-15T10:00:00.000000001Z';
 const t1 = '2026-09-15T10:00:00.000000002Z';
@@ -44,7 +44,7 @@ describe('content save acknowledgements', () => {
 		const original = cached({ title: 'Failed earlier save', body: 'Offline body', is_dirty: true,
 			local_updated_at: t1, flags_dirty: true, flags_toggled: { pinned: true }, pinned: true, archived_offline: true });
 		expect(acknowledgeCachedSave(original, 'title', response())).toEqual({
-			...original, title: 'Saved online', server_updated_at: t2,
+			...original, title: 'Saved online', // sibling remains based on the original checkpoint
 		});
 	});
 
@@ -70,7 +70,7 @@ describe('content save acknowledgements', () => {
 		expect(older()).toBe(false);
 		expect(newer()).toBe(true);
 		expect(acknowledgeCachedSave(original, 'body', response('Original', 'Old body', t1), older())).toEqual({
-			...original, server_updated_at: t1,
+			...original, // the newer offline edit has not acknowledged this server version
 		});
 	});
 
@@ -80,6 +80,31 @@ describe('content save acknowledgements', () => {
 		requests.begin(1, 'title');
 		requests.begin(2, 'body');
 		expect(body()).toBe(true);
+	});
+});
+
+describe('best-effort cache acknowledgement after server success', () => {
+	it('reports cache-open failure without rejecting the successful save', async () => {
+		await expect(cacheSavedNote(async () => { throw new Error('unavailable'); }, 'title', response(), () => true)).resolves.toBe(false);
+	});
+
+	it('does not reject on transaction failure', async () => {
+		const db = await openOfflineDB();
+		db.close();
+		await expect(cacheSavedNote(async () => db, 'title', response(), () => true)).resolves.toBe(false);
+	});
+
+	it('does not access a cache the ownership gate refused', async () => {
+		await expect(cacheSavedNote(async () => null, 'title', response(), () => true)).resolves.toBe(false);
+	});
+
+	it('still acknowledges a successful write using a real transaction', async () => {
+		await expect(cacheSavedNote(openOfflineDB, 'title', response(), () => true)).resolves.toBe(true);
+		const db = await openOfflineDB();
+		try {
+			expect(await getNote(db, 1)).toMatchObject({ title: 'Saved online', is_dirty: false });
+			await deleteNote(db, 1);
+		} finally { db.close(); }
 	});
 });
 

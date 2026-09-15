@@ -32,7 +32,7 @@
 	import { sortNotes, reorderPinned, nextPinOrder } from '$lib/noteOrder';
 	import { finishTitleDraft } from '$lib/titleDraft';
 	import { TitleCommits } from '$lib/titleCommits';
-	import { acknowledgeCachedSave, latestTimestamp, SaveRequests } from '$lib/noteSave';
+	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, SaveRequests } from '$lib/noteSave';
 	import {
 		dropIndexFromY,
 		findScrollParent,
@@ -1277,13 +1277,9 @@
 				...(isLatestRequest() ? { [field]: updated[field] } : {}),
 				updated_at: latestTimestamp(n.updated_at, updated.updated_at),
 			}) : n);
-			const db = await openOwnedCache();
-			if (!db) return;
-			try {
-				await updateCachedNote(db, id, (existing) =>
-					acknowledgeCachedSave(existing, field, updated, isLatestRequest(), tags));
-			} finally {
-				db.close();
+			if (!await cacheSavedNote(openOwnedCache, field, updated, isLatestRequest, tags)) {
+				offlineWriteError = CACHE_SAVE_WARNING;
+				syncStatus = 'unknown';
 			}
 		} finally {
 			saving = false;

@@ -1051,6 +1051,35 @@ describe('Title drafts', () => {
 		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([]);
 	});
 
+	for (const failure of ['open', 'transaction'] as const) {
+		it.each(['navigation', 'toggleLock', 'archive', 'delete'] as const)(`allows %s after a successful title PUT even if cache ${failure} fails`, async (action) => {
+			vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Saved remotely' }));
+			vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ title: 'Saved remotely', locked: true }));
+			vi.mocked(api.notes.archive).mockResolvedValue(undefined);
+			vi.mocked(api.notes.delete).mockResolvedValue(undefined);
+			render(Page);
+			const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			if (failure === 'open') vi.mocked(openOwnedOfflineDB).mockRejectedValueOnce(new Error('cache unavailable'));
+			else vi.mocked(offlineDB.updateCachedNote).mockRejectedValueOnce(new Error('transaction aborted'));
+			await fireEvent.focus(title);
+			await fireEvent.input(title, { target: { value: 'Saved remotely' } });
+			if (action === 'navigation') {
+				const before = vi.mocked(beforeNavigate).mock.calls[0][0];
+				before({ type: 'popstate' } as Parameters<typeof before>[0]);
+				const navigate = vi.mocked(onNavigate).mock.calls[0][0];
+				await expect(Promise.resolve(navigate({ type: 'popstate' } as Parameters<typeof navigate>[0]))).resolves.toBeUndefined();
+			} else {
+				await fireEvent.click(action === 'toggleLock' ? screen.getByTitle('Lock note')
+					: screen.getByRole('button', { name: action === 'archive' ? /move to archive/i : 'Delete' }));
+				await waitFor(() => expect(api.notes[action]).toHaveBeenCalledWith(1));
+			}
+			expect(api.notes.update).toHaveBeenCalledWith(1, { title: 'Saved remotely' });
+			expect(offlineDB.upsertNote).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ is_dirty: true }));
+			expect(screen.getByRole('alert')).toHaveTextContent(/saved.*server.*offline cache/i);
+		});
+	}
+
 	it('commits a focused desktop draft and waits for persistence on browser Back', async () => {
 		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
 		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
@@ -1163,7 +1192,7 @@ describe('Title drafts', () => {
 		await fireEvent.input(title, { target: { value: 'Later online title' } });
 		await fireEvent.blur(title);
 		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-			title: 'Later online title', body: 'Unsynced body', is_dirty: true, server_updated_at: '2024-01-02T00:00:00Z',
+			title: 'Later online title', body: 'Unsynced body', is_dirty: true, server_updated_at: dirty.server_updated_at,
 		})));
 		const persisted = vi.mocked(offlineDB.upsertNote).mock.calls.at(-1)![1];
 		view.unmount();

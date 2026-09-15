@@ -244,6 +244,37 @@ describe('/notes/[id] page', () => {
 		expect((title as HTMLInputElement).value).toBe('Second edit');
 	});
 
+	for (const failure of ['open', 'transaction'] as const) {
+		it.each(['navigation', 'toggleLock', 'archive', 'delete'] as const)(`allows mobile %s after a successful title PUT even if cache ${failure} fails`, async (action) => {
+			vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Saved remotely' }));
+			vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ title: 'Saved remotely', locked: true }));
+			vi.mocked(api.notes.archive).mockResolvedValue(undefined);
+			vi.mocked(api.notes.delete).mockResolvedValue(undefined);
+			render(NotePage);
+			const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+			if (failure === 'open') vi.mocked(openOwnedOfflineDB).mockRejectedValueOnce(new Error('cache unavailable'));
+			else vi.mocked(offlineDB.updateCachedNote).mockRejectedValueOnce(new Error('transaction aborted'));
+			await fireEvent.focus(title);
+			await fireEvent.input(title, { target: { value: 'Saved remotely' } });
+			if (action === 'navigation') {
+				const before = vi.mocked(beforeNavigate).mock.calls[0][0];
+				before({ type: 'popstate' } as Parameters<typeof before>[0]);
+				const navigate = vi.mocked(onNavigate).mock.calls[0][0];
+				await expect(Promise.resolve(navigate({ type: 'popstate' } as Parameters<typeof navigate>[0]))).resolves.toBeUndefined();
+			} else {
+				if (action === 'toggleLock') await fireEvent.click(screen.getByTitle('Lock note'));
+				else {
+					await fireEvent.click(screen.getByRole('button', { name: 'Note actions' }));
+					await fireEvent.click(screen.getByRole('button', { name: action === 'archive' ? 'Archive' : 'Delete' }));
+				}
+				await waitFor(() => expect(api.notes[action]).toHaveBeenCalledWith(42));
+			}
+			expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Saved remotely' });
+			expect(offlineDB.upsertNote).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ is_dirty: true }));
+			expect(screen.getByRole('alert')).toHaveTextContent(/saved.*server.*offline cache/i);
+		});
+	}
+
 	it.each(['archive', 'delete'] as const)('saves the title before mobile %s and destination navigation', async (action) => {
 		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
 		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
