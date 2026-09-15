@@ -2712,10 +2712,10 @@
 		font-size: 2rem;
 		font-weight: 700;
 		letter-spacing: -0.03em;
-		line-height: 1.08;
+		line-height: 1.25;
 		border: none;
 		outline: none;
-		padding: 0.125rem 0;
+		padding: 0;
 		background: transparent;
 		color: var(--text);
 	}
