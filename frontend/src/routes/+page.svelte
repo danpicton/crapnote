@@ -975,6 +975,7 @@
 	}
 
 	async function newNote() {
+		commitTitleDraft();
 		if (!navigator.onLine) {
 			await createNoteOffline();
 			return;
@@ -999,6 +1000,7 @@
 	}
 
 	async function selectNote(id: number) {
+		commitTitleDraft();
 		if (isMobile()) { goto(`/notes/${id}`); return; }
 		selectedId = id;
 		showTagPopover = false;
@@ -1041,6 +1043,7 @@
 	}
 
 	async function applyFilter(tagId: number | null, starred: boolean) {
+		commitTitleDraft();
 		activeTagId = tagId;
 		starredOnly = starred;
 		await loadNotes();
@@ -1058,6 +1061,7 @@
 	}
 
 	async function goHome() {
+		commitTitleDraft();
 		search = '';
 		activeTagId = null;
 		starredOnly = false;

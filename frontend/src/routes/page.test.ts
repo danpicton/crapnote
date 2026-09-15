@@ -1072,6 +1072,23 @@ describe('Title drafts', () => {
 		expect(api.notes.update).toHaveBeenCalledWith(1, { title: 'Final title' });
 		vi.useRealTimers();
 	});
+
+	it('commits the original note before switching to another note', async () => {
+		vi.mocked(api.notes.list).mockResolvedValue([
+			mockNote({ id: 1, title: 'First note' }),
+			mockNote({ id: 2, title: 'Second note' }),
+		]);
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ id: 1, title: 'First edited' }));
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('First note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'First edited' } });
+
+		await fireEvent.click(screen.getByText('Second note').closest('.note-btn')!);
+
+		expect(api.notes.update).toHaveBeenCalledWith(1, { title: 'First edited' });
+		await waitFor(() => expect(screen.getByDisplayValue('Second note')).toBeInTheDocument());
+	});
 });
 
 describe('Note locking', () => {
