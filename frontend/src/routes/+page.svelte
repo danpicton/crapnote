@@ -32,6 +32,7 @@
 	import { sortNotes, reorderPinned, nextPinOrder } from '$lib/noteOrder';
 	import { finishTitleDraft } from '$lib/titleDraft';
 	import { TitleCommits } from '$lib/titleCommits';
+	import { acknowledgeCachedSave, latestTimestamp, SaveRequests } from '$lib/noteSave';
 	import {
 		dropIndexFromY,
 		findScrollParent,
@@ -82,6 +83,7 @@
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
 	let titleDraft = $state<{ noteId: number; savedTitle: string; value: string } | null>(null);
 	const titleSaveQueues = new Map<number, Promise<void>>();
+	const saveRequests = new SaveRequests();
 	const titleCommits = new TitleCommits();
 	const rekeyedNoteIds = new Map<number, number>();
 	let syncInFlight: ReturnType<typeof syncOfflineChanges> | null = null;
@@ -537,6 +539,7 @@
 			await updateCachedNote(db, note.id, (current) => {
 				// Recheck after fetching tags, inside the same write transaction.
 				if (current?.is_dirty || current?.flags_dirty || current?.deleted_offline || current?.archived_offline) return null;
+				if (current && latestTimestamp(current.server_updated_at, note.updated_at) !== note.updated_at) return null;
 				return {
 					id: note.id,
 					title: protectTitles([note])[0].title,
@@ -1235,6 +1238,7 @@
 		// source snapshot even if a filter or navigation removes it from the list.
 		if (syncInFlight) await syncInFlight;
 		const id = rekeyedNoteIds.get(note.id) ?? note.id;
+		const isLatestRequest = saveRequests.begin(id, field);
 		note = { ...note, id };
 		saving = true;
 		try {
@@ -1250,15 +1254,15 @@
 				return;
 			}
 			notes = notes.map((n) => n.id === id ? preservePendingTitle({
-				...n, [field]: updated[field], updated_at: updated.updated_at,
+				...n,
+				...(isLatestRequest() ? { [field]: updated[field] } : {}),
+				updated_at: latestTimestamp(n.updated_at, updated.updated_at),
 			}) : n);
 			const db = await openOwnedCache();
 			if (!db) return;
 			try {
-				await updateCachedNote(db, id, (existing) => existing && !existing.is_dirty ? {
-					...existing, [field]: updated[field],
-					server_updated_at: updated.updated_at, local_updated_at: updated.updated_at,
-				} : null);
+				await updateCachedNote(db, id, (existing) =>
+					acknowledgeCachedSave(existing, field, updated, isLatestRequest(), tags));
 			} finally {
 				db.close();
 			}

@@ -32,6 +32,7 @@
 	import { wrapSelectedInBulletListCommand } from '$lib/milkdown/listedit';
 	import { EMPTY_FORMATS, type ActiveFormats } from '$lib/milkdown/formatState';
 	import { finishTitleDraft } from '$lib/titleDraft';
+	import { acknowledgeCachedSave, latestTimestamp, SaveRequests } from '$lib/noteSave';
 
 	const noteId = $derived(Number($page.params.id));
 
@@ -42,6 +43,7 @@
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
 	let titleDraft = $state<{ savedTitle: string; value: string } | null>(null);
 	let titleSaveQueue: Promise<void> | null = null;
+	const saveRequests = new SaveRequests();
 	let editorRef = $state<EditorRef | null>(null);
 	let titleInput = $state<HTMLInputElement | null>(null);
 	let showTagPopover = $state(false);
@@ -406,6 +408,8 @@
 
 	async function saveField(source: Note, field: 'title' | 'body', value: string) {
 		if (source.locked) return;
+		const isLatestRequest = saveRequests.begin(source.id, field);
+		const tags = noteTags.map(({ id, name }) => ({ id, name }));
 		saving = true;
 			try {
 				if (!navigator.onLine || source.id < 0) {
@@ -416,18 +420,16 @@
 					const updated = await api.notes.update(source.id, { [field]: value });
 					if (note?.id === source.id) note = {
 						...note,
-						body: field === 'body' ? updated.body : note.body,
-						updated_at: updated.updated_at,
+						body: field === 'body' && isLatestRequest() ? updated.body : note.body,
+						updated_at: latestTimestamp(note.updated_at, updated.updated_at),
 					};
 					// Keep cache in sync — a refresh of server state, so a
 					// foreign store is skipped rather than reported.
 					const db = await openOwnedCache();
 					if (!db) return;
 					try {
-						await updateCachedNote(db, source.id, (existing) => existing && !existing.is_dirty ? {
-							...existing, [field]: updated[field],
-							server_updated_at: updated.updated_at, local_updated_at: updated.updated_at,
-						} : null);
+						await updateCachedNote(db, source.id, (existing) =>
+							acknowledgeCachedSave(existing, field, updated, isLatestRequest(), tags));
 					} finally {
 						db.close();
 					}

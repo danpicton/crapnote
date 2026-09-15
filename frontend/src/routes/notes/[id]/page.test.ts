@@ -295,6 +295,70 @@ describe('/notes/[id] page', () => {
 		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(42));
 	});
 
+	it('records an acknowledged checkpoint even if the note has not reached the cache yet', async () => {
+		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Saved title', updated_at: '2024-01-03T00:00:00Z' }));
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved title' } });
+		await fireEvent.blur(title);
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+			title: 'Saved title', is_dirty: false, server_updated_at: '2024-01-03T00:00:00Z',
+		})));
+	});
+
+	it('replaces an earlier dirty cached title after a later successful online commit', async () => {
+		const { OfflineError } = await import('$lib/api');
+		vi.mocked(api.notes.update).mockRejectedValueOnce(new OfflineError());
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Earlier offline title' } });
+		await fireEvent.blur(title);
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ title: 'Earlier offline title', is_dirty: true })));
+		const dirty = vi.mocked(offlineDB.upsertNote).mock.calls.at(-1)![1];
+		vi.mocked(offlineDB.getNote).mockResolvedValue(dirty);
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Later online title', updated_at: '2024-01-02T00:00:00Z' }));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Later online title' } });
+		await fireEvent.blur(title);
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+			title: 'Later online title', is_dirty: false, server_updated_at: '2024-01-02T00:00:00Z',
+		})));
+		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
+	});
+
+	it('does not regress the cached checkpoint when an older body response follows a title response', async () => {
+		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
+		let resolveBody!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockImplementation((_id, update) => {
+			if ('body' in update) return new Promise((resolve) => { resolveBody = resolve; });
+			return Promise.resolve(mockNote({ title: 'Saved title', body: 'Saved body', updated_at: '2024-01-03T00:00:00Z' }));
+		});
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		vi.mocked(offlineDB.getNote).mockResolvedValue({ id: 42, title: 'My Note', body: '# Hello', starred: false, pinned: false, tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z', is_dirty: false, is_new: false });
+		vi.useFakeTimers();
+		(editorProps.current!.onchange as (body: string) => void)('Saved body');
+		await vi.advanceTimersByTimeAsync(800);
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved title' } });
+		await fireEvent.blur(title);
+		await vi.advanceTimersByTimeAsync(0);
+		const afterTitle = vi.mocked(offlineDB.upsertNote).mock.calls.at(-1)![1];
+		expect(afterTitle.server_updated_at).toBe('2024-01-03T00:00:00Z');
+		vi.mocked(offlineDB.getNote).mockResolvedValue(afterTitle);
+		resolveBody(mockNote({ body: 'Saved body', updated_at: '2024-01-02T00:00:00Z' }));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(vi.mocked(offlineDB.upsertNote).mock.calls.at(-1)![1]).toMatchObject({
+			title: 'Saved title', body: 'Saved body', server_updated_at: '2024-01-03T00:00:00Z', local_updated_at: '2024-01-03T00:00:00Z',
+		});
+		vi.useRealTimers();
+		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
+	});
+
 	it('keeps a committed title when an older body save responds later', async () => {
 		let resolveBody!: (note: ReturnType<typeof mockNote>) => void;
 		vi.mocked(api.notes.update).mockImplementation((_id, update) => {

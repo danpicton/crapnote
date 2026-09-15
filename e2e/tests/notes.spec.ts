@@ -96,6 +96,41 @@ for (const { layout, viewport, mobile } of [
   });
 }
 
+for (const [layout, viewport] of [
+  ['desktop', { width: 1280, height: 900 }],
+  ['mobile', { width: 390, height: 844 }],
+] as const) {
+  test.describe(`Title save recovery on ${layout}`, () => {
+    test.use({ viewport, serviceWorkers: 'block' });
+
+    test('reopens the successful title after an earlier save fell back to the offline cache', async ({ page }) => {
+      await login(page);
+      await createNote(page, `Original ${layout}`);
+      const title = page.getByPlaceholder(/note title/i);
+      await page.route('**/api/notes/*', async (route) => {
+        if (route.request().method() === 'PUT' && route.request().postDataJSON().title === 'Failed title') {
+          await route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' });
+        } else {
+          await route.continue();
+        }
+      });
+      const failed = page.waitForResponse((r) => r.request().method() === 'PUT' && r.status() === 503);
+      await title.fill('Failed title');
+      await title.press('Tab');
+      await failed;
+      await expect(page.getByText('Saving…', { exact: true })).not.toBeVisible();
+
+      const saved = page.waitForResponse((r) => r.request().method() === 'PUT' && r.status() === 200);
+      await title.fill(`Recovered title ${layout}`);
+      await title.press('Tab');
+      await saved;
+      await expect(page.getByText('Saving…', { exact: true })).not.toBeVisible();
+      await page.reload();
+      await expect(page.getByPlaceholder(/note title/i)).toHaveValue(`Recovered title ${layout}`);
+    });
+  });
+}
+
 test.describe('Mobile title drafts', () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
