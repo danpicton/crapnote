@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { beforeNavigate, goto } from '$app/navigation';
+	import { beforeNavigate, onNavigate, goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import {
 		toggleStrongCommand,
@@ -18,7 +18,7 @@
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, OfflineError, type Note, type Tag } from '$lib/api';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
-	import { getNote as getOfflineNote, upsertNote, type CachedNote } from '$lib/offlineDB';
+	import { getNote as getOfflineNote, updateCachedNote, noteFlags } from '$lib/offlineDB';
 	import { openOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
@@ -63,6 +63,12 @@
 
 	beforeNavigate(() => {
 		void commitTitleDraft();
+	});
+	// History navigation removes the input without blur. For client-side
+	// navigation, finish persistence before the destination reads its cache/list.
+	onNavigate(async () => {
+		await commitTitleDraft();
+		await titleSaveQueue;
 	});
 
 	/**
@@ -340,38 +346,24 @@
 			+ 'Reconnect and sign in again to save it.';
 	}
 
-	async function saveOfflineEdit(field: 'title' | 'body', value: string) {
+	async function saveOfflineEdit(source: Note, field: 'title' | 'body', value: string) {
 		const db = await openOwnedCache();
 		if (!db) { reportOfflineWriteRefused(); return; }
 		try {
-			const existing = await getOfflineNote(db, noteId);
-			const base: CachedNote = existing ?? {
-				id: noteId,
-				title: note?.title ?? '',
-				body: note?.body ?? '',
-				starred: note?.starred ?? false,
-				pinned: note?.pinned ?? false,
-				tags: noteTags.map((t) => ({ id: t.id, name: t.name })),
-				server_updated_at: note?.updated_at ?? new Date().toISOString(),
-				local_updated_at: new Date().toISOString(),
-				is_dirty: false,
-				is_new: noteId < 0,
-			};
-			await upsertNote(db, {
-				...base,
+			await updateCachedNote(db, source.id, (existing) => ({
+				...(existing ?? {
+					id: source.id, title: source.title, body: source.body, ...noteFlags(source),
+					tags: noteTags.map((t) => ({ id: t.id, name: t.name })),
+					server_updated_at: source.updated_at, is_new: source.id < 0,
+				}),
 				[field]: value,
 				local_updated_at: new Date().toISOString(),
 				is_dirty: true,
-			});
+			}));
 		} finally {
 			db.close();
 		}
-		if (note) {
-			note = {
-				...note,
-				[field]: field === 'title' && note.title !== value ? note.title : value,
-			};
-		}
+		if (note?.id === source.id && field === 'body') note = { ...note, body: value };
 	}
 
 	function beginTitleDraft() {
@@ -388,10 +380,12 @@
 	}
 
 	function queueTitleSave(title: string): Promise<void> {
+		if (!note) return Promise.resolve();
+		const source = note;
 		const previous = titleSaveQueue;
 		const queued = previous
-			? previous.catch(() => {}).then(() => saveField('title', title))
-			: saveField('title', title);
+			? previous.catch(() => {}).then(() => saveField(source, 'title', title))
+			: saveField(source, 'title', title);
 		titleSaveQueue = queued;
 		void queued.then(
 			() => { if (titleSaveQueue === queued) titleSaveQueue = null; },
@@ -410,35 +404,30 @@
 		return queueTitleSave(result.title);
 	}
 
-	async function saveField(field: 'title' | 'body', value: string) {
-		if (note?.locked) return;
+	async function saveField(source: Note, field: 'title' | 'body', value: string) {
+		if (source.locked) return;
 		saving = true;
 			try {
-				if (!navigator.onLine || noteId < 0) {
-					await saveOfflineEdit(field, value);
+				if (!navigator.onLine || source.id < 0) {
+					await saveOfflineEdit(source, field, value);
 					return;
 				}
 				try {
-					const updated = await api.notes.update(noteId, { [field]: value });
-					note = note ? {
-						...updated,
-						title: field === 'title' && note.title === value ? updated.title : note.title,
+					const updated = await api.notes.update(source.id, { [field]: value });
+					if (note?.id === source.id) note = {
+						...note,
 						body: field === 'body' ? updated.body : note.body,
-					} : updated;
+						updated_at: updated.updated_at,
+					};
 					// Keep cache in sync — a refresh of server state, so a
 					// foreign store is skipped rather than reported.
 					const db = await openOwnedCache();
 					if (!db) return;
 					try {
-						const existing = await getOfflineNote(db, noteId);
-						if (existing && !existing.is_dirty) {
-							await upsertNote(db, {
-								...existing,
-								[field]: updated[field],
-								server_updated_at: updated.updated_at,
-								local_updated_at: updated.updated_at,
-							});
-						}
+						await updateCachedNote(db, source.id, (existing) => existing && !existing.is_dirty ? {
+							...existing, [field]: updated[field],
+							server_updated_at: updated.updated_at, local_updated_at: updated.updated_at,
+						} : null);
 					} finally {
 						db.close();
 					}
@@ -446,17 +435,18 @@
 					// Server unreachable (network error or 503 from the SW) — save
 					// offline so the edit isn't lost. The home-page heartbeat will
 					// flush it once the server is reachable again.
-					await saveOfflineEdit(field, value);
+					await saveOfflineEdit(source, field, value);
 				}
 		} finally {
 			saving = false;
 		}
 	}
 
-	function scheduleAutoSave(field: 'title' | 'body', value: string) {
-		if (note?.locked) return;
+	function scheduleAutoSave(field: 'body', value: string) {
+		if (!note || note.locked) return;
 		if (saveTimer) clearTimeout(saveTimer);
-		saveTimer = setTimeout(() => void saveField(field, value), 800);
+		const source = note;
+		saveTimer = setTimeout(() => void saveField(source, field, value), 800);
 	}
 
 	function cmd(key: string | CmdKey<unknown>, payload?: unknown) {

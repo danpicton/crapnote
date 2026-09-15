@@ -96,6 +96,34 @@ for (const { layout, viewport, mobile } of [
   });
 }
 
+test.describe('Mobile title drafts', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('restores blank drafts and saves the final title on browser back before reopening', async ({ page }) => {
+    await login(page);
+    await createNote(page, 'Mobile original title');
+    const noteUrl = page.url();
+    const title = page.getByPlaceholder(/note title/i);
+    await title.fill('');
+    await page.waitForTimeout(1000);
+    await expect(title).toHaveValue('');
+    await title.fill('   ');
+    await title.press('Tab');
+    await expect(title).toHaveValue('Mobile original title');
+
+    await title.fill('Mobile saved on back');
+    const saved = page.waitForResponse(
+      (r) => r.url().includes('/api/notes') && r.request().method() === 'PUT',
+    );
+    await page.goBack();
+    await saved;
+    await expect(page).toHaveURL('/');
+    await expect(page.locator('.note-item').filter({ hasText: 'Mobile saved on back' })).toBeVisible();
+    await page.goto(noteUrl);
+    await expect(page.getByPlaceholder(/note title/i)).toHaveValue('Mobile saved on back');
+  });
+});
+
 test.describe('Notes', () => {
   test.beforeEach(async ({ page }) => {
     await login(page);

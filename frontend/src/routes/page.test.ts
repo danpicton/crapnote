@@ -82,8 +82,9 @@ vi.mock('$lib/localData', async (importOriginal) => ({
 
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
+const editorProps: { current: Record<string, unknown> | null } = { current: null };
 vi.mock('$lib/components/Editor.svelte', async () => ({
-	default: (anchor: unknown, props: unknown) => { void anchor; void props; },
+	default: (anchor: unknown, props: Record<string, unknown>) => { void anchor; editorProps.current = props; },
 }));
 
 vi.mock('$lib/components/MobileTabBar.svelte', () => ({
@@ -110,6 +111,10 @@ vi.mock('$lib/offlineDB', async (importOriginal) => ({
 	getDirtyNotes: vi.fn().mockResolvedValue([]),
 	getNote: vi.fn().mockResolvedValue(null),
 	upsertNote: vi.fn().mockResolvedValue(undefined),
+	updateCachedNote: vi.fn(async (db, id, update) => {
+		const next = update(await offlineDB.getNote(db, id));
+		if (next) await offlineDB.upsertNote(db, next);
+	}),
 	deleteNote: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -1044,6 +1049,80 @@ describe('Title drafts', () => {
 		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([]);
 	});
 
+	it('finishing a title save does not cancel the filter load triggered by blur', async () => {
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		let resolveList!: (notes: ReturnType<typeof mockNote>[]) => void;
+		vi.mocked(api.notes.list).mockReturnValue(new Promise((resolve) => { resolveList = resolve; }));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved title' } });
+		await fireEvent.blur(title);
+		await fireEvent.click(screen.getByRole('button', { name: 'Starred' }));
+		await waitFor(() => expect(api.notes.list).toHaveBeenLastCalledWith({ starred: true }, expect.anything()));
+		const signal = vi.mocked(api.notes.list).mock.calls.at(-1)![1]!;
+		resolveTitle(mockNote({ title: 'Saved title' }));
+		await waitFor(() => expect(screen.queryByText('Saving…')).not.toBeInTheDocument());
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(signal.aborted).toBe(false);
+		resolveList([mockNote({ id: 2, title: 'Only starred result', starred: true })]);
+		await waitFor(() => expect(screen.getByText('Only starred result')).toBeInTheDocument());
+		expect(screen.queryByText('Saved title')).not.toBeInTheDocument();
+	});
+
+	it('still paints the filtered cache if the filter request fails while navigator reports online', async () => {
+		render(Page);
+		await waitFor(() => screen.getByDisplayValue('Test Note'));
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([{
+			id: 2, title: 'Cached starred result', body: '', starred: true, pinned: false, tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z', is_dirty: false, is_new: false,
+		}]);
+		vi.mocked(api.notes.list).mockRejectedValue(new OfflineError());
+		await fireEvent.click(screen.getByRole('button', { name: 'Starred' }));
+		await waitFor(() => expect(screen.getByText('Cached starred result')).toBeInTheDocument());
+		expect(screen.queryByText('Test Note')).not.toBeInTheDocument();
+	});
+
+	it('remaps a syncing source note even after switching away', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([
+			{ id: -1, title: 'Offline title', body: '', starred: false, pinned: false, tags: [],
+				server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z', is_dirty: true, is_new: true },
+			{ id: 2, title: 'Other note', body: '', starred: false, pinned: false, tags: [],
+				server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z', is_dirty: false, is_new: false },
+		]);
+		let resolveSync!: (result: typeof emptySyncResult) => void;
+		vi.mocked(syncOfflineChanges).mockReturnValue(new Promise((resolve) => { resolveSync = resolve; }));
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		render(Page);
+		await fireEvent.click((await waitFor(() => screen.getByText('Offline title'))).closest('.note-btn')!);
+		const title = screen.getByDisplayValue('Offline title');
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Edited source' } });
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		window.dispatchEvent(new Event('online'));
+		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalled());
+		await fireEvent.click(screen.getByText('Other note').closest('.note-btn')!);
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([]);
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ id: 7, title: 'Offline title' }), mockNote({ id: 2, title: 'Other note' })]);
+		resolveSync({ ...emptySyncResult, mappings: [{ tempId: -1, serverId: 7 }] });
+		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(7, { title: 'Edited source' }));
+		await waitFor(() => expect(api.notes.list).toHaveBeenCalled());
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(screen.queryByText('Offline title')).not.toBeInTheDocument();
+		expect(document.querySelectorAll('.note-item')).toHaveLength(2);
+		resolveTitle(mockNote({ id: 7, title: 'Edited source' }));
+		await fireEvent.click(screen.getByText('Edited source').closest('.note-btn')!);
+		await waitFor(() => expect(screen.getByDisplayValue('Edited source')).toBeInTheDocument());
+		await fireEvent.focus(screen.getByDisplayValue('Edited source'));
+		await fireEvent.input(screen.getByDisplayValue('Edited source'), { target: { value: 'Second edit' } });
+		await fireEvent.blur(screen.getByDisplayValue('Second edit'));
+		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(7, { title: 'Second edit' }));
+		resolveTitle(mockNote({ id: 7, title: 'Second edit' }));
+	});
+
 	it('keeps a cleared focused title as a draft past the body autosave delay', async () => {
 		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Untitled' }));
 		render(Page);
@@ -1056,6 +1135,33 @@ describe('Title drafts', () => {
 
 		expect((title as HTMLInputElement).value).toBe('');
 		expect(api.notes.update).not.toHaveBeenCalled();
+		vi.useRealTimers();
+	});
+
+	it('keeps a focused draft through a late body response and commits it independently', async () => {
+		let resolveBody!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockImplementation((_id, update) => {
+			if ('body' in update) return new Promise((resolve) => { resolveBody = resolve; });
+			return Promise.resolve(mockNote({ title: update.title, body: 'Saved body' }));
+		});
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+		vi.useFakeTimers();
+		const onchange = editorProps.current!.onchange as (body: string) => void;
+		onchange('Saved body');
+		await vi.advanceTimersByTimeAsync(800);
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: '' } });
+		resolveBody(mockNote({ body: 'Saved body' }));
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(title).toBeInTheDocument();
+		expect((title as HTMLInputElement).value).toBe('');
+		expect(api.notes.update).toHaveBeenCalledTimes(1);
+		await fireEvent.input(title, { target: { value: 'Final title' } });
+		await fireEvent.blur(title);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.notes.update).toHaveBeenLastCalledWith(1, { title: 'Final title' });
+		expect((title as HTMLInputElement).value).toBe('Final title');
 		vi.useRealTimers();
 	});
 
@@ -1088,7 +1194,7 @@ describe('Title drafts', () => {
 		vi.useRealTimers();
 	});
 
-	it('saves a title blurred while offline sync is rekeying the note', async () => {
+	it('saves a title before locking while offline sync is rekeying the note', async () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: false });
 		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([{
 			id: -1, title: 'Offline title', body: '', starred: false, pinned: false, tags: [],
@@ -1098,6 +1204,7 @@ describe('Title drafts', () => {
 		let resolveSync!: (result: typeof emptySyncResult) => void;
 		vi.mocked(syncOfflineChanges).mockReturnValue(new Promise((resolve) => { resolveSync = resolve; }));
 		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ id: 7, title: 'Draft during sync' }));
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ id: 7, title: 'Draft during sync', locked: true }));
 		render(Page);
 		const title = await waitFor(() => screen.getByDisplayValue('Offline title'));
 		await fireEvent.focus(title);
@@ -1108,11 +1215,43 @@ describe('Title drafts', () => {
 		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ id: 7, title: 'Offline title' })]);
 		window.dispatchEvent(new Event('online'));
 		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalled());
-		await fireEvent.blur(title);
+		await fireEvent.click(screen.getByTitle('Lock note'));
 
 		expect(api.notes.update).not.toHaveBeenCalled();
+		expect(api.notes.toggleLock).not.toHaveBeenCalled();
 		resolveSync({ ...emptySyncResult, mappings: [{ tempId: -1, serverId: 7 }] });
 		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(7, { title: 'Draft during sync' }));
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(7));
+	});
+
+	it('rechecks rekeying after opening the cache for an offline title commit', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([{
+			id: -1, title: 'Offline title', body: '', starred: false, pinned: false, tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z', is_dirty: true, is_new: true,
+		}]);
+		render(Page);
+		await fireEvent.click((await waitFor(() => screen.getByText('Offline title'))).closest('.note-btn')!);
+		const title = screen.getByDisplayValue('Offline title');
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Committed before reconnect' } });
+		let openCache!: (db: IDBDatabase) => void;
+		vi.mocked(openOwnedOfflineDB).mockReturnValueOnce(new Promise((resolve) => { openCache = resolve; }));
+		await fireEvent.blur(title);
+		let resolveSync!: (result: typeof emptySyncResult) => void;
+		vi.mocked(syncOfflineChanges).mockReturnValue(new Promise((resolve) => { resolveSync = resolve; }));
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		window.dispatchEvent(new Event('online'));
+		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalled());
+		openCache({ close: vi.fn() } as unknown as IDBDatabase);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(offlineDB.upsertNote).not.toHaveBeenCalled();
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([]);
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ id: 7, title: 'Offline title' })]);
+		resolveSync({ ...emptySyncResult, mappings: [{ tempId: -1, serverId: 7 }] });
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+			id: 7, title: 'Committed before reconnect', is_dirty: true, is_new: false,
+		})));
 	});
 
 	it('keeps the active draft when sync remaps an offline note ID', async () => {
@@ -1137,9 +1276,28 @@ describe('Title drafts', () => {
 		window.dispatchEvent(new Event('online'));
 
 		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalled());
-		await waitFor(() => expect((title as HTMLInputElement).value).toBe('Draft after sync'));
+		await waitFor(() => expect(api.notes.list).toHaveBeenCalled());
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(title).toBeInTheDocument();
+		expect((title as HTMLInputElement).value).toBe('Draft after sync');
 		await fireEvent.blur(title);
 		expect(api.notes.update).toHaveBeenCalledWith(7, { title: 'Draft after sync' });
+	});
+
+	it('does not cache a stale title when an earlier list cache refresh finishes after the commit', async () => {
+		let releaseTags!: (tags: []) => void;
+		vi.mocked(api.tags.listForNote).mockReturnValue(new Promise((resolve) => { releaseTags = resolve; }));
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Saved title' }));
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved title' } });
+		await fireEvent.blur(title);
+		await waitFor(() => expect(screen.queryByText('Saving…')).not.toBeInTheDocument());
+		releaseTags([]);
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalled());
+		expect(vi.mocked(offlineDB.upsertNote).mock.calls.at(-1)![1].title).toBe('Saved title');
+		vi.mocked(api.tags.listForNote).mockResolvedValue([]);
 	});
 
 	it('ignores a stale list response that finishes after a title save', async () => {

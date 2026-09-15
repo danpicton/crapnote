@@ -56,7 +56,7 @@ vi.mock('$app/stores', async () => {
 	};
 });
 
-vi.mock('$app/navigation', () => ({ goto: vi.fn(), beforeNavigate: vi.fn() }));
+vi.mock('$app/navigation', () => ({ goto: vi.fn(), beforeNavigate: vi.fn(), onNavigate: vi.fn() }));
 
 vi.mock('$lib/api', () => {
 	class ApiError extends Error {
@@ -87,6 +87,10 @@ vi.mock('$lib/offlineDB', async (importOriginal) => ({
 	openOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
 	getNote: vi.fn().mockResolvedValue(null),
 	upsertNote: vi.fn().mockResolvedValue(undefined),
+	updateCachedNote: vi.fn(async (db, id, update) => {
+		const next = update(await offlineDB.getNote(db, id));
+		if (next) await offlineDB.upsertNote(db, next);
+	}),
 	getAllNotes: vi.fn().mockResolvedValue([]),
 	getDirtyNotes: vi.fn().mockResolvedValue([]),
 	deleteNote: vi.fn().mockResolvedValue(undefined),
@@ -116,7 +120,7 @@ import { api } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
 import { openOwnedOfflineDB, requireOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 import { auth } from '$lib/stores/auth.svelte';
-import { beforeNavigate, goto } from '$app/navigation';
+import { beforeNavigate, onNavigate, goto } from '$app/navigation';
 
 const mockNote = (overrides = {}) => ({
 	id: 42, title: 'My Note', body: '# Hello',
@@ -252,6 +256,26 @@ describe('/notes/[id] page', () => {
 		navigationHook({ type: 'popstate' } as Parameters<typeof navigationHook>[0]);
 
 		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Saved on back' });
+	});
+
+	it('waits for the title commit before the destination reads the note on browser back', async () => {
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved on back' } });
+		const before = vi.mocked(beforeNavigate).mock.calls[0][0];
+		before({ type: 'popstate' } as Parameters<typeof before>[0]);
+		expect(onNavigate).toHaveBeenCalled();
+		const navigate = vi.mocked(onNavigate).mock.calls[0][0];
+		let arrived = false;
+		const navigation = Promise.resolve(navigate({ type: 'popstate' } as Parameters<typeof navigate>[0])).then(() => { arrived = true; });
+		await Promise.resolve();
+		expect(arrived).toBe(false);
+		resolveTitle(mockNote({ title: 'Saved on back' }));
+		await navigation;
+		expect(arrived).toBe(true);
 	});
 
 	it('saves a title draft before locking the note', async () => {

@@ -148,6 +148,34 @@ export function upsertNote(db: IDBDatabase, note: CachedNote): Promise<void> {
 	});
 }
 
+/** Read/modify/write in ONE transaction. Separate getNote/upsertNote calls lose
+ * edits when body autosave and title blur overlap, even on separate connections.
+ * The callback must be synchronous; null means leave the record untouched.
+ */
+export function updateCachedNote(
+	db: IDBDatabase,
+	id: number,
+	update: (current: CachedNote | null) => CachedNote | null,
+): Promise<void> {
+	return new Promise((resolve, reject) => {
+		const tx = db.transaction(STORE, 'readwrite');
+		const store = tx.objectStore(STORE);
+		const req = store.get(id);
+		req.onsuccess = () => {
+			try {
+				const next = update((req.result as CachedNote) ?? null);
+				if (next) store.put(next);
+			} catch (err) {
+				tx.abort();
+				reject(err);
+			}
+		};
+		tx.oncomplete = () => resolve();
+		tx.onabort = () => reject(tx.error ?? new Error('Cache update aborted'));
+		tx.onerror = () => reject(tx.error);
+	});
+}
+
 export function getNote(db: IDBDatabase, id: number): Promise<CachedNote | null> {
 	return new Promise((resolve, reject) => {
 		const tx = db.transaction(STORE, 'readonly');

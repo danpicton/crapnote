@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import 'fake-indexeddb/auto';
-import { openOfflineDB, upsertNote, getNote, getAllNotes, getDirtyNotes, deleteNote, noteFlags } from './offlineDB';
+import { openOfflineDB, upsertNote, getNote, getAllNotes, getDirtyNotes, deleteNote, noteFlags, updateCachedNote } from './offlineDB';
 
 const makeNote = (overrides: Partial<Parameters<typeof upsertNote>[1]> = {}) => ({
 	title: 'Test',
@@ -16,6 +16,34 @@ const makeNote = (overrides: Partial<Parameters<typeof upsertNote>[1]> = {}) => 
 });
 
 describe('offlineDB', () => {
+	it('atomically merges overlapping body and title edits from separate connections', async () => {
+		const db = await openOfflineDB();
+		const other = await openOfflineDB();
+		const base = { id: 101, ...makeNote({ pin_order: -4, flags_dirty: true }) };
+		await upsertNote(db, base);
+		await Promise.all([
+			updateCachedNote(db, 101, (current) => ({ ...current!, body: 'New body', is_dirty: true })),
+			updateCachedNote(other, 101, (current) => ({ ...current!, title: 'New title', is_dirty: true })),
+		]);
+		expect(await getNote(db, 101)).toEqual({ ...base, title: 'New title', body: 'New body', is_dirty: true });
+		await deleteNote(db, 101);
+		db.close();
+		other.close();
+	});
+
+	it('checks dirty state inside the write transaction before applying a server refresh', async () => {
+		const db = await openOfflineDB();
+		const base = { id: 102, ...makeNote() };
+		await upsertNote(db, base);
+		await Promise.all([
+			updateCachedNote(db, 102, (current) => ({ ...current!, title: 'Local', is_dirty: true })),
+			updateCachedNote(db, 102, (current) => current?.is_dirty ? null : { ...base, title: 'Stale server' }),
+		]);
+		expect((await getNote(db, 102))?.title).toBe('Local');
+		await deleteNote(db, 102);
+		db.close();
+	});
+
 	it('upserts a note and retrieves it by id', async () => {
 		const db = await openOfflineDB();
 		await upsertNote(db, { id: 1, ...makeNote({ title: 'Hello' }) });
