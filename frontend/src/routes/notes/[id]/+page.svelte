@@ -26,7 +26,7 @@
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Link,
 		Plus, ChevronLeft, Tag as TagIcon,
-		Star, Pin, Lock, LockOpen, Archive, Trash2, MoreHorizontal, RefreshCw, X,
+		Star, Pin, Lock, LockOpen, EyeOff, Archive, Trash2, MoreHorizontal, RefreshCw, X,
 	} from 'lucide-svelte';
 	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
 	import { wrapSelectedInBulletListCommand } from '$lib/milkdown/listedit';
@@ -132,6 +132,13 @@
 		} catch (err) {
 			await toggleFlagOffline(err, 'locked');
 		}
+		showActionSheet = false;
+	}
+
+	async function togglePrivacy() {
+		if (!note) return;
+		const updated = await api.notes.update(note.id, { private: !note.private });
+		note = note ? { ...updated, title: note.title } : updated;
 		showActionSheet = false;
 	}
 
@@ -561,6 +568,9 @@
 		<button class="tb-btn" class:tb-lock-on={note.locked} onclick={toggleLock} title={note.locked ? 'Unlock note' : 'Lock note'} aria-pressed={note.locked}>
 			{#if note.locked}<Lock size={14} />{:else}<LockOpen size={14} />{/if}
 		</button>
+		<button class="tb-btn" class:tb-private-on={note.private} onclick={togglePrivacy} title={note.private ? 'Private: hidden from MCP' : 'Visible to MCP'} aria-label={note.private ? 'Make note visible to MCP' : 'Make note private'} aria-pressed={!!note.private} disabled={note.locked}>
+			<EyeOff size={14} />
+		</button>
 		<span class="tb-spacer"></span>
 		<span class="save-status">{saving ? 'Saving…' : ''}</span>
 	</div>
@@ -745,6 +755,10 @@
 				{#if note.locked}<Lock size={18} aria-hidden="true" />{:else}<LockOpen size={18} aria-hidden="true" />{/if}
 				<span>{note.locked ? 'Unlock note' : 'Lock note'}</span>
 			</button>
+			<button class="mob-sheet-row" onclick={togglePrivacy} disabled={note.locked}>
+				<EyeOff size={18} aria-hidden="true" />
+				<span>{note.private ? 'Make visible to MCP' : 'Make private'}</span>
+			</button>
 			<button class="mob-sheet-row" onclick={mobArchive}>
 				<Archive size={18} aria-hidden="true" />
 				<span>Archive</span>
@@ -882,6 +896,7 @@
 	.tb-spacer { flex: 1; }
 	.save-status { font-size: 0.75rem; color: var(--text-4); white-space: nowrap; }
 	.tb-lock-on { color: var(--accent) !important; }
+	.tb-private-on { color: var(--accent) !important; background: var(--accent-lt); }
 
 	.link-btn-wrap {
 		position: relative;

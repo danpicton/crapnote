@@ -165,6 +165,26 @@ describe('/notes/[id] page', () => {
 		await waitFor(() => expect(api.notes.get).toHaveBeenCalledWith(42));
 	});
 
+	it('shows and persists the private toggle', async () => {
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ private: true }));
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ private: false }));
+		render(NotePage);
+		const toggle = await screen.findByRole('button', { name: 'Make note visible to MCP' });
+		expect(toggle).toHaveAttribute('aria-pressed', 'true');
+		await fireEvent.click(toggle);
+		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(42, { private: false }));
+		expect(screen.getByRole('button', { name: 'Make note private' })).toHaveAttribute('aria-pressed', 'false');
+	});
+
+	it('offers the private toggle in the mobile actions sheet', async () => {
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ private: true }));
+		render(NotePage);
+		await screen.findByDisplayValue('My Note');
+		await fireEvent.click(screen.getByRole('button', { name: 'Note actions' }));
+		await fireEvent.click(screen.getByRole('button', { name: 'Make private' }));
+		expect(api.notes.update).toHaveBeenCalledWith(42, { private: true });
+	});
+
 	it('loads note tags on mount', async () => {
 		render(NotePage);
 		await waitFor(() => expect(api.tags.listForNote).toHaveBeenCalledWith(42));
