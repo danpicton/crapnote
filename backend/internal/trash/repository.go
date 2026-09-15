@@ -2,8 +2,6 @@ package trash
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -79,57 +77,39 @@ func (r *Repo) Restore(ctx context.Context, noteID, userID int64) error {
 	return nil
 }
 
-// DeleteOne permanently deletes a single trashed note (note row + trash row).
-func (r *Repo) DeleteOne(ctx context.Context, noteID, userID int64) error {
-	// Verify ownership via trash table first.
-	var exists int
-	query := `SELECT COUNT(*) FROM trash t JOIN notes n ON n.id=t.note_id WHERE t.note_id=? AND t.user_id=?`
+// trashDeleteSQL enforces ownership, current trash membership and MCP privacy
+// in the DELETE itself. A prior selection can go stale after an owner restores
+// a note or changes privacy. Deleting the note cascades to its trash row.
+func trashDeleteSQL(ctx context.Context) string {
+	query := `DELETE FROM notes WHERE user_id=?
+		AND EXISTS (SELECT 1 FROM trash t WHERE t.note_id=notes.id AND t.user_id=notes.user_id)`
 	if requestctx.IsMCP(ctx) {
-		query += ` AND n.private=0`
+		query += ` AND private=0`
 	}
-	if err := r.db.QueryRowContext(ctx, query, noteID, userID).Scan(&exists); err != nil {
-		return fmt.Errorf("delete one check: %w", err)
-	}
-	if exists == 0 {
-		return ErrNotFound
-	}
-
-	// Deleting the notes row cascades to trash (ON DELETE CASCADE).
-	_, err := r.db.ExecContext(ctx, `DELETE FROM notes WHERE id=? AND user_id=?`, noteID, userID)
-	return err
+	return query
 }
 
-// Empty permanently deletes all trashed notes for a user.
-func (r *Repo) Empty(ctx context.Context, userID int64) error {
-	// Collect note IDs first, then delete notes (trash rows cascade).
-	query := `SELECT t.note_id FROM trash t JOIN notes n ON n.id=t.note_id WHERE t.user_id=?`
-	if requestctx.IsMCP(ctx) {
-		query += ` AND n.private=0`
-	}
-	rows, err := r.db.QueryContext(ctx, query, userID)
+// DeleteOne permanently deletes a single currently visible trashed note.
+func (r *Repo) DeleteOne(ctx context.Context, noteID, userID int64) error {
+	res, err := r.db.ExecContext(ctx, trashDeleteSQL(ctx)+` AND id=?`, userID, noteID)
 	if err != nil {
-		return fmt.Errorf("empty trash query: %w", err)
+		return fmt.Errorf("delete one: %w", err)
 	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		ids = append(ids, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
+	count, err := res.RowsAffected()
+	if err != nil {
 		return err
 	}
+	if count == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
 
-	for _, id := range ids {
-		if _, err := r.db.ExecContext(ctx,
-			`DELETE FROM notes WHERE id=? AND user_id=?`, id, userID,
-		); err != nil {
-			return fmt.Errorf("empty trash delete %d: %w", id, err)
-		}
+// Empty permanently deletes all currently visible trashed notes for a user.
+func (r *Repo) Empty(ctx context.Context, userID int64) error {
+	_, err := r.db.ExecContext(ctx, trashDeleteSQL(ctx), userID)
+	if err != nil {
+		return fmt.Errorf("empty trash: %w", err)
 	}
 	return nil
 }
@@ -166,7 +146,3 @@ func (r *Repo) PurgeExpired(ctx context.Context) error {
 	}
 	return nil
 }
-
-// Ensure ErrNotFound is exported from the sql package check path.
-var _ = sql.ErrNoRows
-var _ = errors.New

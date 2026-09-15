@@ -83,6 +83,61 @@ describe('content save acknowledgements', () => {
 	});
 });
 
+describe('privacy learned from content responses', () => {
+	it.each(['title', 'body'] as const)('learns private=true from a %s response while retaining a dirty sibling', (field) => {
+		const sibling = field === 'title' ? 'body' : 'title';
+		const original = cached({ private: false, is_dirty: true, [sibling]: 'Unsynced private content',
+			flags_dirty: true, flags_toggled: { pinned: true } });
+		const result = acknowledgeCachedSave(original, field, { ...response(), private: true });
+		expect(result).toMatchObject({ private: true, is_dirty: true, [sibling]: 'Unsynced private content',
+			server_updated_at: t0, flags_dirty: true, flags_toggled: { pinned: true } });
+	});
+	it('learns privacy even when a newer same-field edit superseded the saved content', () => {
+		const original = cached({ private: false, body: 'Newer offline body', is_dirty: true });
+		expect(acknowledgeCachedSave(original, 'body', { ...response(), private: true }, false))
+			.toEqual({ ...original, private: true });
+	});
+	it('does not declassify local content on an older public response', () => {
+		expect(acknowledgeCachedSave(cached({ private: true }), 'title', { ...response(), private: false }).private).toBe(true);
+	});
+	it('invalidates earlier privacy inferences only on an explicit write to that note', () => {
+		const requests = new SaveRequests();
+		const title = requests.guardPrivacy(1);
+		const body = requests.guardPrivacy(1);
+		requests.begin(1, 'body');
+		requests.privacyChanged(2);
+		expect(title()).toBe(true);
+		expect(body()).toBe(true);
+		requests.privacyChanged(1);
+		expect(title()).toBe(false);
+		expect(body()).toBe(false);
+		expect(requests.guardPrivacy(1)()).toBe(true);
+	});
+	it('honors an explicit clear from a different editor instance after navigation', () => {
+		const previousEditor = new SaveRequests();
+		const acceptPrivacy = previousEditor.guardPrivacy(1);
+		const nextEditor = new SaveRequests();
+		nextEditor.privacyChanged(1);
+		expect(acceptPrivacy()).toBe(false);
+	});
+	it('checks the privacy guard again when the cache transaction finally starts', async () => {
+		const db = await openOfflineDB();
+		try {
+			await upsertNote(db, cached({ private: true }));
+			const requests = new SaveRequests();
+			const acceptPrivacy = requests.guardPrivacy(1);
+			let release!: (db: IDBDatabase) => void;
+			const opened = new Promise<IDBDatabase>((resolve) => { release = resolve; });
+			const pending = cacheSavedNote(() => opened, 'body', { ...response('Original'), private: true }, () => true, [], acceptPrivacy);
+			requests.privacyChanged(1);
+			await updateCachedNote(db, 1, (current) => acknowledgeCachedPrivacy(current, { ...response('Original'), private: false }));
+			release(await openOfflineDB());
+			expect(await pending).toBe(true);
+			expect(await getNote(db, 1)).toMatchObject({ private: false });
+		} finally { await deleteNote(db, 1); db.close(); }
+	});
+});
+
 describe('explicit privacy acknowledgements', () => {
 	it.each([false, true])('persists private=%s while retaining all unrelated dirty state', (value) => {
 		const original = cached({ private: !value, body: 'Offline body', is_dirty: true,

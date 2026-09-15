@@ -14,6 +14,15 @@ export function latestTimestamp(current: string, incoming: string): string {
 	return fraction(incoming) > fraction(current) ? incoming : current;
 }
 
+/** A content response can reveal privacy set on another device. Retain that
+ * protection for local content; a public response must not declassify a dirty
+ * sibling or undo a newer private response. Explicit privacy writes can clear
+ * it via acknowledgeCachedPrivacy.
+ */
+export function learnedPrivacy(updated: Partial<NoteFlags>, acceptPrivacy = true): { private?: boolean } {
+	return acceptPrivacy && updated.private ? { private: true } : {};
+}
+
 /** Acknowledgement is field-specific, even when the cache has unsynced edits.
  * Skipping a dirty row would leave a superseded offline title to be replayed.
  * Never copy the response's other field: it can predate another save or an
@@ -26,6 +35,7 @@ export function acknowledgeCachedSave(
 	updated: SavedContent,
 	isLatestRequest = true,
 	tags: CachedNote['tags'] = [],
+	acceptPrivacy = true,
 ): CachedNote {
 	current ??= {
 		id: updated.id, title: updated.title, body: updated.body, ...noteFlags(updated), tags,
@@ -43,6 +53,7 @@ export function acknowledgeCachedSave(
 		: latestTimestamp(current.server_updated_at, updated.updated_at);
 	return {
 		...next,
+		...learnedPrivacy(updated, acceptPrivacy),
 		is_dirty,
 		server_updated_at,
 		local_updated_at: is_dirty ? current.local_updated_at : server_updated_at,
@@ -86,6 +97,7 @@ export async function cacheSavedNote(
 	updated: SavedContent,
 	isLatestRequest: () => boolean,
 	tags: CachedNote['tags'] = [],
+	acceptPrivacy: () => boolean = () => true,
 ): Promise<boolean> {
 	try {
 		const db = await openCache();
@@ -95,7 +107,7 @@ export async function cacheSavedNote(
 				if (field === 'private') {
 					return isLatestRequest() ? acknowledgeCachedPrivacy(current, updated, tags) : current;
 				}
-				return acknowledgeCachedSave(current, field, updated, isLatestRequest(), tags);
+				return acknowledgeCachedSave(current, field, updated, isLatestRequest(), tags, acceptPrivacy());
 			});
 		} finally {
 			db.close();
@@ -106,11 +118,27 @@ export async function cacheSavedNote(
 	}
 }
 
+// Shared across editor lifetimes: navigation can leave a content PUT from
+// the previous route in flight while the new route explicitly clears privacy.
+const privacyWrites = new Map<number, symbol>();
+
 /** Later same-field attempts (including offline fallbacks) supersede older
  * responses, but a body attempt must not supersede a title acknowledgement.
  */
 export class SaveRequests {
 	private latest = new Map<string, symbol>();
+
+	/** A later explicit privacy write supersedes privacy inferred from any
+	 * earlier content request, even across fields or equal server timestamps.
+	 */
+	guardPrivacy(id: number): () => boolean {
+		const write = privacyWrites.get(id);
+		return () => privacyWrites.get(id) === write;
+	}
+
+	privacyChanged(id: number): void {
+		privacyWrites.set(id, Symbol());
+	}
 
 	begin(id: number, field: ContentField): () => boolean {
 		const key = `${id}:${field}`;

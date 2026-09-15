@@ -84,6 +84,57 @@ describe('route privacy through the offline cache', () => {
 	});
 
 	for (const [name, Route] of [['desktop', Home], ['detail', Detail]] as const) {
+		it.each(['title', 'body'] as const)(`${name}: learns server privacy from a successful %s save before subsequent actions`, async (field) => {
+			server.private = false;
+			await upsertNote(db, cached({ private: false }));
+			render(Route);
+			const title = await screen.findByDisplayValue('Sensitive title');
+			await screen.findByRole('button', { name: 'Make note private' });
+			// Another device changes privacy, without refreshing this editor.
+			server.private = true;
+			if (field === 'title') {
+				await fireEvent.focus(title);
+				await fireEvent.input(title, { target: { value: 'Edited sensitive title' } });
+				await fireEvent.blur(title);
+			} else {
+				(editor.props!.onchange as (body: string) => void)('Edited sensitive body');
+			}
+			await waitFor(() => expect(updates).toHaveLength(1), { timeout: 2000 });
+			await waitFor(() => expect(screen.queryByText('Saving…')).not.toBeInTheDocument());
+			if (name === 'desktop') {
+				await fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+				await fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate note' }));
+				await waitFor(() => expect(copies).toHaveLength(1));
+				expect(copies[0]).toMatchObject({ private: true, body: server.body });
+			}
+			expect(await getNote(db, 7)).toMatchObject({ private: true });
+			expect(screen.getByRole('button', { name: 'Make note visible to MCP' })).toHaveAttribute('aria-pressed', 'true');
+		});
+
+		it(`${name}: a delayed content response cannot undo a later explicit privacy clear`, async () => {
+			await upsertNote(db, cached());
+			render(Route);
+			await screen.findByDisplayValue('Sensitive title');
+			const request = vi.mocked(fetch).getMockImplementation()!;
+			let release!: () => void;
+			const held = new Promise<void>((resolve) => { release = resolve; });
+			vi.mocked(fetch).mockImplementation(async (...args) => {
+				const response = await request(...args);
+				if (args[1]?.method === 'PUT' && JSON.parse(args[1].body as string).body) await held;
+				return response;
+			});
+			(editor.props!.onchange as (body: string) => void)('Saved while private');
+			await waitFor(() => expect(updates).toHaveLength(1), { timeout: 2000 });
+			await fireEvent.click(screen.getByRole('button', { name: 'Make note visible to MCP' }));
+			await waitFor(async () => expect(await getNote(db, 7)).toMatchObject({ private: false }));
+			await screen.findByRole('button', { name: 'Make note private' });
+			release();
+			await waitFor(() => expect(screen.queryByText('Saving…')).not.toBeInTheDocument());
+			expect(server.private).toBe(false);
+			expect(await getNote(db, 7)).toMatchObject({ private: false, body: 'Saved while private' });
+			expect(screen.getByRole('button', { name: 'Make note private' })).toHaveAttribute('aria-pressed', 'false');
+		});
+
 		it(`${name}: clearing privacy acknowledges only privacy, not unsynced content or queued actions`, async () => {
 			await upsertNote(db, cached({ title: 'Unsynced title', body: 'Unsynced body', is_dirty: true,
 				starred: true, flags_dirty: true, flags_toggled: { starred: true }, local_updated_at: '2024-01-02T00:00:00Z' }));

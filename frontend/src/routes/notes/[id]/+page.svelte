@@ -33,7 +33,7 @@
 	import { EMPTY_FORMATS, type ActiveFormats } from '$lib/milkdown/formatState';
 	import { finishTitleDraft } from '$lib/titleDraft';
 	import { mergeCachedNote } from '$lib/noteMerge';
-	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, SaveRequests } from '$lib/noteSave';
+	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, learnedPrivacy, SaveRequests } from '$lib/noteSave';
 
 	const noteId = $derived(Number($page.params.id));
 
@@ -139,6 +139,7 @@
 	async function togglePrivacy() {
 		if (!note) return;
 		const updated = await api.notes.update(note.id, { private: !note.private });
+		saveRequests.privacyChanged(updated.id);
 		if (!await cacheSavedNote(openOwnedCache, 'private', updated, () => true,
 			noteTags.map(({ id, name }) => ({ id, name })))) {
 			offlineWriteError = CACHE_SAVE_WARNING;
@@ -421,6 +422,7 @@
 	async function saveField(source: Note, field: 'title' | 'body', value: string) {
 		if (source.locked) return;
 		const isLatestRequest = saveRequests.begin(source.id, field);
+		const acceptPrivacy = saveRequests.guardPrivacy(source.id);
 		const tags = noteTags.map(({ id, name }) => ({ id, name }));
 		saving = true;
 		try {
@@ -439,9 +441,10 @@
 			if (note?.id === source.id) note = {
 				...note,
 				body: field === 'body' && isLatestRequest() ? updated.body : note.body,
+				...learnedPrivacy(updated, acceptPrivacy()),
 				updated_at: latestTimestamp(note.updated_at, updated.updated_at),
 			};
-			if (!await cacheSavedNote(openOwnedCache, field, updated, isLatestRequest, tags)) {
+			if (!await cacheSavedNote(openOwnedCache, field, updated, isLatestRequest, tags, acceptPrivacy)) {
 				offlineWriteError = CACHE_SAVE_WARNING;
 			}
 		} finally {

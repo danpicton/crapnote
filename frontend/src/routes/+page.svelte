@@ -33,7 +33,7 @@
 	import { finishTitleDraft } from '$lib/titleDraft';
 	import { mergeCachedNote } from '$lib/noteMerge';
 	import { TitleCommits } from '$lib/titleCommits';
-	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, SaveRequests } from '$lib/noteSave';
+	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, learnedPrivacy, SaveRequests } from '$lib/noteSave';
 	import {
 		dropIndexFromY,
 		findScrollParent,
@@ -1246,6 +1246,7 @@
 		if (syncInFlight) await syncInFlight;
 		const id = rekeyedNoteIds.get(note.id) ?? note.id;
 		const isLatestRequest = saveRequests.begin(id, field);
+		const acceptPrivacy = saveRequests.guardPrivacy(id);
 		note = { ...note, id };
 		saving = true;
 		try {
@@ -1263,9 +1264,10 @@
 			notes = notes.map((n) => n.id === id ? preservePendingTitle({
 				...n,
 				...(isLatestRequest() ? { [field]: updated[field] } : {}),
+				...learnedPrivacy(updated, acceptPrivacy()),
 				updated_at: latestTimestamp(n.updated_at, updated.updated_at),
 			}) : n);
-			if (!await cacheSavedNote(openOwnedCache, field, updated, isLatestRequest, tags)) {
+			if (!await cacheSavedNote(openOwnedCache, field, updated, isLatestRequest, tags, acceptPrivacy)) {
 				offlineWriteError = CACHE_SAVE_WARNING;
 				syncStatus = 'unknown';
 			}
@@ -1383,6 +1385,7 @@
 		const current = notes.find((n) => n.id === id);
 		if (!current || current.locked) return;
 		const updated = await api.notes.update(id, { private: !current.private });
+		saveRequests.privacyChanged(id);
 		invalidateList();
 		if (!await cacheSavedNote(openOwnedCache, 'private', updated, () => true)) {
 			offlineWriteError = CACHE_SAVE_WARNING;
