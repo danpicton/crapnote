@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { ChevronLeft, RotateCcw, Trash2 } from 'lucide-svelte';
+	import { ChevronLeft, RotateCcw, Trash2, Search, X } from 'lucide-svelte';
 	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
 	import { api, OfflineError, type TrashEntry } from '$lib/api';
 
@@ -11,35 +11,56 @@
 	let loading = $state(true);
 	let offline = $state(false);
 	let failed = $state(false);
+	let search = $state('');
+	let trashHasEntries = $state(false);
+	let requestController: AbortController | null = null;
 
-	onMount(async () => {
+	async function loadEntries() {
+		requestController?.abort();
+		const controller = new AbortController();
+		requestController = controller;
 		try {
-			entries = await api.trash.list();
+			entries = await api.trash.list(search ? { search } : {}, controller.signal);
+			if (!search) trashHasEntries = entries.length > 0;
+			offline = false;
+			failed = false;
 		} catch (err) {
+			if (controller.signal.aborted) return;
 			// Trash isn't cached offline — say so instead of spinning on
 			// "Loading…" forever. A genuine server failure gets its own
 			// message, not a misleading "you're offline".
 			if (err instanceof OfflineError) offline = true;
 			else failed = true;
 		} finally {
-			loading = false;
+			if (requestController === controller) {
+				requestController = null;
+				loading = false;
+			}
 		}
+	}
+
+	onMount(() => {
+		void loadEntries();
+		return () => requestController?.abort();
 	});
 
 	async function restore(noteId: number) {
 		await api.trash.restore(noteId);
 		entries = entries.filter((e) => e.note_id !== noteId);
+		if (!search) trashHasEntries = entries.length > 0;
 	}
 
 	async function deleteOne(noteId: number) {
 		await api.trash.deleteOne(noteId);
 		entries = entries.filter((e) => e.note_id !== noteId);
+		if (!search) trashHasEntries = entries.length > 0;
 	}
 
 	async function empty() {
 		if (!confirm('Permanently delete all trashed notes?')) return;
 		await api.trash.empty();
 		entries = [];
+		trashHasEntries = false;
 	}
 
 	function daysLeft(permanentDeleteAt: string): number {
@@ -62,7 +83,7 @@
 			<a href="/" class="mob-back-btn" aria-label="Back to notes"><ChevronLeft size={22} /></a>
 			<span class="mob-wordmark">Trash<span class="mob-wordmark-dot" aria-hidden="true">.</span></span>
 		</div>
-		<button class="mob-empty-btn" onclick={empty} disabled={entries.length === 0}>
+		<button class="mob-empty-btn" onclick={empty} disabled={!trashHasEntries}>
 			Empty
 		</button>
 	</div>
@@ -74,10 +95,26 @@
 				<ChevronLeft size={20} />
 			</a>
 			<h1 class="page-title">Trash<span class="accent-dot" aria-hidden="true">.</span></h1>
-			<button class="danger-btn desk-only" onclick={empty} disabled={entries.length === 0}>
+			<button class="danger-btn desk-only" onclick={empty} disabled={!trashHasEntries}>
 				Empty trash
 			</button>
 		</header>
+
+		<div class="search-box">
+			<Search size={16} aria-hidden="true" />
+			<input
+				type="search"
+				aria-label="Search trash"
+				placeholder="Search deleted notes"
+				bind:value={search}
+				oninput={() => void loadEntries()}
+			/>
+			{#if search}
+				<button aria-label="Clear search" onclick={() => { search = ''; void loadEntries(); }}>
+					<X size={14} aria-hidden="true" />
+				</button>
+			{/if}
+		</div>
 
 		{#if loading}
 			<p class="status">Loading…</p>
@@ -85,6 +122,8 @@
 			<p class="status">Trash isn't available offline. Reconnect to view it.</p>
 		{:else if failed}
 			<p class="status">Couldn't load the trash. Please try again.</p>
+		{:else if entries.length === 0 && search}
+			<p class="status">No deleted notes match “{search}”.</p>
 		{:else if entries.length === 0}
 			<div class="mob-empty-state">
 				<div class="mob-empty-icon"><Trash2 size={28} aria-hidden="true" /></div>
@@ -206,6 +245,20 @@
 
 	.status { color: var(--text-4); padding: 2rem 0; font-size: 0.875rem; }
 
+	.search-box {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin: 1rem 0 0;
+		padding: 0.625rem 0.75rem;
+		border: 1px solid var(--border);
+		border-radius: 0.375rem;
+		color: var(--text-4);
+	}
+	.search-box:focus-within { border-color: var(--accent); }
+	.search-box input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; color: var(--text); font: inherit; }
+	.search-box button { display: flex; border: 0; background: none; color: var(--text-3); cursor: pointer; }
+
 	.entry-list {
 		list-style: none;
 		margin: 0;
@@ -320,6 +373,7 @@
 
 		/* Scrollable inner */
 		.trash-inner { padding: 0; flex: 1; overflow-y: auto; min-height: 0; }
+		.search-box { margin: 12px 20px 0; }
 
 		.entry-list { padding: 8px 0; gap: 0; }
 		.entry {

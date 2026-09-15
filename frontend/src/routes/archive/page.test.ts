@@ -109,6 +109,22 @@ describe('Archive page', () => {
 		await waitFor(() => expect(api.notes.unarchive).toHaveBeenCalledWith(2));
 	});
 
+	it('deletes a note from filtered results', async () => {
+		vi.mocked(api.notes.listArchived)
+			.mockResolvedValueOnce([mockNote(), mockNote({ id: 2, title: 'Matching note' })])
+			.mockResolvedValueOnce([mockNote({ id: 2, title: 'Matching note' })]);
+		vi.mocked(api.notes.delete).mockResolvedValueOnce(undefined);
+		render(ArchivePage);
+		await fireEvent.input(await screen.findByRole('searchbox', { name: /search archive/i }), {
+			target: { value: 'matching' },
+		});
+		await screen.findByText('Matching note');
+
+		await fireEvent.click(screen.getByRole('button', { name: /delete permanently/i }));
+
+		await waitFor(() => expect(api.notes.delete).toHaveBeenCalledWith(2));
+	});
+
 	it('shows empty state when archive is empty', async () => {
 		vi.mocked(api.notes.listArchived).mockResolvedValue([]);
 		render(ArchivePage);
