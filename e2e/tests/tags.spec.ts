@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { createNote } from '../helpers/notes';
 
 async function login(page: Page) {
   await page.goto('/login');
@@ -6,15 +7,6 @@ async function login(page: Page) {
   await page.getByRole('textbox', { name: /password/i }).fill('admin123');
   await page.getByRole('button', { name: /log in/i }).click();
   await expect(page).toHaveURL('/');
-}
-
-async function createNote(page: Page, title: string) {
-  await page.getByLabel('New note').click();
-  const titleInput = page.getByPlaceholder(/note title/i);
-  await titleInput.click({ clickCount: 3 });
-  await page.waitForTimeout(50);
-  await titleInput.pressSequentially(title, { delay: 20 });
-  await page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'PUT');
 }
 
 /** Open the tag popover for the currently selected note. */

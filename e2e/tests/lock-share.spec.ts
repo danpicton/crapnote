@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { createNote } from '../helpers/notes';
 
 async function login(page: Page) {
   await page.goto('/login');
@@ -6,24 +7,6 @@ async function login(page: Page) {
   await page.getByRole('textbox', { name: /password/i }).fill('admin123');
   await page.getByRole('button', { name: /log in/i }).click();
   await expect(page).toHaveURL('/');
-}
-
-/** Create a note, set the title, and wait for autosave to persist it. */
-async function createNote(page: Page, title: string) {
-  const created = page.waitForResponse(
-    (r) => r.url().includes('/api/notes') && r.request().method() === 'POST',
-  );
-  await page.getByLabel('New note').click();
-  await created;
-
-  const titleInput = page.getByPlaceholder(/note title/i);
-  await expect(titleInput).toHaveValue(/^\d{4}-\d{2}-\d{2}/);
-
-  const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/notes') && r.request().method() === 'PUT',
-  );
-  await titleInput.fill(title);
-  await saved;
 }
 
 test.describe('Note locking', () => {

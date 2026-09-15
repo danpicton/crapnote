@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { createNote } from '../helpers/notes';
 
 async function login(page: Page) {
   await page.goto('/login');
@@ -6,33 +7,6 @@ async function login(page: Page) {
   await page.getByRole('textbox', { name: /password/i }).fill('admin123');
   await page.getByRole('button', { name: /log in/i }).click();
   await expect(page).toHaveURL('/');
-}
-
-/** Create a note, set the title, and blur it so the title is persisted. */
-async function createNote(page: Page, title: string) {
-  // Register the response listener BEFORE clicking so a fast create can't
-  // arrive before the listener is attached (race condition).
-  const created = page.waitForResponse(
-    (r) => r.url().includes('/api/notes') && r.request().method() === 'POST',
-  );
-  await page.getByLabel('New note').filter({ visible: true }).click();
-  await created;
-
-  const titleInput = page.getByPlaceholder(/note title/i);
-  // Wait for the editor to re-bind to the NEW note before typing. A fresh
-  // note's title defaults to a timestamp ("2026-07-04 …"); until that value
-  // appears, the visible title input still belongs to the previously
-  // selected note and fill() would start a title draft for that one instead.
-  await expect(titleInput).toHaveValue(/^\d{4}-\d{2}-\d{2}/);
-
-  // fill() replaces any existing text atomically and fires Svelte's input
-  // binding without needing keystroke delays or an explicit waitForTimeout.
-  const saved = page.waitForResponse(
-    (r) => r.url().includes('/api/notes') && r.request().method() === 'PUT',
-  );
-  await titleInput.fill(title);
-  await titleInput.press('Tab');
-  await saved;
 }
 
 async function assertBulletConversion(

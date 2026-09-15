@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { createNote } from '../helpers/notes';
 
 async function login(page: Page) {
   await page.goto('/login');
@@ -61,13 +62,7 @@ test.describe('Offline data is cleared at logout', () => {
     await login(page);
 
     // Create a note so there is something to cache offline.
-    await page.getByLabel('New note').click();
-    const titleInput = page.getByPlaceholder(/note title/i);
-    const saved = page.waitForResponse(
-      (r) => r.url().includes('/api/notes') && r.request().method() === 'PUT',
-    );
-    await titleInput.fill('Private note');
-    await saved;
+    await createNote(page, 'Private note');
 
     // Wait for the service worker to control the page, then reload so the
     // /api fetches flow through it and get cached, and the notes list load
