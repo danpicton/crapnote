@@ -169,6 +169,27 @@ test.describe('Notes', () => {
     await expect(page.getByPlaceholder(/note title/i)).toBeVisible();
   });
 
+  test('saves a focused desktop title on browser Back and reopens it', async ({ page }) => {
+    await createNote(page, 'Desktop original title');
+    // Establish SPA history with the editor as the current entry.
+    await page.getByTitle('Archive', { exact: true }).click();
+    await expect(page).toHaveURL('/archive');
+    await page.getByRole('link', { name: 'Back to notes' }).filter({ visible: true }).click();
+    await expect(page).toHaveURL('/');
+    const title = page.getByPlaceholder(/note title/i);
+    await expect(title).toHaveValue('Desktop original title');
+    // Wait for Milkdown initialization so it cannot steal focus and blur the draft.
+    await expect(page.locator('.ProseMirror')).toBeVisible();
+    await title.fill('Desktop saved on Back');
+    await expect(title).toBeFocused();
+    const saved = page.waitForResponse((r) => r.url().includes('/api/notes') && r.request().method() === 'PUT');
+    await page.goBack();
+    await saved;
+    await expect(page).toHaveURL('/archive');
+    await page.getByRole('link', { name: 'Back to notes' }).filter({ visible: true }).click();
+    await expect(page.getByPlaceholder(/note title/i)).toHaveValue('Desktop saved on Back');
+  });
+
   test('keeps a blank title draft until blur, then saves the replacement', async ({ page }) => {
     await createNote(page, 'Original title');
     const titleInput = page.getByPlaceholder(/note title/i);
@@ -216,6 +237,24 @@ test.describe('Notes', () => {
     await page.reload();
     await page.getByText('Renamed Note').click();
     await expect(page.locator('.ProseMirror')).toContainText('Hello world');
+  });
+
+  test('saves a focused title before toolbar deletion and restores it from trash', async ({ page }) => {
+    await createNote(page, 'Original before toolbar removal');
+    await page.getByPlaceholder(/note title/i).fill('Saved before toolbar removal');
+    // Toolbar mousedown suppresses the title input's blur.
+    await page.getByRole('button', { name: 'More actions' }).click();
+    const deleted = page.waitForResponse((r) => r.url().includes('/api/notes/') && r.request().method() === 'DELETE');
+    await page.getByRole('menuitem', { name: 'Move to trash' }).click();
+    await deleted;
+    await page.getByTitle('Trash', { exact: true }).click();
+    const entry = page.locator('.entry').filter({ hasText: 'Saved before toolbar removal' });
+    await expect(entry).toBeVisible();
+    const restored = page.waitForResponse((r) => r.url().includes('/restore') && r.request().method() === 'POST');
+    await entry.getByRole('button', { name: 'Restore note' }).click();
+    await restored;
+    await page.getByRole('link', { name: 'Back to notes' }).filter({ visible: true }).click();
+    await expect(page.getByPlaceholder(/note title/i)).toHaveValue('Saved before toolbar removal');
   });
 
   test('can delete a note', async ({ page }) => {

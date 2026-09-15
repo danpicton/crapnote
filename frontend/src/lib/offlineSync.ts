@@ -88,8 +88,9 @@ export async function syncOfflineChanges(
 	}
 	syncInProgress = true;
 
-	const db = await openOfflineDB();
+	let db: IDBDatabase | undefined;
 	try {
+		db = await openOfflineDB();
 		const owner = (await getOfflineOwner(db)) ?? null;
 		if (owner === null) {
 			// Legacy store from before owner tracking — adopt it for the
@@ -120,8 +121,8 @@ export async function syncOfflineChanges(
 			}
 		}
 	} finally {
-		db.close();
 		syncInProgress = false;
+		db?.close();
 	}
 
 	result.durationMs = Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - start);

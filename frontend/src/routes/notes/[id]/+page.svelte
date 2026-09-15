@@ -68,10 +68,14 @@
 	});
 	// History navigation removes the input without blur. For client-side
 	// navigation, finish persistence before the destination reads its cache/list.
-	onNavigate(async () => {
-		await commitTitleDraft();
-		await titleSaveQueue;
-	});
+	onNavigate(finishTitleSaves);
+
+	async function finishTitleSaves() {
+		while (titleDraft || titleSaveQueue) {
+			await commitTitleDraft();
+			await titleSaveQueue;
+		}
+	}
 
 	/**
 	 * Offline fallback shared by the star/pin/lock toggles: apply the toggle
@@ -120,10 +124,10 @@
 
 	async function toggleLock() {
 		if (!note) return;
-		await commitTitleDraft();
-		await titleSaveQueue;
+		const id = note.id;
+		await finishTitleSaves();
 		try {
-			const updated = await api.notes.toggleLock(noteId);
+			const updated = await api.notes.toggleLock(id);
 			note = note ? { ...updated, title: note.title } : updated;
 		} catch (err) {
 			await toggleFlagOffline(err, 'locked');
@@ -133,10 +137,12 @@
 
 	async function mobArchive() {
 		if (!note) return;
+		const id = note.id;
 		showActionSheet = false;
+		await finishTitleSaves();
 		if (navigator.onLine) {
 			try {
-				await api.notes.archive(noteId);
+				await api.notes.archive(id);
 				goto('/');
 				return;
 			} catch (err) {
@@ -157,10 +163,13 @@
 	}
 
 	async function mobDelete() {
+		if (!note) return;
+		const id = note.id;
 		showActionSheet = false;
+		await finishTitleSaves();
 		if (navigator.onLine) {
 			try {
-				await api.notes.delete(noteId);
+				await api.notes.delete(id);
 				goto('/');
 				return;
 			} catch (err) {

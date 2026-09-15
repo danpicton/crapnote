@@ -315,6 +315,14 @@ describe('syncOfflineChanges — result and logging', () => {
 });
 
 describe('syncOfflineChanges — resilience', () => {
+	it('releases the sync mutex if opening IndexedDB fails so a later run can retry', async () => {
+		vi.mocked(offlineDB.openOfflineDB).mockRejectedValueOnce(new Error('database unavailable'));
+		await expect(syncOfflineChanges('manual', 1)).rejects.toThrow('database unavailable');
+		const retry = await syncOfflineChanges('manual', 1);
+		expect(retry.skipped).toBe(false);
+		expect(offlineDB.openOfflineDB).toHaveBeenCalledTimes(2);
+	});
+
 	it('continues syncing remaining notes if one note sync throws', async () => {
 		const note1 = fakeCachedNote({ id: 10, is_new: true });
 		const note2 = fakeCachedNote({ id: 11, is_new: true });

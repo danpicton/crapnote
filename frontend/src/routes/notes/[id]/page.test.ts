@@ -69,7 +69,7 @@ vi.mock('$lib/api', () => {
 	ApiError,
 	OfflineError,
 	api: {
-		notes: { get: vi.fn(), update: vi.fn(), toggleLock: vi.fn() },
+		notes: { get: vi.fn(), update: vi.fn(), toggleLock: vi.fn(), archive: vi.fn(), delete: vi.fn() },
 		tags: {
 			list: vi.fn(),
 			listForNote: vi.fn(),
@@ -242,6 +242,24 @@ describe('/notes/[id] page', () => {
 		resolveFirst(mockNote({ title: 'First edit' }));
 		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Second edit' }));
 		expect((title as HTMLInputElement).value).toBe('Second edit');
+	});
+
+	it.each(['archive', 'delete'] as const)('saves the title before mobile %s and destination navigation', async (action) => {
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		vi.mocked(api.notes[action]).mockResolvedValue(undefined);
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved before mobile removal' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Note actions' }));
+		await fireEvent.click(screen.getByRole('button', { name: action === 'archive' ? 'Archive' : 'Delete' }));
+		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Saved before mobile removal' });
+		expect(api.notes[action]).not.toHaveBeenCalled();
+		expect(goto).not.toHaveBeenCalled();
+		resolveTitle(mockNote({ title: 'Saved before mobile removal' }));
+		await waitFor(() => expect(api.notes[action]).toHaveBeenCalledWith(42));
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
 	});
 
 	it('commits a focused title draft before browser-back navigation', async () => {

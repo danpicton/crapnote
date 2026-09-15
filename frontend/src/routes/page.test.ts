@@ -80,7 +80,7 @@ vi.mock('$lib/localData', async (importOriginal) => ({
 	openOwnedOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
 }));
 
-vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
+vi.mock('$app/navigation', () => ({ goto: vi.fn(), beforeNavigate: vi.fn(), onNavigate: vi.fn() }));
 
 const editorProps: { current: Record<string, unknown> | null } = { current: null };
 vi.mock('$lib/components/Editor.svelte', async () => ({
@@ -145,6 +145,7 @@ vi.mock('$lib/offlineSync', () => ({
 }));
 
 
+import { beforeNavigate, onNavigate } from '$app/navigation';
 import { api, OfflineError } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
 import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
@@ -1046,7 +1047,105 @@ describe('Offline mode', () => {
 describe('Title drafts', () => {
 	beforeEach(() => {
 		mockViewport(false);
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
 		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([]);
+	});
+
+	it('commits a focused desktop draft and waits for persistence on browser Back', async () => {
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved on desktop Back' } });
+		expect(beforeNavigate).toHaveBeenCalled();
+		const before = vi.mocked(beforeNavigate).mock.calls[0][0];
+		before({ type: 'popstate' } as Parameters<typeof before>[0]);
+		expect(api.notes.update).toHaveBeenCalledWith(1, { title: 'Saved on desktop Back' });
+		expect(onNavigate).toHaveBeenCalled();
+		const navigate = vi.mocked(onNavigate).mock.calls[0][0];
+		let arrived = false;
+		const navigation = Promise.resolve(navigate({ type: 'popstate' } as Parameters<typeof navigate>[0])).then(() => { arrived = true; });
+		await Promise.resolve();
+		expect(arrived).toBe(false);
+		resolveTitle(mockNote({ title: 'Saved on desktop Back' }));
+		await navigation;
+		expect(arrived).toBe(true);
+	});
+
+	it.each(['archive', 'delete'] as const)('commits the focused title before %s can remove the note', async (action) => {
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		vi.mocked(api.notes[action]).mockResolvedValue(undefined);
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved before removal' } });
+		if (action === 'delete') {
+			// The toolbar prevents mousedown's default blur.
+			await fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+			await fireEvent.click(screen.getByRole('menuitem', { name: /move to trash/i }));
+		} else {
+			await fireEvent.blur(title);
+			await fireEvent.click(screen.getByRole('button', { name: /move to archive/i }));
+		}
+		expect(api.notes.update).toHaveBeenCalledWith(1, { title: 'Saved before removal' });
+		expect(api.notes[action]).not.toHaveBeenCalled();
+		resolveTitle(mockNote({ title: 'Saved before removal' }));
+		await waitFor(() => expect(api.notes[action]).toHaveBeenCalledWith(1));
+		await waitFor(() => expect(screen.queryByDisplayValue('Saved before removal')).not.toBeInTheDocument());
+	});
+
+	it.each(['archive', 'delete'] as const)('finishes offline title persistence before queuing %s', async (action) => {
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		let persist!: () => void;
+		vi.mocked(offlineDB.upsertNote).mockReturnValueOnce(new Promise((resolve) => { persist = resolve; }));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved offline before removal' } });
+		await fireEvent.click(action === 'archive'
+			? screen.getByRole('button', { name: /move to archive/i })
+			: screen.getByRole('button', { name: 'Delete' }));
+		const markRemoval = action === 'archive' ? markNoteArchivedOffline : markNoteDeletedOffline;
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+			title: 'Saved offline before removal', is_dirty: true,
+		})));
+		expect(markRemoval).not.toHaveBeenCalled();
+		expect(api.notes[action]).not.toHaveBeenCalled();
+		persist();
+		await waitFor(() => expect(markRemoval).toHaveBeenCalledWith(1, expect.objectContaining({ id: 1, title: 'Saved offline before removal' })));
+	});
+
+	it('releases pending title/body saves after sync rejects and allows a later sync retry', async () => {
+		let rejectSync!: (reason: Error) => void;
+		vi.mocked(syncOfflineChanges).mockReturnValueOnce(new Promise((_resolve, reject) => { rejectSync = reject; }));
+		vi.mocked(api.notes.update).mockImplementation((_id, update) => Promise.resolve(mockNote(update)));
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+		window.dispatchEvent(new Event('online'));
+		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalledTimes(1));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Waiting for sync' } });
+		await fireEvent.blur(title);
+		vi.useFakeTimers();
+		(editorProps.current!.onchange as (body: string) => void)('Body waiting for sync');
+		await vi.advanceTimersByTimeAsync(800);
+		expect(api.notes.update).not.toHaveBeenCalled();
+		rejectSync(new Error('database unavailable'));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.notes.update).toHaveBeenCalledWith(1, { title: 'Waiting for sync' });
+		expect(api.notes.update).toHaveBeenCalledWith(1, { body: 'Body waiting for sync' });
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'After failed sync' } });
+		await fireEvent.blur(title);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(api.notes.update).toHaveBeenCalledWith(1, { title: 'After failed sync' });
+		vi.useRealTimers();
+		vi.mocked(syncOfflineChanges).mockResolvedValue(emptySyncResult);
+		window.dispatchEvent(new Event('online'));
+		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalledTimes(2));
 	});
 
 	it('acknowledges a successful title after an earlier title save fell back offline', async () => {
@@ -1248,7 +1347,7 @@ describe('Title drafts', () => {
 		vi.useRealTimers();
 	});
 
-	it('saves a title before locking while offline sync is rekeying the note', async () => {
+	it.each(['toggleLock', 'archive', 'delete'] as const)('saves a title before %s while offline sync is rekeying the note', async (action) => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: false });
 		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([{
 			id: -1, title: 'Offline title', body: '', starred: false, pinned: false, tags: [],
@@ -1259,6 +1358,8 @@ describe('Title drafts', () => {
 		vi.mocked(syncOfflineChanges).mockReturnValue(new Promise((resolve) => { resolveSync = resolve; }));
 		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ id: 7, title: 'Draft during sync' }));
 		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ id: 7, title: 'Draft during sync', locked: true }));
+		vi.mocked(api.notes.archive).mockResolvedValue(undefined);
+		vi.mocked(api.notes.delete).mockResolvedValue(undefined);
 		render(Page);
 		const title = await waitFor(() => screen.getByDisplayValue('Offline title'));
 		await fireEvent.focus(title);
@@ -1269,13 +1370,15 @@ describe('Title drafts', () => {
 		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ id: 7, title: 'Offline title' })]);
 		window.dispatchEvent(new Event('online'));
 		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalled());
-		await fireEvent.click(screen.getByTitle('Lock note'));
+		await fireEvent.click(action === 'toggleLock' ? screen.getByTitle('Lock note')
+			: action === 'archive' ? screen.getByRole('button', { name: /move to archive/i })
+				: screen.getByRole('button', { name: 'Delete' }));
 
 		expect(api.notes.update).not.toHaveBeenCalled();
-		expect(api.notes.toggleLock).not.toHaveBeenCalled();
+		expect(api.notes[action]).not.toHaveBeenCalled();
 		resolveSync({ ...emptySyncResult, mappings: [{ tempId: -1, serverId: 7 }] });
 		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(7, { title: 'Draft during sync' }));
-		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(7));
+		await waitFor(() => expect(api.notes[action]).toHaveBeenCalledWith(7));
 	});
 
 	it('rechecks rekeying after opening the cache for an offline title commit', async () => {

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { beforeNavigate, onNavigate, goto } from '$app/navigation';
 	import {
 		toggleStrongCommand,
 		toggleEmphasisCommand,
@@ -27,7 +27,7 @@
 	import { getAllNotes, getNote, getDirtyNotes, upsertNote, updateCachedNote, deleteNote as deleteOfflineNote, noteFlags } from '$lib/offlineDB';
 	import { openOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 	import type { CachedNote } from '$lib/offlineDB';
-	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
+	import { syncOfflineChanges, type SyncTrigger, type SyncResult } from '$lib/offlineSync';
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 	import { sortNotes, reorderPinned, nextPinOrder } from '$lib/noteOrder';
 	import { finishTitleDraft } from '$lib/titleDraft';
@@ -86,7 +86,17 @@
 	const saveRequests = new SaveRequests();
 	const titleCommits = new TitleCommits();
 	const rekeyedNoteIds = new Map<number, number>();
-	let syncInFlight: ReturnType<typeof syncOfflineChanges> | null = null;
+	let syncInFlight: Promise<SyncResult | null> | null = null;
+
+	beforeNavigate(() => { void commitTitleDraft(); });
+	onNavigate(async () => {
+		// History navigation can detach the input without blur. Wait for all
+		// source-note commits before the destination reads its list/cache.
+		while (titleDraft || titleSaveQueues.size) {
+			await commitTitleDraft();
+			await Promise.all([...titleSaveQueues.values()]);
+		}
+	});
 	// Helpers for detecting mobile viewport
 	function isMobile() { return window.matchMedia('(max-width: 640px)').matches; }
 
@@ -725,28 +735,37 @@
 		}
 		syncStatus = 'syncing';
 
-		const syncPromise = syncOfflineChanges(trigger, auth.user?.id ?? null);
+		// The barrier includes rekeying and always settles successfully. A failed
+		// push must release both current save waiters and future sync attempts.
+		const syncPromise = syncOfflineChanges(trigger, auth.user?.id ?? null)
+			.then((result) => {
+				// Rekey every note, including saves whose editor has since closed.
+				for (const mapping of result.mappings) {
+					rekeyedNoteIds.set(mapping.tempId, mapping.serverId);
+					if (selectedId === mapping.tempId) selectedId = mapping.serverId;
+					notes = notes.map((note) => note.id === mapping.tempId
+						? { ...note, id: mapping.serverId }
+						: note);
+					if (titleDraft?.noteId === mapping.tempId) {
+						titleDraft = { ...titleDraft, noteId: mapping.serverId };
+					}
+					titleCommits.remap(mapping.tempId, mapping.serverId);
+					const pendingSave = titleSaveQueues.get(mapping.tempId);
+					if (pendingSave) {
+						titleSaveQueues.delete(mapping.tempId);
+						titleSaveQueues.set(mapping.serverId, pendingSave);
+					}
+				}
+				return result;
+			})
+			.catch(() => {
+				syncStatus = 'unknown';
+				return null;
+			});
 		syncInFlight = syncPromise;
 		const result = await syncPromise;
-
-		// Rekey every note, including pending saves whose editor has since closed.
-		for (const mapping of result.mappings) {
-			rekeyedNoteIds.set(mapping.tempId, mapping.serverId);
-			if (selectedId === mapping.tempId) selectedId = mapping.serverId;
-			notes = notes.map((note) => note.id === mapping.tempId
-				? { ...note, id: mapping.serverId }
-				: note);
-			if (titleDraft?.noteId === mapping.tempId) {
-				titleDraft = { ...titleDraft, noteId: mapping.serverId };
-			}
-			titleCommits.remap(mapping.tempId, mapping.serverId);
-			const pendingSave = titleSaveQueues.get(mapping.tempId);
-			if (pendingSave) {
-				titleSaveQueues.delete(mapping.tempId);
-				titleSaveQueues.set(mapping.serverId, pendingSave);
-			}
-		}
 		if (syncInFlight === syncPromise) syncInFlight = null;
+		if (!result) return;
 
 		// Pull: refresh list so server-side changes (from another device, conflict notes,
 		// etc.) show up. loadNotes() merges with IDB so still-dirty local edits survive
@@ -1344,10 +1363,24 @@
 		);
 	}
 
+	/** Drain the target note's draft/queue before an action can make it read-only
+	 * or remove it. Resolve IDs again after awaits: sync may rekey the source.
+	 */
+	async function finishTitleForNote(id: number): Promise<number> {
+		for (;;) {
+			id = rekeyedNoteIds.get(id) ?? id;
+			if (titleDraft?.noteId === id) {
+				await commitTitleDraft();
+				continue;
+			}
+			const pending = titleSaveQueues.get(id);
+			if (!pending) return id;
+			await pending;
+		}
+	}
+
 	async function toggleLock(id: number) {
-		await commitTitleDraft();
-		id = rekeyedNoteIds.get(id) ?? id;
-		await titleSaveQueues.get(id);
+		id = await finishTitleForNote(id);
 		let updated: Note | null;
 		try {
 			updated = await api.notes.toggleLock(id);
@@ -1371,6 +1404,7 @@
 	}
 
 	async function archiveNote(id: number) {
+		id = await finishTitleForNote(id);
 		const note = notes.find((n) => n.id === id);
 		if (navigator.onLine) {
 			try {
@@ -1398,6 +1432,7 @@
 	}
 
 	async function deleteNote(id: number) {
+		id = await finishTitleForNote(id);
 		const note = notes.find((n) => n.id === id);
 		if (navigator.onLine) {
 			try {
