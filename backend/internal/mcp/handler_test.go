@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,9 @@ import (
 	"testing"
 
 	"github.com/danpicton/crapnote/internal/apispec"
+	"github.com/danpicton/crapnote/internal/auth"
+	"github.com/danpicton/crapnote/internal/db"
+	"github.com/danpicton/crapnote/internal/notes"
 )
 
 // rpc posts one JSON-RPC message to the handler and decodes the response.
@@ -293,6 +297,67 @@ func TestToolsCall_APIErrorBecomesToolError(t *testing.T) {
 	}
 	if !strings.Contains(cr.Content[0].Text, "403") || !strings.Contains(cr.Content[0].Text, "read-only") {
 		t.Errorf("error text = %q", cr.Content[0].Text)
+	}
+}
+
+func TestToolsCall_LockedArchiveAndDeleteUseRealNoteEnforcement(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+		tool   string
+	}{
+		{name: "archive", method: http.MethodPatch, path: "/api/notes/{id}/archive", tool: "notes_archive"},
+		{name: "delete", method: http.MethodDelete, path: "/api/notes/{id}", tool: "notes_delete"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+			if err != nil {
+				t.Fatalf("open db: %v", err)
+			}
+			t.Cleanup(func() { database.Close() })
+			user, err := auth.NewUserRepo(database).Create(context.Background(), "alice", "$2a$12$x", false)
+			if err != nil {
+				t.Fatalf("create user: %v", err)
+			}
+			svc := notes.NewService(notes.NewRepo(database))
+			note, err := svc.Create(context.Background(), user.ID, "Protected", "body")
+			if err != nil {
+				t.Fatalf("create note: %v", err)
+			}
+			if _, err := svc.ToggleLock(context.Background(), note.ID, user.ID); err != nil {
+				t.Fatalf("lock note: %v", err)
+			}
+
+			noteHandler := notes.NewHandler(svc)
+			mux := http.NewServeMux()
+			if tc.tool == "notes_archive" {
+				mux.HandleFunc(tc.method+" "+tc.path, noteHandler.Archive)
+			} else {
+				mux.HandleFunc(tc.method+" "+tc.path, noteHandler.Delete)
+			}
+			api := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mux.ServeHTTP(w, r.WithContext(auth.WithUser(r.Context(), user)))
+			})
+			h := newTestHandler(api)
+
+			args := fmt.Sprintf(`{"id":%d}`, note.ID)
+			blocked := resultOf(t, callTool(t, h, tc.tool, args, nil))
+			if !blocked.IsError || !strings.Contains(blocked.Content[0].Text, "unlock it first") {
+				t.Fatalf("locked result = %+v, want tool error with unlock guidance", blocked)
+			}
+			if _, err := svc.Get(context.Background(), note.ID, user.ID); err != nil {
+				t.Fatalf("blocked operation changed note: %v", err)
+			}
+
+			if _, err := svc.ToggleLock(context.Background(), note.ID, user.ID); err != nil {
+				t.Fatalf("unlock note: %v", err)
+			}
+			succeeded := resultOf(t, callTool(t, h, tc.tool, args, nil))
+			if succeeded.IsError {
+				t.Fatalf("unlocked result = %+v, want success", succeeded)
+			}
+		})
 	}
 }
 
