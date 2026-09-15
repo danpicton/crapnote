@@ -62,6 +62,53 @@ describe('Archive page', () => {
 		await waitFor(() => expect(screen.getByText('Archived Note')).toBeInTheDocument());
 	});
 
+	it('searches archived note titles and bodies as the user types', async () => {
+		vi.mocked(api.notes.listArchived)
+			.mockResolvedValueOnce([mockNote(), mockNote({ id: 2, title: 'Other note' })])
+			.mockResolvedValueOnce([mockNote()]);
+		render(ArchivePage);
+		const input = await screen.findByRole('searchbox', { name: /search archive/i });
+
+		await fireEvent.input(input, { target: { value: 'eleph' } });
+
+		await waitFor(() => expect(api.notes.listArchived).toHaveBeenLastCalledWith(
+			{ search: 'eleph' }, expect.any(AbortSignal)
+		));
+	});
+
+	it('shows no results and clearing search restores the archive', async () => {
+		vi.mocked(api.notes.listArchived)
+			.mockResolvedValueOnce([mockNote()])
+			.mockResolvedValueOnce([])
+			.mockResolvedValueOnce([mockNote()]);
+		render(ArchivePage);
+		const input = await screen.findByRole('searchbox', { name: /search archive/i });
+		await fireEvent.input(input, { target: { value: 'missing' } });
+		await screen.findByText(/no archived notes match/i);
+
+		await fireEvent.click(screen.getByRole('button', { name: /clear search/i }));
+
+		await waitFor(() => expect(screen.getByText('Archived Note')).toBeInTheDocument());
+		expect(input).toHaveValue('');
+		expect(api.notes.listArchived).toHaveBeenLastCalledWith({}, expect.any(AbortSignal));
+	});
+
+	it('restores a note from filtered results', async () => {
+		vi.mocked(api.notes.listArchived)
+			.mockResolvedValueOnce([mockNote(), mockNote({ id: 2, title: 'Matching note' })])
+			.mockResolvedValueOnce([mockNote({ id: 2, title: 'Matching note' })]);
+		vi.mocked(api.notes.unarchive).mockResolvedValueOnce(undefined);
+		render(ArchivePage);
+		await fireEvent.input(await screen.findByRole('searchbox', { name: /search archive/i }), {
+			target: { value: 'matching' },
+		});
+		await screen.findByText('Matching note');
+
+		await fireEvent.click(screen.getByRole('button', { name: /restore from archive/i }));
+
+		await waitFor(() => expect(api.notes.unarchive).toHaveBeenCalledWith(2));
+	});
+
 	it('shows empty state when archive is empty', async () => {
 		vi.mocked(api.notes.listArchived).mockResolvedValue([]);
 		render(ArchivePage);
