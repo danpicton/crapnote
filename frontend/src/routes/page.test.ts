@@ -1039,7 +1039,10 @@ describe('Offline mode', () => {
 });
 
 describe('Title drafts', () => {
-	beforeEach(() => mockViewport(false));
+	beforeEach(() => {
+		mockViewport(false);
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([]);
+	});
 
 	it('keeps a cleared focused title as a draft past the body autosave delay', async () => {
 		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Untitled' }));
@@ -1054,6 +1057,18 @@ describe('Title drafts', () => {
 		expect((title as HTMLInputElement).value).toBe('');
 		expect(api.notes.update).not.toHaveBeenCalled();
 		vi.useRealTimers();
+	});
+
+	it('restores the saved title when a whitespace-only draft blurs', async () => {
+		render(Page);
+		const title = await waitFor(() => screen.getByPlaceholderText(/note title/i));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: '   ' } });
+
+		await fireEvent.blur(title);
+
+		expect((title as HTMLInputElement).value).toBe('Test Note');
+		expect(api.notes.update).not.toHaveBeenCalled();
 	});
 
 	it('commits only the final nonblank title when the input blurs', async () => {
@@ -1745,6 +1760,8 @@ describe('offline write ownership guard', () => {
 		vi.useFakeTimers();
 		await fireEvent.input(title, { target: { value: 'Edited offline' } });
 		await vi.advanceTimersByTimeAsync(1000);
+		await fireEvent.blur(screen.getByDisplayValue('Edited offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		vi.useRealTimers();
 
 		expect(offlineDB.upsertNote).not.toHaveBeenCalled();
@@ -1763,6 +1780,8 @@ describe('offline write ownership guard', () => {
 		vi.useFakeTimers();
 		await fireEvent.input(title, { target: { value: 'Edited offline' } });
 		await vi.advanceTimersByTimeAsync(1000);
+		await fireEvent.blur(screen.getByDisplayValue('Edited offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		vi.useRealTimers();
 
 		expect(offlineDB.upsertNote).toHaveBeenCalledWith(

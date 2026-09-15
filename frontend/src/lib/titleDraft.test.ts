@@ -8,4 +8,18 @@ describe('finishTitleDraft', () => {
 			commit: false,
 		});
 	});
+
+	it('commits a nonblank draft exactly as entered', () => {
+		expect(finishTitleDraft('Saved title', ' Replacement ')).toEqual({
+			title: ' Replacement ',
+			commit: true,
+		});
+	});
+
+	it('does not write an unchanged title', () => {
+		expect(finishTitleDraft('Saved title', 'Saved title')).toEqual({
+			title: 'Saved title',
+			commit: false,
+		});
+	});
 });

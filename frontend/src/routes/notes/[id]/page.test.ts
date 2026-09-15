@@ -189,22 +189,54 @@ describe('/notes/[id] page', () => {
 		vi.useRealTimers();
 	});
 
-	it('title input change schedules auto-save', async () => {
-		vi.useFakeTimers();
+	it('restores the saved title when a whitespace-only draft blurs', async () => {
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: '  \t' } });
+
+		await fireEvent.blur(title);
+
+		expect((title as HTMLInputElement).value).toBe('My Note');
+		expect(api.notes.update).not.toHaveBeenCalled();
+	});
+
+	it('commits a nonblank title when the input blurs', async () => {
 		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'New Title' }));
 
 		render(NotePage);
-		await waitFor(() => screen.getByDisplayValue('My Note'));
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'New Title' } });
+		expect(api.notes.update).not.toHaveBeenCalled();
 
-		await fireEvent.input(screen.getByDisplayValue('My Note'), {
-			target: { value: 'New Title' },
-		});
-
-		// Auto-save fires after 800 ms debounce. waitFor is inert under fake
-		// timers (@testing-library/dom only takes its fake-timer path when a
-		// global `jest` exists), so drive the clock and assert directly.
-		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		await fireEvent.blur(title);
 		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'New Title' });
+	});
+
+	it('keeps a committed title when an older body save responds later', async () => {
+		let resolveBody!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockImplementation((_id, update) => {
+			if ('body' in update) return new Promise((resolve) => { resolveBody = resolve; });
+			return Promise.resolve(mockNote({ title: 'Final title', body: '# Hello' }));
+		});
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		vi.useFakeTimers();
+		const onchange = editorProps.current?.onchange as ((body: string) => void) | undefined;
+		expect(onchange).toBeTypeOf('function');
+		onchange!('New body');
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Final title' } });
+		await fireEvent.blur(title);
+		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Final title' });
+
+		resolveBody(mockNote({ title: 'My Note', body: 'New body' }));
+		await vi.advanceTimersByTimeAsync(0);
+		expect((title as HTMLInputElement).value).toBe('Final title');
 		vi.useRealTimers();
 	});
 
@@ -321,6 +353,8 @@ describe('/notes/[id] offline mode', () => {
 		});
 
 		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		await fireEvent.blur(screen.getByDisplayValue('Edited Offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		expect(offlineDB.upsertNote).toHaveBeenCalledWith(
 			expect.anything(),
 			expect.objectContaining({ title: 'Edited Offline', is_dirty: true })
@@ -358,6 +392,8 @@ describe('/notes/[id] offline mode', () => {
 		});
 
 		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		await fireEvent.blur(screen.getByDisplayValue('Edited Offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		expect(offlineDB.upsertNote).toHaveBeenCalled();
 
 		const written = vi.mocked(offlineDB.upsertNote).mock.calls[0][1];
@@ -403,6 +439,8 @@ describe('/notes/[id] offline mode', () => {
 		});
 
 		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		await fireEvent.blur(screen.getByDisplayValue('Edited Offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		expect(offlineDB.upsertNote).toHaveBeenCalled();
 
 		const written = vi.mocked(offlineDB.upsertNote).mock.calls[0][1];
@@ -451,6 +489,8 @@ describe('/notes/[id] offline mode', () => {
 		});
 
 		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		await fireEvent.blur(screen.getByDisplayValue('Edited Offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		expect(offlineDB.upsertNote).toHaveBeenCalled();
 
 		// toEqual, not toMatchObject: a dropped or clobbered field must fail.
@@ -486,6 +526,8 @@ describe('/notes/[id] offline mode', () => {
 		});
 
 		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		await fireEvent.blur(screen.getByDisplayValue('Edited While Unreachable'));
+		await vi.advanceTimersByTimeAsync(0);
 		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Edited While Unreachable' });
 		expect(offlineDB.upsertNote).toHaveBeenCalled();
 
@@ -817,6 +859,8 @@ describe('/notes/[id] offline write ownership guard', () => {
 			target: { value: 'Edited Offline' },
 		});
 		await vi.advanceTimersByTimeAsync(1000);
+		await fireEvent.blur(screen.getByDisplayValue('Edited Offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		vi.useRealTimers();
 
 		expect(offlineDB.upsertNote).not.toHaveBeenCalled();
@@ -832,6 +876,8 @@ describe('/notes/[id] offline write ownership guard', () => {
 			target: { value: 'Edited Offline' },
 		});
 		await vi.advanceTimersByTimeAsync(1000);
+		await fireEvent.blur(screen.getByDisplayValue('Edited Offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		vi.useRealTimers();
 
 		expect(offlineDB.upsertNote).toHaveBeenCalledWith(

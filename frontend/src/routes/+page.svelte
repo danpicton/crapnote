@@ -1128,7 +1128,11 @@
 	}
 
 	function updateTitleDraft(value: string) {
-		if (titleDraft) titleDraft = { ...titleDraft, value };
+		if (titleDraft) {
+			titleDraft = { ...titleDraft, value };
+		} else if (selectedNote && !selectedNote.locked) {
+			titleDraft = { noteId: selectedNote.id, savedTitle: selectedNote.title, value };
+		}
 	}
 
 	function commitTitleDraft() {
