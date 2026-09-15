@@ -176,6 +176,7 @@ const mockNote = (overrides = {}) => ({
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	localStorage.clear();
 	vi.mocked(api.notes.list).mockResolvedValue([mockNote()]);
 	vi.mocked(api.tags.list).mockResolvedValue([]);
 });
@@ -197,6 +198,93 @@ describe('Notes page', () => {
 	it('shows the note list after load', async () => {
 		render(Page);
 		await waitFor(() => expect(screen.getByText('Test Note')).toBeInTheDocument());
+	});
+
+	it('hides the complete desktop sidebar and leaves a control to restore it', async () => {
+		const { container } = render(Page);
+		const hide = await screen.findByRole('button', { name: 'Hide sidebar' });
+
+		await fireEvent.click(hide);
+
+		expect(container.querySelector('aside')).not.toBeInTheDocument();
+		const show = screen.getByRole('button', { name: 'Show sidebar' });
+		expect(JSON.parse(localStorage.getItem('crapnote-sidebar')!)).toEqual({ hidden: true, width: 300 });
+
+		await fireEvent.click(show);
+		expect(container.querySelector('aside')).toBeInTheDocument();
+	});
+
+	it('reserves toolbar space for the restore control when the sidebar is hidden', async () => {
+		render(Page);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Hide sidebar' }));
+
+		const toolbar = await screen.findByRole('toolbar', { name: /formatting/i });
+		expect(getComputedStyle(toolbar).paddingLeft).toBe('3rem');
+	});
+
+	it('restores the hidden state and last expanded width', async () => {
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: true, width: 420 }));
+		const { container } = render(Page);
+
+		const show = await screen.findByRole('button', { name: 'Show sidebar' });
+		expect(container.querySelector('aside')).not.toBeInTheDocument();
+
+		await fireEvent.click(show);
+		expect(container.querySelector('aside')).toHaveStyle({ width: '420px' });
+	});
+
+	it('resizes the sidebar from the keyboard and saves the width', async () => {
+		const { container } = render(Page);
+		const resize = await screen.findByRole('separator', { name: 'Resize sidebar' });
+
+		await fireEvent.keyDown(resize, { key: 'ArrowRight' });
+
+		expect(container.querySelector('aside')).toHaveStyle({ width: '310px' });
+		expect(JSON.parse(localStorage.getItem('crapnote-sidebar')!)).toEqual({ hidden: false, width: 310 });
+	});
+
+	it('resizes the sidebar by dragging its edge', async () => {
+		const { container } = render(Page);
+		const resize = await screen.findByRole('separator', { name: 'Resize sidebar' });
+		const pointer = (type: string, clientX: number) => {
+			const event = new MouseEvent(type, { bubbles: true, button: 0, clientX });
+			Object.defineProperty(event, 'pointerId', { value: 1 });
+			return event;
+		};
+
+		await fireEvent(resize, pointer('pointerdown', 300));
+		await fireEvent(resize, pointer('pointermove', 365));
+		await fireEvent(resize, pointer('pointerup', 365));
+
+		expect(container.querySelector('aside')).toHaveStyle({ width: '365px' });
+		expect(JSON.parse(localStorage.getItem('crapnote-sidebar')!)).toEqual({ hidden: false, width: 365 });
+	});
+
+	it('clamps a restored width when the desktop window is narrower', async () => {
+		vi.stubGlobal('innerWidth', 700);
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: false, width: 480 }));
+		const { container } = render(Page);
+
+		await screen.findByRole('button', { name: 'Hide sidebar' });
+		expect(container.querySelector('aside')).toHaveStyle({ width: '380px' });
+		vi.unstubAllGlobals();
+	});
+
+	it('updates accessible resize bounds when the window grows', async () => {
+		vi.stubGlobal('innerWidth', 700);
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: false, width: 480 }));
+		render(Page);
+		const resize = await screen.findByRole('separator', { name: 'Resize sidebar' });
+		expect(resize).toHaveAttribute('aria-valuemax', '380');
+
+		vi.stubGlobal('innerWidth', 1024);
+		window.dispatchEvent(new Event('resize'));
+
+		await waitFor(() => {
+			expect(resize).toHaveAttribute('aria-valuenow', '480');
+			expect(resize).toHaveAttribute('aria-valuemax', '480');
+		});
+		vi.unstubAllGlobals();
 	});
 
 	it('renders preview links underlined and unbracketed', async () => {
@@ -236,6 +324,18 @@ describe('Notes page', () => {
 		// Use title to target the sidebar header button specifically
 		await fireEvent.click(screen.getByTitle('New note'));
 		await waitFor(() => expect(api.notes.create).toHaveBeenCalled());
+	});
+
+	it('keeps the hide control on the first header row at minimum width while offline', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: false, width: 220 }));
+		render(Page);
+
+		const hide = await screen.findByRole('button', { name: 'Hide sidebar' });
+		const header = hide.closest('header');
+		expect(header?.querySelector('.offline-row')).toHaveTextContent('Offline');
+		expect(hide.parentElement).toBe(header);
+		vi.unstubAllGlobals();
 	});
 
 	it('shows logout button', async () => {
@@ -284,6 +384,15 @@ describe('Notes page', () => {
 describe('Mobile navigation', () => {
 	beforeEach(() => {
 		mockViewport(true); // mobile for every test in this block
+	});
+
+	it('keeps the mobile note list usable when the desktop sidebar is hidden', async () => {
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: true, width: 420 }));
+		render(Page);
+
+		await waitFor(() => expect(screen.getByText('Test Note')).toBeInTheDocument());
+		expect(screen.queryByRole('button', { name: /sidebar/i })).not.toBeInTheDocument();
+		expect(screen.queryByRole('separator', { name: /sidebar/i })).not.toBeInTheDocument();
 	});
 
 	it('clicking a note navigates to /notes/[id] on mobile', async () => {

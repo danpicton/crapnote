@@ -32,6 +32,11 @@
 	import { sortNotes, reorderPinned, nextPinOrder } from '$lib/noteOrder';
 	import { finishTitleDraft } from '$lib/titleDraft';
 	import { TitleCommits } from '$lib/titleCommits';
+	import {
+		clampSidebarWidth,
+		loadSidebarPreferences,
+		saveSidebarPreferences,
+	} from '$lib/sidebarPreferences';
 	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, SaveRequests } from '$lib/noteSave';
 	import {
 		dropIndexFromY,
@@ -336,6 +341,76 @@
 	let titleInput = $state<HTMLInputElement | null>(null);
 	let searchInput = $state<HTMLInputElement | null>(null);
 	let showShortcutHelp = $state(false);
+	let sidebarHidden = $state(false);
+	let sidebarWidth = $state(300);
+	let sidebarMaxWidth = $state(480);
+	let sidebarPreferredWidth = 300;
+	let sidebarResizePointer = $state<number | null>(null);
+	let sidebarResizeStartX = 0;
+	let sidebarResizeStartWidth = 0;
+
+	function setSidebarHidden(hidden: boolean) {
+		sidebarHidden = hidden;
+		if (!hidden) sidebarWidth = clampSidebarWidth(sidebarPreferredWidth, window.innerWidth);
+		saveSidebarPreferences({ hidden, width: sidebarPreferredWidth });
+	}
+
+	function setSidebarWidth(width: number) {
+		sidebarWidth = clampSidebarWidth(width, window.innerWidth);
+		sidebarPreferredWidth = sidebarWidth;
+		saveSidebarPreferences({ hidden: sidebarHidden, width: sidebarPreferredWidth });
+	}
+
+	function onSidebarResizeKeydown(e: KeyboardEvent) {
+		let width: number | null = null;
+		if (e.key === 'ArrowLeft') width = sidebarWidth - 10;
+		if (e.key === 'ArrowRight') width = sidebarWidth + 10;
+		if (e.key === 'Home') width = 220;
+		if (e.key === 'End') width = Number.POSITIVE_INFINITY;
+		if (width === null) return;
+		e.preventDefault();
+		setSidebarWidth(width);
+	}
+
+	function onSidebarResizeStart(e: PointerEvent) {
+		if (e.button !== 0) return;
+		e.preventDefault();
+		sidebarResizePointer = e.pointerId;
+		sidebarResizeStartX = e.clientX;
+		sidebarResizeStartWidth = sidebarWidth;
+		try {
+			(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+		} catch {
+			// Capture is best-effort; movement over the handle still resizes.
+		}
+	}
+
+	function onSidebarResizeMove(e: PointerEvent) {
+		if (sidebarResizePointer !== e.pointerId) return;
+		setSidebarWidth(sidebarResizeStartWidth + e.clientX - sidebarResizeStartX);
+	}
+
+	function onSidebarResizeEnd(e: PointerEvent) {
+		if (sidebarResizePointer !== e.pointerId) return;
+		sidebarResizePointer = null;
+	}
+
+	function sidebarResize(node: HTMLElement) {
+		node.addEventListener('keydown', onSidebarResizeKeydown);
+		node.addEventListener('pointerdown', onSidebarResizeStart);
+		node.addEventListener('pointermove', onSidebarResizeMove);
+		node.addEventListener('pointerup', onSidebarResizeEnd);
+		node.addEventListener('pointercancel', onSidebarResizeEnd);
+		return {
+			destroy() {
+				node.removeEventListener('keydown', onSidebarResizeKeydown);
+				node.removeEventListener('pointerdown', onSidebarResizeStart);
+				node.removeEventListener('pointermove', onSidebarResizeMove);
+				node.removeEventListener('pointerup', onSidebarResizeEnd);
+				node.removeEventListener('pointercancel', onSidebarResizeEnd);
+			},
+		};
+	}
 
 	// Tags
 	let allTags = $state<Tag[]>([]);
@@ -829,6 +904,15 @@
 
 	onMount(() => {
 		isOnline = navigator.onLine;
+		const sidebarPreferences = loadSidebarPreferences();
+		sidebarHidden = sidebarPreferences.hidden;
+		sidebarPreferredWidth = sidebarPreferences.width;
+		sidebarMaxWidth = clampSidebarWidth(Number.POSITIVE_INFINITY, window.innerWidth);
+		sidebarWidth = clampSidebarWidth(sidebarPreferredWidth, window.innerWidth);
+		const handleWindowResize = () => {
+			sidebarMaxWidth = clampSidebarWidth(Number.POSITIVE_INFINITY, window.innerWidth);
+			sidebarWidth = clampSidebarWidth(sidebarPreferredWidth, window.innerWidth);
+		};
 
 		// Load per-user keyboard shortcut overrides from localStorage. This
 		// callback runs before the root layout has resolved /api/auth/me, so
@@ -907,6 +991,7 @@
 		window.addEventListener('online', handleOnline);
 		window.addEventListener('offline', handleOffline);
 		window.addEventListener('keydown', handleKeydown);
+		window.addEventListener('resize', handleWindowResize);
 
 		// Periodic bidirectional sync while the page is open.
 		const heartbeatTimer = setInterval(() => { void heartbeatSync('heartbeat'); }, SYNC_INTERVAL_MS);
@@ -937,6 +1022,7 @@
 			window.removeEventListener('online', handleOnline);
 			window.removeEventListener('offline', handleOffline);
 			window.removeEventListener('keydown', handleKeydown);
+			window.removeEventListener('resize', handleWindowResize);
 			clearInterval(heartbeatTimer);
 		};
 	});
@@ -1529,12 +1615,15 @@
 
 <div class="app">
 	<!-- ── Sidebar ── -->
-	<aside class="sidebar">
+	{#if isMobileLayout || !sidebarHidden}
+	<aside class="sidebar" style:width={isMobileLayout ? undefined : `${sidebarWidth}px`}>
 		<!-- Desktop header -->
 		<header class="sidebar-header">
 			<a href="/" class="wordmark app-name" onclick={(e) => { e.preventDefault(); void goHome(); }}>Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
 			{#if !isOnline}
-				<span class="offline-badge" title="You are offline — changes will sync when reconnected">Offline</span>
+				<div class="offline-row">
+					<span class="offline-badge" title="You are offline — changes will sync when reconnected">Offline</span>
+				</div>
 			{/if}
 			{#if selectedId}
 				<button class="hdr-btn mobile-show-editor" onclick={() => goto(`/notes/${selectedId}`)} title="View note" aria-label="View note">
@@ -1544,6 +1633,11 @@
 			<button class="hdr-btn new-btn" onclick={newNote} title="New note" aria-label="New note">
 				<Plus size={16} />
 			</button>
+			{#if !isMobileLayout}
+				<button class="hdr-btn sidebar-hide-btn" onclick={() => setSidebarHidden(true)} title="Hide sidebar" aria-label="Hide sidebar">
+					<span class="sidebar-hide-icon"><ChevronRight size={16} /></span>
+				</button>
+			{/if}
 		</header>
 
 		<!-- Mobile header (wordmark row + search + tabs) — only rendered on mobile -->
@@ -1890,6 +1984,31 @@
 			</div>
 		</div>
 	</aside>
+	{#if !isMobileLayout}
+		<!-- Svelte does not recognise the ARIA separator's value attributes as
+		     the keyboard-operable separator pattern defined by ARIA. -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<div
+			class="sidebar-resizer"
+			class:sidebar-resizing={sidebarResizePointer !== null}
+			style:left={`${sidebarWidth - 4}px`}
+			role="separator"
+			aria-label="Resize sidebar"
+			aria-orientation="vertical"
+			aria-valuemin="220"
+			aria-valuemax={sidebarMaxWidth}
+			aria-valuenow={sidebarWidth}
+			tabindex="0"
+			use:sidebarResize
+		></div>
+	{/if}
+	{/if}
+
+	{#if !isMobileLayout && sidebarHidden}
+		<button class="sidebar-show-btn" onclick={() => setSidebarHidden(false)} title="Show sidebar" aria-label="Show sidebar">
+			<ChevronRight size={18} />
+		</button>
+	{/if}
 
 	<!-- Mobile tab bar -->
 	<MobileTabBar activeTab="notes" />
@@ -1904,6 +2023,7 @@
 				onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editorFocused = false; showHeadingsMenu = false; } }}
 			>
 					<div class="toolbar" role="toolbar" aria-label="Formatting" tabindex="-1"
+					style:padding-left={!isMobileLayout && sidebarHidden ? '3rem' : undefined}
 					onmousedown={(e) => { if (!(e.target as Element).closest('input, textarea')) e.preventDefault(); }}
 				>
 						<!-- Headings expanding group -->
@@ -2054,6 +2174,7 @@
 <style>
 	/* ─── Layout ─────────────────────────────────────────── */
 	.app {
+		position: relative;
 		display: flex;
 		height: 100dvh;
 		overflow: hidden;
@@ -2072,8 +2193,26 @@
 		overflow: hidden;
 	}
 
+	.sidebar-resizer {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		z-index: 20;
+		width: 8px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: col-resize;
+		touch-action: none;
+		outline: none;
+	}
+	.sidebar-resizer:hover,
+	.sidebar-resizer:focus-visible,
+	.sidebar-resizing { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+
 	.sidebar-header {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.5rem;
 		padding: 1.25rem 1.25rem 0.75rem;
@@ -2101,6 +2240,11 @@
 		background: var(--accent);
 		margin-left: 3px;
 		margin-bottom: 1px;
+	}
+
+	.offline-row {
+		order: 2;
+		flex-basis: 100%;
 	}
 
 	.offline-badge {
@@ -2153,6 +2297,27 @@
 		align-items: center;
 	}
 	.hdr-btn:hover { color: var(--text); }
+	.sidebar-hide-btn { flex-shrink: 0; }
+	.sidebar-hide-icon { display: flex; transform: rotate(180deg); }
+
+	.sidebar-show-btn {
+		position: absolute;
+		top: 0.4rem;
+		left: 0.4rem;
+		z-index: 10;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 30px;
+		height: 30px;
+		padding: 0;
+		border: 1px solid var(--border);
+		border-radius: 3px;
+		background: var(--bg-toolbar);
+		color: var(--text-3);
+		cursor: pointer;
+	}
+	.sidebar-show-btn:hover { color: var(--text); background: var(--bg-hover); }
 
 	.new-btn {
 		width: 26px;
