@@ -14,12 +14,19 @@
 	let search = $state('');
 	let requestController: AbortController | null = null;
 
-	async function loadNotes() {
+	function invalidateListRequest() {
 		requestController?.abort();
+		requestController = null;
+	}
+
+	async function loadNotes() {
+		invalidateListRequest();
 		const controller = new AbortController();
 		requestController = controller;
 		try {
-			notes = await api.notes.listArchived(search ? { search } : {}, controller.signal);
+			const loaded = await api.notes.listArchived(search ? { search } : {}, controller.signal);
+			if (controller.signal.aborted) return;
+			notes = loaded;
 			offline = false;
 			failed = false;
 		} catch (err) {
@@ -39,7 +46,7 @@
 
 	onMount(() => {
 		void loadNotes();
-		return () => requestController?.abort();
+		return invalidateListRequest;
 	});
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -53,6 +60,7 @@
 
 	async function unarchive(id: number) {
 		await api.notes.unarchive(id);
+		invalidateListRequest();
 		notes = notes.filter((n) => n.id !== id);
 	}
 
@@ -65,6 +73,7 @@
 		}
 		if (!confirm('Permanently delete this note?')) return;
 		await api.notes.delete(id);
+		invalidateListRequest();
 		notes = notes.filter((n) => n.id !== id);
 		if (expandedId === id) expandedId = null;
 	}

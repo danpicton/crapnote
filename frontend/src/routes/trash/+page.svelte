@@ -15,12 +15,19 @@
 	let trashHasEntries = $state(false);
 	let requestController: AbortController | null = null;
 
-	async function loadEntries() {
+	function invalidateListRequest() {
 		requestController?.abort();
+		requestController = null;
+	}
+
+	async function loadEntries() {
+		invalidateListRequest();
 		const controller = new AbortController();
 		requestController = controller;
 		try {
-			entries = await api.trash.list(search ? { search } : {}, controller.signal);
+			const loaded = await api.trash.list(search ? { search } : {}, controller.signal);
+			if (controller.signal.aborted) return;
+			entries = loaded;
 			if (!search) trashHasEntries = entries.length > 0;
 			offline = false;
 			failed = false;
@@ -41,17 +48,19 @@
 
 	onMount(() => {
 		void loadEntries();
-		return () => requestController?.abort();
+		return invalidateListRequest;
 	});
 
 	async function restore(noteId: number) {
 		await api.trash.restore(noteId);
+		invalidateListRequest();
 		entries = entries.filter((e) => e.note_id !== noteId);
 		if (!search) trashHasEntries = entries.length > 0;
 	}
 
 	async function deleteOne(noteId: number) {
 		await api.trash.deleteOne(noteId);
+		invalidateListRequest();
 		entries = entries.filter((e) => e.note_id !== noteId);
 		if (!search) trashHasEntries = entries.length > 0;
 	}
@@ -59,6 +68,7 @@
 	async function empty() {
 		if (!confirm('Permanently delete all trashed notes?')) return;
 		await api.trash.empty();
+		invalidateListRequest();
 		entries = [];
 		trashHasEntries = false;
 	}
