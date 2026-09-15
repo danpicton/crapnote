@@ -2,6 +2,7 @@ import { getNote, upsertNote, deleteNote, noteFlags } from '$lib/offlineDB';
 import { requireOwnedOfflineDB } from '$lib/localData';
 import type { CachedNote } from '$lib/offlineDB';
 import type { Note } from '$lib/api';
+import { LOCKED_ACTION_MESSAGE } from '$lib/noteActions';
 
 /**
  * Optimistic offline note actions. When a delete/archive can't reach the
@@ -43,6 +44,7 @@ export async function markNoteDeletedOffline(
 	note: Note,
 	tags: Array<{ id: number; name: string }> = []
 ): Promise<void> {
+	if (note.locked) throw new Error(LOCKED_ACTION_MESSAGE);
 	const db = await requireOwnedOfflineDB(userId);
 	try {
 		const existing = await getNote(db, note.id);
@@ -100,6 +102,7 @@ export async function markNoteArchivedOffline(
 	note: Note,
 	tags: Array<{ id: number; name: string }> = []
 ): Promise<void> {
+	if (note.locked) throw new Error(LOCKED_ACTION_MESSAGE);
 	const db = await requireOwnedOfflineDB(userId);
 	try {
 		const existing = await getNote(db, note.id);

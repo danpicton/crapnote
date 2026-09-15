@@ -20,6 +20,7 @@
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, OfflineError, type Note, type Tag } from '$lib/api';
 	import { notePreviewSegments } from '$lib/notePreview';
+	import { canArchiveOrDelete, isLockRejection, LOCKED_ACTION_MESSAGE } from '$lib/noteActions';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { shortcuts, matchShortcut, type ShortcutId } from '$lib/stores/shortcuts.svelte';
 	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
@@ -82,6 +83,8 @@
 	 * silence here would be worse than the bug it replaces.
 	 */
 	let offlineWriteError = $state<string | null>(null);
+	let actionError = $state<string | null>(null);
+	let visibleError = $derived(actionError ?? offlineWriteError);
 
 	let selectedId = $state<number | null>(null);
 	let search = $state('');
@@ -1495,6 +1498,11 @@
 				removeNoteFromList(id);
 				return;
 			} catch (err) {
+				if (isLockRejection(err)) {
+					actionError = LOCKED_ACTION_MESSAGE;
+					notes = notes.map((n) => n.id === id ? { ...n, locked: true } : n);
+					return;
+				}
 				// Only fall through to the offline queue on a connectivity
 				// failure — a genuine server rejection must not hide a note
 				// that still exists server-side.
@@ -1523,6 +1531,11 @@
 				removeNoteFromList(id);
 				return;
 			} catch (err) {
+				if (isLockRejection(err)) {
+					actionError = LOCKED_ACTION_MESSAGE;
+					notes = notes.map((n) => n.id === id ? { ...n, locked: true } : n);
+					return;
+				}
 				// See archiveNote — only queue on connectivity failure.
 				if (!(err instanceof OfflineError)) throw err;
 			}
@@ -1602,13 +1615,13 @@
 	<title>Crapnote</title>
 </svelte:head>
 
-{#if offlineWriteError}
+{#if visibleError}
 	<!-- Outside .app: that is a row flex container on desktop, where a banner
 	     child would render as a narrow full-height column beside the sidebar
 	     rather than a bar across the top. -->
 	<div class="offline-write-error" role="alert">
-		<span>{offlineWriteError}</span>
-		<button onclick={() => (offlineWriteError = null)} aria-label="Dismiss">
+		<span>{visibleError}</span>
+		<button onclick={() => { offlineWriteError = null; actionError = null; }} aria-label="Dismiss">
 			<X size={14} />
 		</button>
 	</div>
@@ -1838,24 +1851,26 @@
 							<span>{note.locked ? 'Unlock' : 'Lock'}</span>
 						</button>
 					</div>
-					<div class="mob-swipe-right" class:mob-swipe-visible={(swipeX[note.id] ?? 0) < -4}>
-						<button
-							class="mob-swipe-btn mob-swipe-archive"
-							onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void archiveNote(note.id); }}
-							aria-label="Archive note"
-						>
-							<Archive size={20} aria-hidden="true" />
-							<span>Archive</span>
-						</button>
-						<button
-							class="mob-swipe-btn mob-swipe-delete"
-							onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void deleteNote(note.id); }}
-							aria-label="Delete note"
-						>
-							<Trash2 size={20} aria-hidden="true" />
-							<span>Delete</span>
-						</button>
-					</div>
+					{#if canArchiveOrDelete(note)}
+						<div class="mob-swipe-right" class:mob-swipe-visible={(swipeX[note.id] ?? 0) < -4}>
+							<button
+								class="mob-swipe-btn mob-swipe-archive"
+								onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void archiveNote(note.id); }}
+								aria-label="Archive note"
+							>
+								<Archive size={20} aria-hidden="true" />
+								<span>Archive</span>
+							</button>
+							<button
+								class="mob-swipe-btn mob-swipe-delete"
+								onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void deleteNote(note.id); }}
+								aria-label="Delete note"
+							>
+								<Trash2 size={20} aria-hidden="true" />
+								<span>Delete</span>
+							</button>
+						</div>
+					{/if}
 
 					<!-- Row body (shared desktop + mobile, translates on mobile swipe) -->
 					<div
@@ -1908,8 +1923,10 @@
 							{#if !note.locked}
 								<button class="act-btn" onclick={() => void toggleLock(note.id)} title="Lock"><LockOpen size={12} /></button>
 							{/if}
-							<button class="act-btn" onclick={() => void archiveNote(note.id)} title="Move to archive" aria-label="Move to archive"><Archive size={12} /></button>
-							<button class="act-btn danger" onclick={() => void deleteNote(note.id)} title="Delete" disabled={note.locked} aria-label={note.locked ? 'Delete (unlock the note first)' : 'Delete'}><Trash2 size={12} /></button>
+							{#if canArchiveOrDelete(note)}
+								<button class="act-btn" onclick={() => void archiveNote(note.id)} title="Move to archive" aria-label="Move to archive"><Archive size={12} /></button>
+								<button class="act-btn danger" onclick={() => void deleteNote(note.id)} title="Delete" aria-label="Delete"><Trash2 size={12} /></button>
+							{/if}
 						</div>
 					</div>
 				</li>
@@ -2084,9 +2101,11 @@
 									<button class="note-menu-item" role="menuitem" onclick={() => duplicateNote(selectedNote.id)}>
 										<Plus size={13} />Duplicate note
 									</button>
-									<button class="note-menu-item danger" role="menuitem" disabled={selectedNote.locked} title={selectedNote.locked ? 'Unlock the note first' : undefined} onclick={() => { deleteNote(selectedNote.id); showNoteMenu = false; }}>
-										<Trash2 size={13} />Move to trash
-									</button>
+									{#if canArchiveOrDelete(selectedNote)}
+										<button class="note-menu-item danger" role="menuitem" onclick={() => { deleteNote(selectedNote.id); showNoteMenu = false; }}>
+											<Trash2 size={13} />Move to trash
+										</button>
+									{/if}
 								</div>
 							{/if}
 						</div>

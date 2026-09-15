@@ -117,7 +117,7 @@ vi.mock('$lib/localData', async (importOriginal) => ({
 	requireOwnedOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
 }));
 
-import { api } from '$lib/api';
+import { api, ApiError } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
 import { openOwnedOfflineDB, requireOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 import { auth } from '$lib/stores/auth.svelte';
@@ -926,6 +926,29 @@ describe('Mobile lock control', () => {
 		await waitFor(() => screen.getByDisplayValue('My Note'));
 
 		expect(container.querySelector('.mob-topbar button[aria-label="Unlock note"]')).toBeTruthy();
+	});
+
+	it('hides archive and delete from the action sheet while locked', async () => {
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ locked: true }));
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Note actions' }));
+
+		expect(screen.queryByRole('button', { name: 'Archive' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+	});
+
+	it('shows unlock guidance and stays put when a stale archive gets 423', async () => {
+		vi.mocked(api.notes.archive).mockRejectedValue(new ApiError(423, 'locked'));
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Note actions' }));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+
+		await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/unlock/i));
+		expect(goto).not.toHaveBeenCalledWith('/');
 	});
 });
 

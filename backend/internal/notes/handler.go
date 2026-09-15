@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	maxTitleLen = 500
-	maxBodyLen  = 500_000
+	maxTitleLen   = 500
+	maxBodyLen    = 500_000
+	lockedMessage = "note is locked; unlock it first"
 )
 
 // Handler holds HTTP handlers for notes endpoints.
@@ -165,7 +166,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if errors.Is(err, ErrLocked) {
-		writeError(w, http.StatusLocked, "note is locked")
+		writeError(w, http.StatusLocked, lockedMessage)
 		return
 	}
 	if err != nil {
@@ -194,7 +195,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "note not found")
 		return
 	} else if errors.Is(err, ErrLocked) {
-		writeError(w, http.StatusLocked, "note is locked")
+		writeError(w, http.StatusLocked, lockedMessage)
 		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
@@ -260,7 +261,7 @@ func (h *Handler) Archive(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "note not found")
 		return
 	} else if errors.Is(err, ErrLocked) {
-		writeError(w, http.StatusLocked, "note is locked")
+		writeError(w, http.StatusLocked, lockedMessage)
 		return
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")

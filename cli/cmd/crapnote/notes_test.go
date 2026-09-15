@@ -119,6 +119,29 @@ func TestNotesDeleteMovesToTrash(t *testing.T) {
 	}
 }
 
+func TestLockedArchiveAndDeleteExitUnsuccessfullyWithGuidance(t *testing.T) {
+	for _, action := range []string{"archive", "delete"} {
+		t.Run(action, func(t *testing.T) {
+			srv := newAPIServer(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusLocked)
+				_, _ = w.Write([]byte(`{"error":"note is locked; unlock it first"}`))
+			})
+
+			stdout, stderr, code := runCLI(t, nil, "--url", srv.URL, "--token", "t",
+				"notes", action, "7")
+			if code == 0 {
+				t.Fatal("exit = 0, want failure")
+			}
+			if stdout != "" {
+				t.Errorf("stdout = %q, want no success output", stdout)
+			}
+			if !strings.Contains(stderr, "unlock it first") {
+				t.Errorf("stderr = %q, want unlock guidance", stderr)
+			}
+		})
+	}
+}
+
 func TestNotesStarTogglesAndReportsNewState(t *testing.T) {
 	srv := newAPIServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPatch || r.URL.Path != "/api/notes/7/star" {

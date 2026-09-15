@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import { ArchiveRestore, Trash2, ChevronLeft, Archive as ArchiveIcon, Search, X } from 'lucide-svelte';
 	import { api, OfflineError, type Note } from '$lib/api';
+	import { canArchiveOrDelete, isLockRejection, LOCKED_ACTION_MESSAGE } from '$lib/noteActions';
 	import { notePreviewSegments } from '$lib/notePreview';
 	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
 
@@ -12,6 +13,7 @@
 	let failed = $state(false);
 	let expandedId = $state<number | null>(null);
 	let search = $state('');
+	let actionError = $state<string | null>(null);
 	let requestController: AbortController | null = null;
 
 	function invalidateListRequest() {
@@ -65,14 +67,15 @@
 	}
 
 	async function deleteNote(id: number) {
-		// The API rejects deletes on locked notes with 423; say so up front
-		// rather than letting the request fail silently.
-		if (notes.find((n) => n.id === id)?.locked) {
-			alert('This note is locked. Unlock it before deleting.');
+		if (!confirm('Permanently delete this note?')) return;
+		try {
+			await api.notes.delete(id);
+		} catch (err) {
+			if (!isLockRejection(err)) throw err;
+			actionError = LOCKED_ACTION_MESSAGE;
+			notes = notes.map((note) => note.id === id ? { ...note, locked: true } : note);
 			return;
 		}
-		if (!confirm('Permanently delete this note?')) return;
-		await api.notes.delete(id);
 		invalidateListRequest();
 		notes = notes.filter((n) => n.id !== id);
 		if (expandedId === id) expandedId = null;
@@ -141,6 +144,9 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="archive-page">
+	{#if actionError}
+		<div class="action-error" role="alert">{actionError}</div>
+	{/if}
 	<!-- Desktop wordmark -->
 	<a href="/" class="wordmark">Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
 
@@ -228,9 +234,11 @@
 									<button class="act-btn" onclick={() => unarchive(note.id)} title="Restore from archive" aria-label="Restore from archive">
 										<ArchiveRestore size={14} />
 									</button>
-									<button class="act-btn danger" onclick={() => deleteNote(note.id)} title="Delete permanently" aria-label="Delete permanently">
-										<Trash2 size={14} />
-									</button>
+									{#if canArchiveOrDelete(note)}
+										<button class="act-btn danger" onclick={() => deleteNote(note.id)} title="Delete permanently" aria-label="Delete permanently">
+											<Trash2 size={14} />
+										</button>
+									{/if}
 								</div>
 							</div>
 
@@ -244,14 +252,16 @@
 									<ArchiveRestore size={20} aria-hidden="true" />
 									<span>Restore</span>
 								</button>
-								<button
-									class="mob-swipe-btn mob-swipe-delete"
-									onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void deleteNote(note.id); }}
-									aria-label="Delete note"
-								>
-									<Trash2 size={20} aria-hidden="true" />
-									<span>Delete</span>
-								</button>
+								{#if canArchiveOrDelete(note)}
+									<button
+										class="mob-swipe-btn mob-swipe-delete"
+										onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void deleteNote(note.id); }}
+										aria-label="Delete note"
+									>
+										<Trash2 size={20} aria-hidden="true" />
+										<span>Delete</span>
+									</button>
+								{/if}
 							</div>
 						</div>
 
@@ -271,6 +281,7 @@
 
 <style>
 	/* ── Base ── */
+	.action-error { padding: 0.75rem 1rem; background: #fee2e2; color: #991b1b; }
 	.archive-page {
 		height: 100dvh;
 		overflow-y: auto;
