@@ -143,6 +143,58 @@ test.describe('Notes', () => {
     await expect(page.getByPlaceholder(/note title/i)).toBeVisible();
   });
 
+  test('uses the body text column for the desktop title', async ({ page }) => {
+    await createNote(page, 'Title aligned with body');
+    const titleBox = await page.getByPlaceholder(/note title/i).boundingBox();
+    const bodyBox = await page.locator('.milkdown').boundingBox();
+
+    expect(titleBox).not.toBeNull();
+    expect(bodyBox).not.toBeNull();
+    expect(titleBox!.x).toBeCloseTo(bodyBox!.x, 0);
+    expect(titleBox!.width).toBeCloseTo(bodyBox!.width, 0);
+
+    await page.setViewportSize({ width: 850, height: 900 });
+    const narrowTitleBox = await page.getByPlaceholder(/note title/i).boundingBox();
+    const narrowBodyBox = await page.locator('.milkdown').boundingBox();
+    expect(narrowTitleBox).not.toBeNull();
+    expect(narrowBodyBox).not.toBeNull();
+    expect(narrowTitleBox!.x).toBeCloseTo(narrowBodyBox!.x, 0);
+    expect(narrowTitleBox!.width).toBeCloseTo(narrowBodyBox!.width, 0);
+    expect(narrowTitleBox!.width).toBeLessThan(titleBox!.width);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(850);
+  });
+
+  test('ellipsizes an unfocused long title without truncating the editable value', async ({ page }) => {
+    const longTitle = `Beginning ${'wide title '.repeat(30)}Ending`;
+    await createNote(page, longTitle);
+    const title = page.getByPlaceholder(/note title/i);
+
+    const unfocused = await title.evaluate((input) => ({
+      clientWidth: input.clientWidth,
+      scrollLeft: input.scrollLeft,
+      scrollWidth: input.scrollWidth,
+      textOverflow: getComputedStyle(input).textOverflow,
+    }));
+    expect(unfocused.scrollWidth).toBeGreaterThan(unfocused.clientWidth);
+    expect(unfocused.scrollLeft).toBe(0);
+    expect(unfocused.textOverflow).toBe('ellipsis');
+    await expect(title).toHaveValue(longTitle);
+
+    await title.focus();
+    await title.press('End');
+    await title.pressSequentially(' edited');
+    const editedTitle = `${longTitle} edited`;
+    const saved = page.waitForResponse(
+      (r) => r.url().includes('/api/notes/')
+        && r.request().method() === 'PUT'
+        && r.request().postDataJSON()?.title === editedTitle,
+    );
+    await title.press('Tab');
+    await saved;
+    await page.reload();
+    await expect(page.getByPlaceholder(/note title/i)).toHaveValue(editedTitle);
+  });
+
   test('saves a focused desktop title on browser Back and reopens it', async ({ page }) => {
     await createNote(page, 'Desktop original title');
     // Establish SPA history with the editor as the current entry.
