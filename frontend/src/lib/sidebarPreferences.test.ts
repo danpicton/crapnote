@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { clampSidebarWidth, parseSidebarPreferences } from './sidebarPreferences';
+import {
+	clampSidebarWidth,
+	loadSidebarPreferences,
+	parseSidebarPreferences,
+	saveSidebarPreferences,
+} from './sidebarPreferences';
 
 describe('sidebar preferences', () => {
 	it('restores a valid hidden state and expanded width', () => {
@@ -19,5 +24,16 @@ describe('sidebar preferences', () => {
 		expect(clampSidebarWidth(100, 1200)).toBe(220);
 		expect(clampSidebarWidth(900, 1200)).toBe(480);
 		expect(clampSidebarWidth(480, 700)).toBe(380);
+	});
+
+	it('falls back safely when browser storage is unavailable', () => {
+		const read = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('denied'); });
+		const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('denied'); });
+
+		expect(loadSidebarPreferences()).toEqual({ hidden: false, width: 300 });
+		expect(() => saveSidebarPreferences({ hidden: true, width: 350 })).not.toThrow();
+
+		read.mockRestore();
+		write.mockRestore();
 	});
 });
