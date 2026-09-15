@@ -15,7 +15,7 @@ async function createNote(page: Page, title: string) {
   const created = page.waitForResponse(
     (r) => r.url().includes('/api/notes') && r.request().method() === 'POST',
   );
-  await page.getByLabel('New note').click();
+  await page.getByLabel('New note').filter({ visible: true }).click();
   await created;
 
   const titleInput = page.getByPlaceholder(/note title/i);
@@ -33,6 +33,67 @@ async function createNote(page: Page, title: string) {
   );
   await titleInput.fill(title);
   await saved;
+}
+
+async function assertBulletConversion(
+  page: Page,
+  title: string,
+  separator: 'Enter' | 'Shift+Enter',
+  expectedItems: number,
+  mobile: boolean,
+) {
+  await createNote(page, title);
+  const editor = page.locator('.ProseMirror');
+  await editor.click();
+  await editor.pressSequentially('Alpha');
+  await editor.press(separator);
+  await editor.pressSequentially('Beta');
+  await editor.press(separator);
+  await editor.pressSequentially('Gamma');
+  await editor.press('Control+A');
+
+  const saved = page.waitForResponse(
+    (r) => r.url().includes('/api/notes') && r.request().method() === 'PUT',
+  );
+  const bulletButton = mobile
+    ? page.getByRole('button', { name: 'Bullet list' })
+    : page.getByTitle('Bullet list');
+  await bulletButton.click();
+
+  const items = editor.locator(':scope > ul > li');
+  await expect(items).toHaveCount(expectedItems);
+  await expect(items).toContainText(
+    expectedItems === 3 ? ['Alpha', 'Beta', 'Gamma'] : ['AlphaBetaGamma'],
+  );
+  if (expectedItems === 1) await expect(items.locator('br')).toHaveCount(2);
+  await saved;
+
+  await page.reload();
+  const reopenedItems = page.locator('.ProseMirror > ul > li');
+  await expect(reopenedItems).toHaveCount(expectedItems);
+  await expect(reopenedItems).toContainText(
+    expectedItems === 3 ? ['Alpha', 'Beta', 'Gamma'] : ['AlphaBetaGamma'],
+  );
+  if (expectedItems === 1) await expect(reopenedItems.locator('br')).toHaveCount(2);
+}
+
+for (const { layout, viewport, mobile } of [
+  { layout: 'desktop', viewport: { width: 1280, height: 900 }, mobile: false },
+  { layout: 'mobile', viewport: { width: 390, height: 844 }, mobile: true },
+]) {
+  test.describe(`Bullet conversion on ${layout}`, () => {
+    test.use({ viewport });
+
+    test.beforeEach(async ({ page }) => {
+      await login(page);
+    });
+
+    test('converts paragraphs but keeps hard breaks in one item and persists both', async ({ page }) => {
+      await assertBulletConversion(page, `Paragraph bullets ${layout}`, 'Enter', 3, mobile);
+      await page.goto('/');
+      await assertBulletConversion(page, `Hard-break bullet ${layout}`, 'Shift+Enter', 1, mobile);
+    });
+  });
 }
 
 test.describe('Notes', () => {
