@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/danpicton/crapnote/internal/db"
+	"github.com/danpicton/crapnote/internal/requestctx"
 	"github.com/danpicton/crapnote/internal/tags"
 )
 
@@ -80,6 +81,41 @@ func TestTagRepo_List_NoteCount(t *testing.T) {
 	list, _ := repo.List(ctx, userID, 0, 0)
 	if list[0].NoteCount != 2 {
 		t.Fatalf("expected NoteCount=2, got %d", list[0].NoteCount)
+	}
+}
+
+func TestTagRepo_MCPDoesNotDiscloseOrMutatePrivateAssociations(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := tags.NewRepo(database)
+	ctx := context.Background()
+	publicTag, _ := repo.Create(ctx, userID, "public-tag")
+	secretTag, _ := repo.Create(ctx, userID, "secret-tag")
+	publicID := seedNote(t, database, userID, "public")
+	privateID := seedNote(t, database, userID, "private")
+	_, _ = database.Exec(`UPDATE notes SET private=1 WHERE id=?`, privateID)
+	_ = repo.AddToNote(ctx, publicID, publicTag.ID, userID)
+	_ = repo.AddToNote(ctx, privateID, secretTag.ID, userID)
+	mcpCtx := requestctx.WithMCP(ctx)
+
+	listed, err := repo.List(mcpCtx, userID, 0, 0)
+	if err != nil || len(listed) != 1 || listed[0].Name != "public-tag" || listed[0].NoteCount != 1 {
+		t.Fatalf("MCP tags list = %#v, %v", listed, err)
+	}
+	if got, err := repo.ListForNote(mcpCtx, privateID, userID); err != nil || len(got) != 0 {
+		t.Fatalf("MCP private note tags = %#v, %v", got, err)
+	}
+	if err := repo.AddToNote(mcpCtx, privateID, publicTag.ID, userID); err != tags.ErrNotFound {
+		t.Fatalf("MCP add tag to private note = %v", err)
+	}
+	if err := repo.RemoveFromNote(mcpCtx, privateID, secretTag.ID, userID); err != tags.ErrNotFound {
+		t.Fatalf("MCP remove tag from private note = %v", err)
+	}
+	if _, err := repo.Rename(mcpCtx, secretTag.ID, userID, "leaked"); err != tags.ErrNotFound {
+		t.Fatalf("MCP rename private-only tag = %v", err)
+	}
+	if err := repo.Delete(mcpCtx, secretTag.ID, userID); err != tags.ErrNotFound {
+		t.Fatalf("MCP delete private-only tag = %v", err)
 	}
 }
 

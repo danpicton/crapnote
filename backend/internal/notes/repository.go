@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/danpicton/crapnote/internal/db"
+	"github.com/danpicton/crapnote/internal/requestctx"
 )
 
 // Repo provides access to the notes table.
@@ -48,14 +49,14 @@ func (r *Repo) CreateWithPrivacy(ctx context.Context, userID int64, title, body 
 func (r *Repo) Get(ctx context.Context, id, userID int64) (*Note, error) {
 	n := &Note{}
 	var starred, pinned, archived, locked, private int
-	err := r.db.QueryRowContext(ctx, `
+	query := `
 		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked, n.private,
 		       n.pin_order, n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.id = ? AND n.user_id = ?
 		  AND n.archived = 0
-		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)
-	`, id, userID).Scan(
+		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)` + publicOnly(ctx, "n")
+	err := r.db.QueryRowContext(ctx, query, id, userID).Scan(
 		&n.ID, &n.UserID, &n.Title, &n.Body,
 		&starred, &pinned, &archived, &locked, &private, &n.PinOrder, &n.CreatedAt, &n.UpdatedAt,
 	)
@@ -79,9 +80,8 @@ func (r *Repo) Get(ctx context.Context, id, userID int64) (*Note, error) {
 // lock.
 func (r *Repo) IsLocked(ctx context.Context, id, userID int64) (bool, error) {
 	var locked int
-	err := r.db.QueryRowContext(ctx,
-		`SELECT locked FROM notes WHERE id = ? AND user_id = ?`, id, userID,
-	).Scan(&locked)
+	query := `SELECT locked FROM notes WHERE id = ? AND user_id = ?` + publicOnly(ctx, "notes")
+	err := r.db.QueryRowContext(ctx, query, id, userID).Scan(&locked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, ErrNotFound
 	}
@@ -104,6 +104,7 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)`
 
 	args := []any{userID}
+	query += publicOnly(ctx, "n")
 
 	if filter.Starred != nil {
 		if *filter.Starred {
@@ -149,13 +150,14 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 // archived, in one query so an archive-state transition cannot omit or
 // duplicate a note between separate reads.
 func (r *Repo) ListForExport(ctx context.Context, userID int64) ([]*Note, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	query := `
 		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked, n.private,
 		       n.pin_order, n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.user_id = ?
-		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)
-		ORDER BY n.updated_at DESC`, userID)
+		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)` + publicOnly(ctx, "n") + `
+		ORDER BY n.updated_at DESC`
+	rows, err := r.db.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list notes for export: %w", err)
 	}
@@ -179,14 +181,15 @@ func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string
 // UpdateWithPrivacy performs an explicit partial update, preserving nil fields.
 func (r *Repo) UpdateWithPrivacy(ctx context.Context, id, userID int64, title, body *string, private *bool) (*Note, error) {
 	now := time.Now().UTC()
-	res, err := r.db.ExecContext(ctx, `
+	query := `
 		UPDATE notes
 		SET title      = CASE WHEN ? IS NOT NULL THEN ? ELSE title END,
 		    body       = CASE WHEN ? IS NOT NULL THEN ? ELSE body  END,
 		    private    = CASE WHEN ? IS NOT NULL THEN ? ELSE private END,
 		    updated_at = ?
 		WHERE id = ? AND user_id = ? AND archived = 0 AND locked = 0
-		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = notes.id)`,
+		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = notes.id)` + publicOnly(ctx, "notes")
+	res, err := r.db.ExecContext(ctx, query,
 		title, title, body, body, private, private, now, id, userID,
 	)
 	if err != nil {
@@ -278,21 +281,18 @@ func (r *Repo) SetPinned(ctx context.Context, id, userID int64, pinned bool) err
 	var res sql.Result
 	var err error
 	if pinned {
-		res, err = r.db.ExecContext(ctx, `
+		query := `
 			UPDATE notes
 			SET pinned = 1,
 			    pin_order = COALESCE(
 			        (SELECT MIN(p.pin_order) - 1 FROM notes p
 			          WHERE p.user_id = ? AND p.pinned = 1 AND p.id <> notes.id),
 			        0)
-			WHERE id = ? AND user_id = ?`,
-			userID, id, userID,
-		)
+			WHERE id = ? AND user_id = ?` + publicOnly(ctx, "notes")
+		res, err = r.db.ExecContext(ctx, query, userID, id, userID)
 	} else {
-		res, err = r.db.ExecContext(ctx,
-			`UPDATE notes SET pinned = 0, pin_order = 0 WHERE id = ? AND user_id = ?`,
-			id, userID,
-		)
+		query := `UPDATE notes SET pinned = 0, pin_order = 0 WHERE id = ? AND user_id = ?` + publicOnly(ctx, "notes")
+		res, err = r.db.ExecContext(ctx, query, id, userID)
 	}
 	if err != nil {
 		return fmt.Errorf("set pinned: %w", err)
@@ -343,7 +343,7 @@ func (r *Repo) ReorderPins(ctx context.Context, userID int64, ids []int64) error
 	final := mergePinOrder(current, ids)
 
 	stmt, err := tx.PrepareContext(ctx,
-		`UPDATE notes SET pin_order = ? WHERE id = ? AND user_id = ? AND pinned = 1`)
+		`UPDATE notes SET pin_order = ? WHERE id = ? AND user_id = ? AND pinned = 1`+publicOnly(ctx, "notes"))
 	if err != nil {
 		return fmt.Errorf("reorder pins: %w", err)
 	}
@@ -363,11 +363,12 @@ func (r *Repo) ReorderPins(ctx context.Context, userID int64, ids []int64) error
 
 // pinnedIDs lists the user's pinned note IDs in their current display order.
 func pinnedIDs(ctx context.Context, tx *sql.Tx, userID int64) ([]int64, error) {
-	rows, err := tx.QueryContext(ctx, `
+	query := `
 		SELECT id FROM notes
 		WHERE user_id = ? AND pinned = 1
-		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = notes.id)
-		ORDER BY pin_order ASC, updated_at DESC`, userID)
+		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = notes.id)` + publicOnly(ctx, "notes") + `
+		ORDER BY pin_order ASC, updated_at DESC`
+	rows, err := tx.QueryContext(ctx, query, userID)
 	if err != nil {
 		return nil, fmt.Errorf("reorder pins: %w", err)
 	}
@@ -418,10 +419,8 @@ func (r *Repo) setBool(ctx context.Context, col string, id, userID int64, val bo
 	if val {
 		v = 1
 	}
-	res, err := r.db.ExecContext(ctx,
-		fmt.Sprintf(`UPDATE notes SET %s=? WHERE id=? AND user_id=?`, col),
-		v, id, userID,
-	)
+	query := fmt.Sprintf(`UPDATE notes SET %s=? WHERE id=? AND user_id=?`, col) + publicOnly(ctx, "notes")
+	res, err := r.db.ExecContext(ctx, query, v, id, userID)
 	if err != nil {
 		return fmt.Errorf("set %s: %w", col, err)
 	}
@@ -441,11 +440,11 @@ func (r *Repo) SoftDelete(ctx context.Context, id, userID int64) error {
 	// Ownership and the locked check are part of the insert itself, so a
 	// concurrent SetLocked or AutoLockStale cannot land between them and the
 	// write.
-	res, err := r.db.ExecContext(ctx, `
+	query := `
 		INSERT OR IGNORE INTO trash(note_id, user_id)
 		SELECT id, user_id FROM notes
-		WHERE id = ? AND user_id = ? AND locked = 0`, id, userID,
-	)
+		WHERE id = ? AND user_id = ? AND locked = 0` + publicOnly(ctx, "notes")
+	res, err := r.db.ExecContext(ctx, query, id, userID)
 	if err != nil {
 		return fmt.Errorf("soft delete: %w", err)
 	}
@@ -473,9 +472,8 @@ func (r *Repo) SoftDelete(ctx context.Context, id, userID int64) error {
 func (r *Repo) Archive(ctx context.Context, id, userID int64) error {
 	// Enforce the lock in the write itself so a concurrent lock cannot land
 	// between a check and the update.
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE notes SET archived=1 WHERE id=? AND user_id=? AND locked=0`, id, userID,
-	)
+	query := `UPDATE notes SET archived=1 WHERE id=? AND user_id=? AND locked=0` + publicOnly(ctx, "notes")
+	res, err := r.db.ExecContext(ctx, query, id, userID)
 	if err != nil {
 		return fmt.Errorf("set archived: %w", err)
 	}
@@ -498,9 +496,8 @@ func (r *Repo) Archive(ctx context.Context, id, userID int64) error {
 
 // Unarchive restores an archived note back to the normal list.
 func (r *Repo) Unarchive(ctx context.Context, id, userID int64) error {
-	res, err := r.db.ExecContext(ctx,
-		`UPDATE notes SET archived=0 WHERE id=? AND user_id=?`, id, userID,
-	)
+	query := `UPDATE notes SET archived=0 WHERE id=? AND user_id=?` + publicOnly(ctx, "notes")
+	res, err := r.db.ExecContext(ctx, query, id, userID)
 	if err != nil {
 		return fmt.Errorf("unarchive: %w", err)
 	}
@@ -526,6 +523,7 @@ func (r *Repo) ListArchived(ctx context.Context, userID int64, search string, li
 		  AND n.archived = 1
 		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)`
 	args := []any{userID}
+	query += publicOnly(ctx, "n")
 	if search != "" {
 		escaped := strings.ReplaceAll(search, `"`, `""`)
 		query += ` AND n.id IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?)`
@@ -545,11 +543,17 @@ func (r *Repo) ListArchived(ctx context.Context, userID int64, search string, li
 	return scanNotes(rows)
 }
 
+func publicOnly(ctx context.Context, alias string) string {
+	if requestctx.IsMCP(ctx) {
+		return " AND " + alias + ".private = 0"
+	}
+	return ""
+}
+
 // HardDelete permanently removes a note and its trash record.
 func (r *Repo) HardDelete(ctx context.Context, id, userID int64) error {
-	res, err := r.db.ExecContext(ctx,
-		`DELETE FROM notes WHERE id=? AND user_id=?`, id, userID,
-	)
+	query := `DELETE FROM notes WHERE id=? AND user_id=?` + publicOnly(ctx, "notes")
+	res, err := r.db.ExecContext(ctx, query, id, userID)
 	if err != nil {
 		return fmt.Errorf("hard delete: %w", err)
 	}

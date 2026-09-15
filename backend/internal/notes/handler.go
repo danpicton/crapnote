@@ -9,6 +9,7 @@ import (
 
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/httpx"
+	"github.com/danpicton/crapnote/internal/requestctx"
 )
 
 const (
@@ -84,6 +85,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if req.Private && requestctx.IsMCP(r.Context()) {
+		writeError(w, http.StatusNotFound, "note not found")
+		return
+	}
 	if len(req.Title) > maxTitleLen {
 		writeError(w, http.StatusBadRequest, "title exceeds maximum length")
 		return
@@ -150,6 +155,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Private != nil && requestctx.IsMCP(r.Context()) {
+		writeError(w, http.StatusNotFound, "note not found")
 		return
 	}
 	if req.Title != nil && len(*req.Title) > maxTitleLen {

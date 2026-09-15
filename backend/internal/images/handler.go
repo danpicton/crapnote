@@ -12,6 +12,7 @@ import (
 
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/ratelimit"
+	"github.com/danpicton/crapnote/internal/requestctx"
 )
 
 const maxImageSize = 10 << 20 // 10 MB
@@ -207,9 +208,19 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 	var mimeType string
 	var data []byte
 
-	err := h.db.QueryRowContext(r.Context(),
-		`SELECT user_id, mime_type, data FROM images WHERE id = ?`, id,
-	).Scan(&userID, &mimeType, &data)
+	query := `SELECT user_id, mime_type, data FROM images WHERE id = ?`
+	if requestctx.IsMCP(r.Context()) {
+		query += ` AND EXISTS (
+			SELECT 1 FROM notes n
+			WHERE n.user_id=images.user_id AND n.private=0
+			  AND n.body LIKE '%/api/images/' || images.id || '%'
+		) AND NOT EXISTS (
+			SELECT 1 FROM notes n
+			WHERE n.user_id=images.user_id AND n.private=1
+			  AND n.body LIKE '%/api/images/' || images.id || '%'
+		)`
+	}
+	err := h.db.QueryRowContext(r.Context(), query, id).Scan(&userID, &mimeType, &data)
 
 	if err == sql.ErrNoRows {
 		http.NotFound(w, r)

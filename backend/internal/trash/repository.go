@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/danpicton/crapnote/internal/db"
+	"github.com/danpicton/crapnote/internal/requestctx"
 )
 
 // Repo provides access to the trash table.
@@ -30,6 +31,9 @@ func (r *Repo) List(ctx context.Context, userID int64, search string, limit, off
 		JOIN notes n ON n.id = t.note_id
 		WHERE t.user_id = ?`
 	args := []any{userID}
+	if requestctx.IsMCP(ctx) {
+		query += ` AND n.private = 0`
+	}
 	if search != "" {
 		escaped := strings.ReplaceAll(search, `"`, `""`)
 		query += ` AND n.id IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?)`
@@ -61,9 +65,11 @@ func (r *Repo) List(ctx context.Context, userID int64, search string, limit, off
 // Restore removes a note from the trash without deleting it.
 // Returns ErrNotFound if the note is not in trash or belongs to another user.
 func (r *Repo) Restore(ctx context.Context, noteID, userID int64) error {
-	res, err := r.db.ExecContext(ctx,
-		`DELETE FROM trash WHERE note_id=? AND user_id=?`, noteID, userID,
-	)
+	query := `DELETE FROM trash WHERE note_id=? AND user_id=?`
+	if requestctx.IsMCP(ctx) {
+		query += ` AND EXISTS (SELECT 1 FROM notes n WHERE n.id=trash.note_id AND n.private=0)`
+	}
+	res, err := r.db.ExecContext(ctx, query, noteID, userID)
 	if err != nil {
 		return fmt.Errorf("restore: %w", err)
 	}
@@ -77,9 +83,11 @@ func (r *Repo) Restore(ctx context.Context, noteID, userID int64) error {
 func (r *Repo) DeleteOne(ctx context.Context, noteID, userID int64) error {
 	// Verify ownership via trash table first.
 	var exists int
-	if err := r.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM trash WHERE note_id=? AND user_id=?`, noteID, userID,
-	).Scan(&exists); err != nil {
+	query := `SELECT COUNT(*) FROM trash t JOIN notes n ON n.id=t.note_id WHERE t.note_id=? AND t.user_id=?`
+	if requestctx.IsMCP(ctx) {
+		query += ` AND n.private=0`
+	}
+	if err := r.db.QueryRowContext(ctx, query, noteID, userID).Scan(&exists); err != nil {
 		return fmt.Errorf("delete one check: %w", err)
 	}
 	if exists == 0 {
@@ -94,9 +102,11 @@ func (r *Repo) DeleteOne(ctx context.Context, noteID, userID int64) error {
 // Empty permanently deletes all trashed notes for a user.
 func (r *Repo) Empty(ctx context.Context, userID int64) error {
 	// Collect note IDs first, then delete notes (trash rows cascade).
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT note_id FROM trash WHERE user_id=?`, userID,
-	)
+	query := `SELECT t.note_id FROM trash t JOIN notes n ON n.id=t.note_id WHERE t.user_id=?`
+	if requestctx.IsMCP(ctx) {
+		query += ` AND n.private=0`
+	}
+	rows, err := r.db.QueryContext(ctx, query, userID)
 	if err != nil {
 		return fmt.Errorf("empty trash query: %w", err)
 	}

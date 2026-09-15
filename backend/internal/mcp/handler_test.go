@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/danpicton/crapnote/internal/apispec"
+	"github.com/danpicton/crapnote/internal/requestctx"
 )
 
 // rpc posts one JSON-RPC message to the handler and decodes the response.
@@ -206,6 +207,15 @@ func TestToolsCall_DispatchesThroughAPI(t *testing.T) {
 	}
 	if cr.IsError || cr.Content[0].Text != `[{"id":1}]` {
 		t.Errorf("result = %+v", cr)
+	}
+}
+
+func TestToolsCall_MarksReplayedRequestAsMCP(t *testing.T) {
+	api := &captureAPI{status: 200, resp: []byte(`[]`)}
+	h := newTestHandler(api)
+	callTool(t, h, "notes_list", `{}`, nil)
+	if !requestctx.IsMCP(api.req.Context()) {
+		t.Fatal("replayed API request is not marked as MCP-originated")
 	}
 }
 

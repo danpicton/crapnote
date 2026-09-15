@@ -100,6 +100,37 @@ func TestNotesHandler_CreateAndUpdatePrivacy(t *testing.T) {
 	}
 }
 
+func TestNotesHandler_InvalidPrivacyDoesNotChangeNote(t *testing.T) {
+	h, user := newHandlerFixture(t)
+	create := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(`{"title":"Keep","private":true}`))
+	create = withUser(create, user)
+	createdRec := httptest.NewRecorder()
+	h.Create(createdRec, create)
+	var created map[string]any
+	_ = json.NewDecoder(createdRec.Body).Decode(&created)
+	id := int64(created["id"].(float64))
+
+	update := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/notes/%d", id), bytes.NewBufferString(`{"private":"false"}`))
+	update.SetPathValue("id", strconv.FormatInt(id, 10))
+	update = withUser(update, user)
+	updatedRec := httptest.NewRecorder()
+	h.Update(updatedRec, update)
+	if updatedRec.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d", updatedRec.Code)
+	}
+
+	get := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/notes/%d", id), nil)
+	get.SetPathValue("id", strconv.FormatInt(id, 10))
+	get = withUser(get, user)
+	gotRec := httptest.NewRecorder()
+	h.Get(gotRec, get)
+	var got map[string]any
+	_ = json.NewDecoder(gotRec.Body).Decode(&got)
+	if got["private"] != true || got["title"] != "Keep" {
+		t.Fatalf("note changed: %v", got)
+	}
+}
+
 func TestNotesHandler_Create_DefaultTitle(t *testing.T) {
 	h, user := newHandlerFixture(t)
 

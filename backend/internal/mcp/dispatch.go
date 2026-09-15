@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/danpicton/crapnote/internal/apispec"
+	"github.com/danpicton/crapnote/internal/requestctx"
 )
 
 // callResult is the MCP tools/call result payload.
@@ -123,7 +124,7 @@ func (h *Handler) dispatch(orig *http.Request, op apispec.Operation, args map[st
 	// same context. This keeps the caller's token out of a second
 	// verification (and rate-limit charge) and forwards nothing else from
 	// the MCP request.
-	req := httptest.NewRequestWithContext(orig.Context(), op.Method, target, reqBody)
+	req := httptest.NewRequestWithContext(requestctx.WithMCP(orig.Context()), op.Method, target, reqBody)
 	if op.Method != http.MethodGet {
 		req.Header.Set("Content-Type", contentType)
 	}
