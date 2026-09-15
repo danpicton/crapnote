@@ -394,6 +394,23 @@
 		sidebarResizePointer = null;
 	}
 
+	function sidebarResize(node: HTMLElement) {
+		node.addEventListener('keydown', onSidebarResizeKeydown);
+		node.addEventListener('pointerdown', onSidebarResizeStart);
+		node.addEventListener('pointermove', onSidebarResizeMove);
+		node.addEventListener('pointerup', onSidebarResizeEnd);
+		node.addEventListener('pointercancel', onSidebarResizeEnd);
+		return {
+			destroy() {
+				node.removeEventListener('keydown', onSidebarResizeKeydown);
+				node.removeEventListener('pointerdown', onSidebarResizeStart);
+				node.removeEventListener('pointermove', onSidebarResizeMove);
+				node.removeEventListener('pointerup', onSidebarResizeEnd);
+				node.removeEventListener('pointercancel', onSidebarResizeEnd);
+			},
+		};
+	}
+
 	// Tags
 	let allTags = $state<Tag[]>([]);
 	let noteTags = $state<Tag[]>([]);
@@ -1965,7 +1982,7 @@
 	{#if !isMobileLayout}
 		<!-- Svelte does not recognise the ARIA separator's value attributes as
 		     the keyboard-operable separator pattern defined by ARIA. -->
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<div
 			class="sidebar-resizer"
 			class:sidebar-resizing={sidebarResizePointer !== null}
@@ -1977,11 +1994,7 @@
 			aria-valuemax={clampSidebarWidth(Number.POSITIVE_INFINITY, typeof window === 'undefined' ? 1024 : window.innerWidth)}
 			aria-valuenow={sidebarWidth}
 			tabindex="0"
-			onkeydown={onSidebarResizeKeydown}
-			onpointerdown={onSidebarResizeStart}
-			onpointermove={onSidebarResizeMove}
-			onpointerup={onSidebarResizeEnd}
-			onpointercancel={onSidebarResizeEnd}
+			use:sidebarResize
 		></div>
 	{/if}
 	{/if}
