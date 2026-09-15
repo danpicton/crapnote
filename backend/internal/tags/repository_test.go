@@ -222,6 +222,70 @@ func TestTagRepo_AddRemoveFromNote(t *testing.T) {
 	}
 }
 
+func TestTagRepo_AssociationMutationsRemainIdempotent(t *testing.T) {
+	for _, origin := range []string{"REST", "MCP"} {
+		t.Run(origin, func(t *testing.T) {
+			database := openTestDB(t)
+			userID := seedUser(t, database)
+			noteID := seedNote(t, database, userID, "Note")
+			repo := tags.NewRepo(database)
+			ctx := context.Background()
+			if origin == "MCP" {
+				ctx = requestctx.WithMCP(ctx)
+			}
+			tag, err := repo.Create(ctx, userID, "label")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if err := repo.AddToNote(ctx, noteID, tag.ID, userID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			list, err := repo.ListForNote(ctx, noteID, userID)
+			if err != nil || len(list) != 1 {
+				t.Fatalf("repeated add: %v, %v", list, err)
+			}
+			for range 2 {
+				if err := repo.RemoveFromNote(ctx, noteID, tag.ID, userID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			list, err = repo.ListForNote(ctx, noteID, userID)
+			if err != nil || len(list) != 0 {
+				t.Fatalf("repeated remove: %v, %v", list, err)
+			}
+			// Missing/inaccessible notes aren't successful no-op removals.
+			if err := repo.RemoveFromNote(ctx, noteID, tag.ID, userID+999); err != tags.ErrNotFound {
+				t.Fatalf("foreign note removal: %v", err)
+			}
+			if err := repo.RemoveFromNote(ctx, noteID+999, tag.ID, userID); err != tags.ErrNotFound {
+				t.Fatalf("missing note removal: %v", err)
+			}
+			if err := repo.AddToNote(ctx, noteID, tag.ID+999, userID); err != tags.ErrNotFound {
+				t.Fatalf("missing tag addition: %v", err)
+			}
+
+			// The tag, not just the target note, must belong to this user.
+			res, err := database.Exec(`INSERT INTO users(username,password_hash) VALUES('other','h')`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			otherID, err := res.LastInsertId()
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreignTag, err := repo.Create(context.Background(), otherID, "foreign")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.AddToNote(ctx, noteID, foreignTag.ID, userID); err != tags.ErrNotFound {
+				t.Fatalf("foreign tag addition: %v", err)
+			}
+		})
+	}
+}
+
 func TestTagRepo_AddToNote_WrongUser(t *testing.T) {
 	database := openTestDB(t)
 	userID := seedUser(t, database)

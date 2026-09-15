@@ -135,59 +135,59 @@ func (r *Repo) Delete(ctx context.Context, id, userID int64) error {
 	return nil
 }
 
-// AddToNote associates a tag with a note, verifying both belong to userID.
+// AddToNote associates a tag with a note. Ownership and MCP visibility are
+// checked in the write itself: a privacy change must not race a prior SELECT.
 func (r *Repo) AddToNote(ctx context.Context, noteID, tagID, userID int64) error {
-	// Verify the note belongs to the user and is visible to this origin.
-	var noteOwner int64
-	query := `SELECT user_id FROM notes WHERE id=?`
+	query := `INSERT INTO note_tags(note_id, tag_id)
+		SELECT n.id, t.id FROM notes n JOIN tags t ON t.user_id=n.user_id
+		WHERE n.id=? AND t.id=? AND n.user_id=?` + privateNoteClause(ctx)
 	if requestctx.IsMCP(ctx) {
-		query += ` AND private=0`
+		// A guessed private-only tag must not become visible by attaching it
+		// to a public note. Its visibility can change concurrently too.
+		query += ` AND (NOT EXISTS (SELECT 1 FROM note_tags a WHERE a.tag_id=t.id)
+			OR EXISTS (SELECT 1 FROM note_tags a JOIN notes linked ON linked.id=a.note_id
+			           WHERE a.tag_id=t.id AND linked.private=0))`
 	}
-	if err := r.db.QueryRowContext(ctx, query, noteID).Scan(&noteOwner); errors.Is(err, sql.ErrNoRows) || noteOwner != userID {
-		return ErrNotFound
+	// A duplicate association remains a successful, idempotent request. The
+	// no-op update distinguishes an authorized duplicate (one affected row)
+	// from a missing/invisible note or tag (zero rows), without a stale check.
+	query += ` ON CONFLICT(note_id, tag_id) DO UPDATE SET tag_id=excluded.tag_id`
+	res, err := r.db.ExecContext(ctx, query, noteID, tagID, userID)
+	if err != nil {
+		return fmt.Errorf("add tag to note: %w", err)
 	}
-
-	// Verify the tag belongs to the user and does not disclose a private-only
-	// association to MCP callers that guessed its ID.
-	if requestctx.IsMCP(ctx) {
-		var visible int
-		err := r.db.QueryRowContext(ctx, `
-			SELECT COUNT(*) FROM tags t
-			WHERE t.id=? AND t.user_id=?
-			  AND (NOT EXISTS (SELECT 1 FROM note_tags a WHERE a.tag_id=t.id)
-			       OR EXISTS (SELECT 1 FROM note_tags a JOIN notes n ON n.id=a.note_id
-			                  WHERE a.tag_id=t.id AND n.private=0))`, tagID, userID).Scan(&visible)
-		if err != nil {
-			return err
-		}
-		if visible == 0 {
-			return ErrNotFound
-		}
-	} else if _, err := r.FindByID(ctx, tagID, userID); err != nil {
+	count, err := res.RowsAffected()
+	if err != nil {
 		return err
 	}
-
-	_, err := r.db.ExecContext(ctx,
-		`INSERT OR IGNORE INTO note_tags(note_id, tag_id) VALUES(?, ?)`, noteID, tagID,
-	)
-	return err
-}
-
-// RemoveFromNote removes a tag association from a note.
-func (r *Repo) RemoveFromNote(ctx context.Context, noteID, tagID, userID int64) error {
-	// Verify note ownership and visibility to this origin.
-	var noteOwner int64
-	query := `SELECT user_id FROM notes WHERE id=?`
-	if requestctx.IsMCP(ctx) {
-		query += ` AND private=0`
-	}
-	if err := r.db.QueryRowContext(ctx, query, noteID).Scan(&noteOwner); errors.Is(err, sql.ErrNoRows) || noteOwner != userID {
+	if count == 0 {
 		return ErrNotFound
 	}
+	return nil
+}
 
-	_, err := r.db.ExecContext(ctx,
-		`DELETE FROM note_tags WHERE note_id=? AND tag_id=?`, noteID, tagID,
-	)
+// RemoveFromNote removes a tag association, enforcing ownership and privacy
+// within the DELETE so a concurrent privacy change cannot invalidate the gate.
+func (r *Repo) RemoveFromNote(ctx context.Context, noteID, tagID, userID int64) error {
+	query := `DELETE FROM note_tags WHERE note_id=? AND tag_id=?
+		AND EXISTS (SELECT 1 FROM notes n WHERE n.id=note_tags.note_id AND n.user_id=?` + privateNoteClause(ctx) + `)`
+	res, err := r.db.ExecContext(ctx, query, noteID, tagID, userID)
+	if err != nil {
+		return fmt.Errorf("remove tag from note: %w", err)
+	}
+	count, err := res.RowsAffected()
+	if err != nil || count > 0 {
+		return err
+	}
+	// Preserve idempotent removal of an absent association on a visible owned
+	// note. This read classifies a no-op only; no write follows it.
+	var exists int
+	err = r.db.QueryRowContext(ctx,
+		`SELECT 1 FROM notes n WHERE n.id=? AND n.user_id=?`+privateNoteClause(ctx), noteID, userID,
+	).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
 	return err
 }
 
