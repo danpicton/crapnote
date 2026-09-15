@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseSidebarPreferences } from './sidebarPreferences';
+import { clampSidebarWidth, parseSidebarPreferences } from './sidebarPreferences';
 
 describe('sidebar preferences', () => {
 	it('restores a valid hidden state and expanded width', () => {
@@ -13,5 +13,11 @@ describe('sidebar preferences', () => {
 		for (const raw of ['not json', '{"hidden":"yes","width":376}', '{"hidden":true,"width":"wide"}', '{"hidden":true,"width":1e999}']) {
 			expect(parseSidebarPreferences(raw)).toEqual({ hidden: false, width: 300 });
 		}
+	});
+
+	it('bounds the sidebar while reserving a usable note pane', () => {
+		expect(clampSidebarWidth(100, 1200)).toBe(220);
+		expect(clampSidebarWidth(900, 1200)).toBe(480);
+		expect(clampSidebarWidth(480, 700)).toBe(380);
 	});
 });
