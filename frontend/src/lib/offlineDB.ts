@@ -28,9 +28,9 @@ export interface CachedNote {
 }
 
 /**
- * The per-note flags that must travel together whenever a cached note is
- * rebuilt — they are all server-owned, and a record carrying some of them from
- * the server and the rest from a stale local copy is incoherent.
+ * The per-note flags carried by a complete snapshot. This is not an offline
+ * intent mask: only flags_toggled may override server flags during a merge,
+ * and privacy must be reconciled separately from queued star/pin/lock work.
  */
 export interface NoteFlags {
 	starred: boolean;
@@ -44,7 +44,7 @@ export interface NoteFlags {
  * Pull the flag set off `source`, filling anything it omits from `fallback`.
  *
  * Several places rebuild a CachedNote — the sync reconcilers, the conflict
- * path, the offline action queue, the list merge. Each used to spell these
+ * path and the offline action queue. Each used to spell these
  * fields out by hand, and twice now a newly added field (`pin_order`) was
  * fixed in some of those literals and silently dropped by the others. Adding a
  * field here reaches every rebuild at once.

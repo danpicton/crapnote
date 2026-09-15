@@ -32,6 +32,7 @@
 	import { wrapSelectedInBulletListCommand } from '$lib/milkdown/listedit';
 	import { EMPTY_FORMATS, type ActiveFormats } from '$lib/milkdown/formatState';
 	import { finishTitleDraft } from '$lib/titleDraft';
+	import { mergeCachedNote } from '$lib/noteMerge';
 	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, SaveRequests } from '$lib/noteSave';
 
 	const noteId = $derived(Number($page.params.id));
@@ -138,7 +139,11 @@
 	async function togglePrivacy() {
 		if (!note) return;
 		const updated = await api.notes.update(note.id, { private: !note.private });
-		note = note ? { ...updated, title: note.title } : updated;
+		if (!await cacheSavedNote(openOwnedCache, 'private', updated, () => true,
+			noteTags.map(({ id, name }) => ({ id, name })))) {
+			offlineWriteError = CACHE_SAVE_WARNING;
+		}
+		if (note?.id === updated.id) note = { ...note, private: updated.private };
 		showActionSheet = false;
 	}
 
@@ -322,16 +327,7 @@
 			const db = await openOwnedCache();
 			const cached = db ? await getOfflineNote(db, noteId) : null;
 			db?.close();
-			if (cached && cached.is_dirty && !cached.is_new) {
-				note = {
-					...serverNote,
-					title: cached.title,
-					body: cached.body,
-					updated_at: cached.local_updated_at,
-				};
-			} else {
-				note = serverNote;
-			}
+			note = mergeCachedNote(serverNote, cached);
 			noteTags = fetchedTags;
 			allTags = allTagsList;
 			await maybeFocusTitleForNewNote();

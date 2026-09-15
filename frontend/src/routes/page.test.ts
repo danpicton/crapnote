@@ -1687,7 +1687,7 @@ describe('Note locking', () => {
 		await fireEvent.click(toggle);
 
 		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(1, { private: true }));
-		expect(screen.getByRole('button', { name: 'Make note visible to MCP' })).toHaveAttribute('aria-pressed', 'true');
+		expect(await screen.findByRole('button', { name: 'Make note visible to MCP' })).toHaveAttribute('aria-pressed', 'true');
 		cleanup();
 		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ private: true })]);
 		await openNote();

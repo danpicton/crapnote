@@ -173,7 +173,7 @@ describe('/notes/[id] page', () => {
 		expect(toggle).toHaveAttribute('aria-pressed', 'true');
 		await fireEvent.click(toggle);
 		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(42, { private: false }));
-		expect(screen.getByRole('button', { name: 'Make note private' })).toHaveAttribute('aria-pressed', 'false');
+		expect(await screen.findByRole('button', { name: 'Make note private' })).toHaveAttribute('aria-pressed', 'false');
 		cleanup();
 		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ private: false }));
 		render(NotePage);

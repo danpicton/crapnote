@@ -49,6 +49,29 @@ export function acknowledgeCachedSave(
 	};
 }
 
+/** An explicit privacy write supersedes cached privacy even on a dirty row.
+ * It acknowledges no title/body edit or queued action. Advance the content
+ * checkpoint only when the response accounts for the cached content, so a
+ * later offline edit doesn't mistake our own privacy write for a conflict.
+ */
+export function acknowledgeCachedPrivacy(
+	current: CachedNote | null,
+	updated: SavedContent,
+	tags: CachedNote['tags'] = [],
+): CachedNote {
+	if (!current) return acknowledgeCachedSave(null, 'title', updated, true, tags);
+	const sameContent = current.title === updated.title && current.body === updated.body;
+	const checkpoint = latestTimestamp(current.server_updated_at, updated.updated_at);
+	return {
+		...current,
+		private: updated.private ?? false,
+		...(sameContent ? {
+			server_updated_at: checkpoint,
+			local_updated_at: current.is_dirty ? current.local_updated_at : checkpoint,
+		} : {}),
+	};
+}
+
 export const CACHE_SAVE_WARNING =
 	'Saved to the server, but the offline cache could not be updated. Offline copies may be out of date.';
 
@@ -59,7 +82,7 @@ export const CACHE_SAVE_WARNING =
  */
 export async function cacheSavedNote(
 	openCache: () => Promise<IDBDatabase | null>,
-	field: ContentField,
+	field: ContentField | 'private',
 	updated: SavedContent,
 	isLatestRequest: () => boolean,
 	tags: CachedNote['tags'] = [],
@@ -68,8 +91,12 @@ export async function cacheSavedNote(
 		const db = await openCache();
 		if (!db) return false;
 		try {
-			await updateCachedNote(db, updated.id, (current) =>
-				acknowledgeCachedSave(current, field, updated, isLatestRequest(), tags));
+			await updateCachedNote(db, updated.id, (current) => {
+				if (field === 'private') {
+					return isLatestRequest() ? acknowledgeCachedPrivacy(current, updated, tags) : current;
+				}
+				return acknowledgeCachedSave(current, field, updated, isLatestRequest(), tags);
+			});
 		} finally {
 			db.close();
 		}

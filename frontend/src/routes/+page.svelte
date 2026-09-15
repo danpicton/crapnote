@@ -31,6 +31,7 @@
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 	import { sortNotes, reorderPinned, nextPinOrder } from '$lib/noteOrder';
 	import { finishTitleDraft } from '$lib/titleDraft';
+	import { mergeCachedNote } from '$lib/noteMerge';
 	import { TitleCommits } from '$lib/titleCommits';
 	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, SaveRequests } from '$lib/noteSave';
 	import {
@@ -606,18 +607,7 @@
 		}
 		const merged: Note[] = serverNotes
 			.filter((n) => !hiddenIds.has(n.id))
-			.map((n) => {
-				const d = dirtyById.get(n.id);
-				if (!d) return n;
-				// The desired local state wins, falling back to the server's for
-				// anything the cache entry doesn't carry. pin_order matters
-				// here: a note pinned offline holds a client-assigned slot the
-				// server hasn't seen, and without it the note would sort by the
-				// server's stale 0 instead of at the top.
-				const flags = d.flags_dirty ? noteFlags(d, n) : {};
-				if (!d.is_dirty) return { ...n, ...flags };
-				return { ...n, ...flags, title: d.title, body: d.body, updated_at: d.local_updated_at };
-			});
+			.map((n) => mergeCachedNote(n, dirtyById.get(n.id)));
 
 		// Include offline-created notes (not yet on the server) — apply the
 		// same filters the server query applies so the list stays consistent.
@@ -1394,9 +1384,10 @@
 		if (!current || current.locked) return;
 		const updated = await api.notes.update(id, { private: !current.private });
 		invalidateList();
-		notes = notes.map((n) => n.id === id
-			? preservePendingTitle({ ...updated, title: n.title })
-			: n);
+		if (!await cacheSavedNote(openOwnedCache, 'private', updated, () => true)) {
+			offlineWriteError = CACHE_SAVE_WARNING;
+		}
+		notes = notes.map((n) => n.id === id ? { ...n, private: updated.private } : n);
 	}
 
 	/** Remove a note from the visible list after an archive/delete. */

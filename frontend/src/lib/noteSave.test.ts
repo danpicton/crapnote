@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
 import { openOfflineDB, upsertNote, updateCachedNote, getNote, deleteNote, type CachedNote } from './offlineDB';
-import { acknowledgeCachedSave, cacheSavedNote, latestTimestamp, SaveRequests } from './noteSave';
+import { acknowledgeCachedSave, acknowledgeCachedPrivacy, cacheSavedNote, latestTimestamp, SaveRequests } from './noteSave';
 
 const t0 = '2026-09-15T10:00:00.000000001Z';
 const t1 = '2026-09-15T10:00:00.000000002Z';
@@ -83,19 +83,50 @@ describe('content save acknowledgements', () => {
 	});
 });
 
+describe('explicit privacy acknowledgements', () => {
+	it.each([false, true])('persists private=%s while retaining all unrelated dirty state', (value) => {
+		const original = cached({ private: !value, body: 'Offline body', is_dirty: true,
+			flags_dirty: true, flags_toggled: { pinned: true }, pinned: true, pin_order: -3,
+			archived_offline: true, local_updated_at: t1 });
+		expect(acknowledgeCachedPrivacy(original, { ...response(), private: value })).toEqual({
+			...original, private: value,
+		});
+	});
+	it('advances only an accounted-for content baseline', () => {
+		expect(acknowledgeCachedPrivacy(cached({ private: true }), { ...response('Original'), private: false }))
+			.toEqual(cached({ private: false, server_updated_at: t2, local_updated_at: t2 }));
+	});
+	it('creates a missing cache row with the acknowledged privacy', () => {
+		expect(acknowledgeCachedPrivacy(null, { ...response(), private: true }))
+			.toMatchObject({ id: 1, private: true, title: 'Saved online', body: 'Body', is_dirty: false });
+	});
+	it('atomically preserves a concurrent offline edit during explicit clearing', async () => {
+		const db = await openOfflineDB();
+		try {
+			await upsertNote(db, cached({ private: true }));
+			await Promise.all([
+				updateCachedNote(db, 1, (current) => ({ ...current!, body: 'Offline body', is_dirty: true })),
+				cacheSavedNote(openOfflineDB, 'private', { ...response('Original'), private: false }, () => true),
+			]);
+			expect(await getNote(db, 1)).toMatchObject({ body: 'Offline body', is_dirty: true, private: false,
+				server_updated_at: t0 });
+		} finally { await deleteNote(db, 1); db.close(); }
+	});
+});
+
 describe('best-effort cache acknowledgement after server success', () => {
-	it('reports cache-open failure without rejecting the successful save', async () => {
-		await expect(cacheSavedNote(async () => { throw new Error('unavailable'); }, 'title', response(), () => true)).resolves.toBe(false);
+	it.each(['title', 'private'] as const)('reports cache-open failure without rejecting the successful %s save', async (field) => {
+		await expect(cacheSavedNote(async () => { throw new Error('unavailable'); }, field, response(), () => true)).resolves.toBe(false);
 	});
 
-	it('does not reject on transaction failure', async () => {
+	it.each(['title', 'private'] as const)('does not reject on %s transaction failure', async (field) => {
 		const db = await openOfflineDB();
 		db.close();
-		await expect(cacheSavedNote(async () => db, 'title', response(), () => true)).resolves.toBe(false);
+		await expect(cacheSavedNote(async () => db, field, response(), () => true)).resolves.toBe(false);
 	});
 
-	it('does not access a cache the ownership gate refused', async () => {
-		await expect(cacheSavedNote(async () => null, 'title', response(), () => true)).resolves.toBe(false);
+	it.each(['title', 'private'] as const)('does not access a cache the ownership gate refused for %s', async (field) => {
+		await expect(cacheSavedNote(async () => null, field, response(), () => true)).resolves.toBe(false);
 	});
 
 	it('still acknowledges a successful write using a real transaction', async () => {
