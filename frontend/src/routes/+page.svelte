@@ -6,7 +6,6 @@
 		toggleEmphasisCommand,
 		toggleInlineCodeCommand,
 		wrapInBlockquoteCommand,
-		wrapInBulletListCommand,
 		wrapInOrderedListCommand,
 		insertHrCommand,
 		createCodeBlockCommand,
@@ -17,6 +16,7 @@
 	import { toggleUnderlineCommand } from '$lib/milkdown/underline';
 	import { insertImageCommand } from '$lib/milkdown/image';
 	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
+	import { wrapSelectedInBulletListCommand } from '$lib/milkdown/listedit';
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, OfflineError, type Note, type Tag } from '$lib/api';
 	import { notePreviewSegments } from '$lib/notePreview';
@@ -1826,7 +1826,7 @@
 						<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code"><Code size={13} /></button>
 						<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={13} /></button>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(wrapInBulletListCommand.key)} title="Bullet list"><List size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(wrapSelectedInBulletListCommand.key)} title="Bullet list"><List size={13} /></button>
 						<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list"><ListOrdered size={13} /></button>
 						<button class="tb-btn" onclick={() => cmd(wrapInTaskListCommand.key)} title="Task list"><ListTodo size={13} /></button>
 						<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={13} /></button>

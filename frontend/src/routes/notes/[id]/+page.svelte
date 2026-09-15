@@ -7,7 +7,6 @@
 		toggleEmphasisCommand,
 		toggleInlineCodeCommand,
 		wrapInBlockquoteCommand,
-		wrapInBulletListCommand,
 		wrapInOrderedListCommand,
 		wrapInHeadingCommand,
 		insertHrCommand,
@@ -30,6 +29,7 @@
 		Star, Pin, Lock, LockOpen, Archive, Trash2, MoreHorizontal, RefreshCw, X,
 	} from 'lucide-svelte';
 	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
+	import { wrapSelectedInBulletListCommand } from '$lib/milkdown/listedit';
 	import { EMPTY_FORMATS, type ActiveFormats } from '$lib/milkdown/formatState';
 
 	const noteId = $derived(Number($page.params.id));
@@ -498,7 +498,7 @@
 		<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code"><Code size={14} /></button>
 		<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={14} /></button>
 		<span class="tb-sep"></span>
-		<button class="tb-btn" onclick={() => cmd(wrapInBulletListCommand.key)} title="Bullet list"><List size={14} /></button>
+		<button class="tb-btn" onclick={() => cmd(wrapSelectedInBulletListCommand.key)} title="Bullet list"><List size={14} /></button>
 		<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list"><ListOrdered size={14} /></button>
 		<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={14} /></button>
 		<span class="tb-sep"></span>
@@ -650,7 +650,7 @@
 			<button class="mob-tb-btn" onclick={openLinkDialog} aria-label="Insert link"><Link size={20} /></button>
 			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.blockquote} onclick={() => cmd(wrapInBlockquoteCommand.key)} aria-label="Quote"><Quote size={20} /></button>
 			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.inlineCode} onclick={() => cmd(toggleInlineCodeCommand.key)} aria-label="Inline code"><Code size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.bulletList} onclick={() => cmd(wrapInBulletListCommand.key)} aria-label="Bullet list"><List size={20} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.bulletList} onclick={() => cmd(wrapSelectedInBulletListCommand.key)} aria-label="Bullet list"><List size={20} /></button>
 			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.orderedList} onclick={() => cmd(wrapInOrderedListCommand.key)} aria-label="Ordered list"><ListOrdered size={20} /></button>
 			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.taskList} onclick={() => cmd(wrapInTaskListCommand.key)} aria-label="Checklist"><ListTodo size={20} /></button>
 			<button class="mob-tb-btn" onclick={() => cmd(insertHrCommand.key)} aria-label="Horizontal rule"><Minus size={20} /></button>

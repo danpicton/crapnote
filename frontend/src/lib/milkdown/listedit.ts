@@ -1,4 +1,7 @@
-import { $prose as prosePlugin } from '@milkdown/kit/utils';
+import { $command, $prose as prosePlugin } from '@milkdown/kit/utils';
+import { bulletListSchema } from '@milkdown/kit/preset/commonmark';
+import { wrapInList } from '@milkdown/kit/prose/schema-list';
+import type { NodeType } from '@milkdown/kit/prose/model';
 import { Plugin, Selection, type EditorState, type Transaction } from '@milkdown/kit/prose/state';
 
 /**
@@ -12,6 +15,21 @@ import { Plugin, Selection, type EditorState, type Transaction } from '@milkdown
  */
 
 const LIST_TYPES = new Set(['bullet_list', 'ordered_list']);
+
+/** Wraps every selected text block as its own list item. */
+export function wrapSelectedBlocksInList(
+	state: EditorState,
+	dispatch: ((tr: Transaction) => void) | undefined,
+	listType: NodeType
+): boolean {
+	return wrapInList(listType)(state, dispatch);
+}
+
+export const wrapSelectedInBulletListCommand = $command(
+	'WrapSelectedInBulletList',
+	(ctx) => () => (state, dispatch) =>
+		wrapSelectedBlocksInList(state, dispatch, bulletListSchema.type(ctx))
+);
 
 /**
  * Removes the empty textblock the caret is in when the next sibling is a list.
@@ -80,4 +98,4 @@ export const listEditKeymap = prosePlugin(
 		})
 );
 
-export const listEditPlugin = [listEditKeymap];
+export const listEditPlugin = [wrapSelectedInBulletListCommand, listEditKeymap];
