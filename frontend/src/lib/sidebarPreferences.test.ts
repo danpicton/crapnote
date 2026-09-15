@@ -8,4 +8,10 @@ describe('sidebar preferences', () => {
 			width: 376,
 		});
 	});
+
+	it('falls back when saved preferences are malformed or invalid', () => {
+		for (const raw of ['not json', '{"hidden":"yes","width":376}', '{"hidden":true,"width":"wide"}', '{"hidden":true,"width":1e999}']) {
+			expect(parseSidebarPreferences(raw)).toEqual({ hidden: false, width: 300 });
+		}
+	});
 });

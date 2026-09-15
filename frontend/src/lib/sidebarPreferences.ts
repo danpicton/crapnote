@@ -16,6 +16,7 @@ export function parseSidebarPreferences(raw: string | null): SidebarPreferences 
 			typeof value === 'object' && value !== null
 			&& typeof (value as Record<string, unknown>).hidden === 'boolean'
 			&& typeof (value as Record<string, unknown>).width === 'number'
+			&& Number.isFinite((value as Record<string, unknown>).width)
 		) {
 			return value as SidebarPreferences;
 		}
