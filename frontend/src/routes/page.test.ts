@@ -1038,6 +1038,25 @@ describe('Offline mode', () => {
 	});
 });
 
+describe('Title drafts', () => {
+	beforeEach(() => mockViewport(false));
+
+	it('keeps a cleared focused title as a draft past the body autosave delay', async () => {
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Untitled' }));
+		render(Page);
+		const title = await waitFor(() => screen.getByPlaceholderText(/note title/i));
+
+		vi.useFakeTimers();
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: '' } });
+		await vi.advanceTimersByTimeAsync(1000);
+
+		expect((title as HTMLInputElement).value).toBe('');
+		expect(api.notes.update).not.toHaveBeenCalled();
+		vi.useRealTimers();
+	});
+});
+
 describe('Note locking', () => {
 	// Earlier blocks stub a mobile viewport globally; the lock control lives in
 	// the desktop editor toolbar.

@@ -30,6 +30,7 @@
 	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 	import { sortNotes, reorderPinned, nextPinOrder } from '$lib/noteOrder';
+	import { finishTitleDraft } from '$lib/titleDraft';
 	import {
 		dropIndexFromY,
 		findScrollParent,
@@ -78,6 +79,7 @@
 	let search = $state('');
 	let saving = $state(false);
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
+	let titleDraft = $state<{ noteId: number; savedTitle: string; value: string } | null>(null);
 	// Helpers for detecting mobile viewport
 	function isMobile() { return window.matchMedia('(max-width: 640px)').matches; }
 
@@ -1116,6 +1118,23 @@
 		allTags = await api.tags.list();
 	}
 
+	function beginTitleDraft(note: Note) {
+		if (note.locked) return;
+		titleDraft = { noteId: note.id, savedTitle: note.title, value: note.title };
+	}
+
+	function updateTitleDraft(value: string) {
+		if (titleDraft) titleDraft = { ...titleDraft, value };
+	}
+
+	function commitTitleDraft() {
+		const draft = titleDraft;
+		if (!draft) return;
+		titleDraft = null;
+		const result = finishTitleDraft(draft.savedTitle, draft.value);
+		if (result.commit) scheduleAutoSave('title', result.title);
+	}
+
 	function scheduleAutoSave(field: 'title' | 'body', value: string) {
 		if (!selectedId) return;
 		if (selectedNote?.locked) return;
@@ -1865,8 +1884,10 @@
 							bind:this={titleInput}
 							class="title-input"
 							type="text"
-						value={selectedNote.title}
-							oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
+						value={titleDraft?.noteId === selectedNote.id ? titleDraft.value : selectedNote.title}
+							onfocus={() => beginTitleDraft(selectedNote)}
+							oninput={(e) => updateTitleDraft((e.target as HTMLInputElement).value)}
+							onblur={commitTitleDraft}
 							placeholder="Note title"
 							readonly={selectedNote.locked}
 						/>
