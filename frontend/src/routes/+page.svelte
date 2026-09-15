@@ -2699,12 +2699,11 @@
 	/* ─── Editor header (title) ─────────────────────────── */
 	.editor-header {
 		border-bottom: 1px solid var(--border);
+		padding: 1.25rem 2rem 0.625rem;
 		flex-shrink: 0;
 	}
 	.editor-header-inner {
-		padding: 1.25rem 2rem 0.625rem;
-		max-width: 760px;
-		box-sizing: border-box;
+		max-width: min(1100px, 100%);
 	}
 
 	.title-input {
@@ -2719,6 +2718,11 @@
 		padding: 0;
 		background: transparent;
 		color: var(--text);
+	}
+	.title-input:not(:focus) {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.title-input::placeholder { color: var(--text-4); }
 
