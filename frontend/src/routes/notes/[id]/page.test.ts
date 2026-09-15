@@ -56,7 +56,7 @@ vi.mock('$app/stores', async () => {
 	};
 });
 
-vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
+vi.mock('$app/navigation', () => ({ goto: vi.fn(), beforeNavigate: vi.fn() }));
 
 vi.mock('$lib/api', () => {
 	class ApiError extends Error {
@@ -116,7 +116,7 @@ import { api } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
 import { openOwnedOfflineDB, requireOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 import { auth } from '$lib/stores/auth.svelte';
-import { goto } from '$app/navigation';
+import { beforeNavigate, goto } from '$app/navigation';
 
 const mockNote = (overrides = {}) => ({
 	id: 42, title: 'My Note', body: '# Hello',
@@ -238,6 +238,20 @@ describe('/notes/[id] page', () => {
 		resolveFirst(mockNote({ title: 'First edit' }));
 		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Second edit' }));
 		expect((title as HTMLInputElement).value).toBe('Second edit');
+	});
+
+	it('commits a focused title draft before browser-back navigation', async () => {
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Saved on back' }));
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved on back' } });
+
+		expect(beforeNavigate).toHaveBeenCalled();
+		const navigationHook = vi.mocked(beforeNavigate).mock.calls[0][0];
+		navigationHook({ type: 'popstate' } as Parameters<typeof navigationHook>[0]);
+
+		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Saved on back' });
 	});
 
 	it('saves a title draft before locking the note', async () => {

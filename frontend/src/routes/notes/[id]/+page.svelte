@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { beforeNavigate, goto } from '$app/navigation';
 	import { page } from '$app/stores';
 	import {
 		toggleStrongCommand,
@@ -61,6 +61,10 @@
 	let offlineWriteError = $state<string | null>(null);
 	let activeFormats = $state<ActiveFormats>({ ...EMPTY_FORMATS });
 
+	beforeNavigate(() => {
+		void commitTitleDraft();
+	});
+
 	/**
 	 * Offline fallback shared by the star/pin/lock toggles: apply the toggle
 	 * optimistically and record the desired state in IndexedDB so sync
@@ -88,7 +92,8 @@
 	async function mobToggleStar() {
 		if (!note) return;
 		try {
-			note = await api.notes.toggleStar(noteId);
+			const updated = await api.notes.toggleStar(noteId);
+			note = note ? { ...updated, title: note.title } : updated;
 		} catch (err) {
 			await toggleFlagOffline(err, 'starred');
 		}
@@ -97,7 +102,8 @@
 	async function mobTogglePin() {
 		if (!note) return;
 		try {
-			note = await api.notes.togglePin(noteId);
+			const updated = await api.notes.togglePin(noteId);
+			note = note ? { ...updated, title: note.title } : updated;
 		} catch (err) {
 			await toggleFlagOffline(err, 'pinned');
 		}
@@ -109,7 +115,8 @@
 		await commitTitleDraft();
 		await titleSaveQueue;
 		try {
-			note = await api.notes.toggleLock(noteId);
+			const updated = await api.notes.toggleLock(noteId);
+			note = note ? { ...updated, title: note.title } : updated;
 		} catch (err) {
 			await toggleFlagOffline(err, 'locked');
 		}

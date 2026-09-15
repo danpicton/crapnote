@@ -1088,6 +1088,33 @@ describe('Title drafts', () => {
 		vi.useRealTimers();
 	});
 
+	it('saves a title blurred while offline sync is rekeying the note', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([{
+			id: -1, title: 'Offline title', body: '', starred: false, pinned: false, tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
+			is_dirty: true, is_new: true,
+		}]);
+		let resolveSync!: (result: typeof emptySyncResult) => void;
+		vi.mocked(syncOfflineChanges).mockReturnValue(new Promise((resolve) => { resolveSync = resolve; }));
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ id: 7, title: 'Draft during sync' }));
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Offline title'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Draft during sync' } });
+
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([]);
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ id: 7, title: 'Offline title' })]);
+		window.dispatchEvent(new Event('online'));
+		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalled());
+		await fireEvent.blur(title);
+
+		expect(api.notes.update).not.toHaveBeenCalled();
+		resolveSync({ ...emptySyncResult, mappings: [{ tempId: -1, serverId: 7 }] });
+		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(7, { title: 'Draft during sync' }));
+	});
+
 	it('keeps the active draft when sync remaps an offline note ID', async () => {
 		vi.stubGlobal('navigator', { ...navigator, onLine: false });
 		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([{
@@ -1113,6 +1140,53 @@ describe('Title drafts', () => {
 		await waitFor(() => expect((title as HTMLInputElement).value).toBe('Draft after sync'));
 		await fireEvent.blur(title);
 		expect(api.notes.update).toHaveBeenCalledWith(7, { title: 'Draft after sync' });
+	});
+
+	it('ignores a stale list response that finishes after a title save', async () => {
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([{
+			id: 1, title: 'Test Note', body: 'Hello world', starred: false, pinned: false, tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z',
+			is_dirty: false, is_new: false,
+		}]);
+		let resolveList!: (notes: ReturnType<typeof mockNote>[]) => void;
+		vi.mocked(api.notes.list).mockReturnValue(new Promise((resolve) => { resolveList = resolve; }));
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		render(Page);
+		const cachedTitle = await waitFor(() => screen.getByText('Test Note'));
+		await fireEvent.click(cachedTitle.closest('.note-btn')!);
+		const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved title' } });
+		await fireEvent.blur(title);
+
+		resolveTitle(mockNote({ title: 'Saved title' }));
+		await waitFor(() => expect(screen.queryByText('Saving…')).not.toBeInTheDocument());
+		await Promise.resolve();
+		resolveList([mockNote({ title: 'Test Note' })]);
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(screen.queryByDisplayValue('Test Note')).not.toBeInTheDocument();
+		expect(screen.getByDisplayValue('Saved title')).toBeInTheDocument();
+	});
+
+	it('keeps a pending title visible when a stale action response arrives', async () => {
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		vi.mocked(api.notes.toggleStar).mockResolvedValue(mockNote({ title: 'Test Note', starred: true }));
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Pending title' } });
+		await fireEvent.blur(title);
+
+		const starButtons = screen.getAllByTitle('Star');
+		await fireEvent.click(starButtons[starButtons.length - 1]);
+		await waitFor(() => expect(screen.getAllByTitle('Unstar').length).toBeGreaterThan(0));
+
+		expect((title as HTMLInputElement).value).toBe('Pending title');
+		resolveTitle(mockNote({ title: 'Pending title', starred: true }));
+		await waitFor(() => expect((title as HTMLInputElement).value).toBe('Pending title'));
 	});
 
 	it('serializes repeated title commits so the newest title wins', async () => {
