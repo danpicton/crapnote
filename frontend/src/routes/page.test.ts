@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Page from './+page.svelte';
 import { shortcuts } from '$lib/stores/shortcuts.svelte';
+import { noteBodyTextSize } from '$lib/stores/noteBodyTextSize.svelte';
 
 // Stub all heavy Milkdown imports — they use browser APIs that hang in jsdom
 vi.mock('@milkdown/kit/preset/commonmark', () => ({
@@ -177,6 +178,7 @@ const mockNote = (overrides = {}) => ({
 beforeEach(() => {
 	vi.clearAllMocks();
 	localStorage.clear();
+	noteBodyTextSize.set('medium');
 	vi.mocked(api.notes.list).mockResolvedValue([mockNote()]);
 	vi.mocked(api.tags.list).mockResolvedValue([]);
 });
@@ -378,6 +380,23 @@ describe('Notes page', () => {
 		render(Page);
 		await waitFor(() => screen.getByText('Test Note'));
 		await waitFor(() => expect(screen.getByRole('toolbar', { name: /formatting/i })).toBeInTheDocument());
+	});
+
+	it('offers the four named body text sizes and updates the shared display preference', async () => {
+		render(Page);
+		const select = await screen.findByRole('combobox', { name: 'Text size' }) as HTMLSelectElement;
+
+		expect(Array.from(select.options).map(({ text, value }) => ({ text, value }))).toEqual([
+			{ text: 'Small', value: 'small' },
+			{ text: 'Medium', value: 'medium' },
+			{ text: 'Large', value: 'large' },
+			{ text: 'X-large', value: 'x-large' },
+		]);
+		expect(select.value).toBe('medium');
+		expect(await fireEvent.mouseDown(select)).toBe(true);
+		await fireEvent.change(select, { target: { value: 'large' } });
+		expect(noteBodyTextSize.current).toBe('large');
+		expect(api.notes.update).not.toHaveBeenCalled();
 	});
 });
 

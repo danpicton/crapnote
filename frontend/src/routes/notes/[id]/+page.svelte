@@ -18,6 +18,7 @@
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, OfflineError, type Note, type Tag } from '$lib/api';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
+	import NoteBodyTextSizeSelect from '$lib/components/NoteBodyTextSizeSelect.svelte';
 	import { getNote as getOfflineNote, updateCachedNote, noteFlags } from '$lib/offlineDB';
 	import { openOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -562,6 +563,7 @@
 			{#if note.locked}<Lock size={14} />{:else}<LockOpen size={14} />{/if}
 		</button>
 		<span class="tb-spacer"></span>
+		<NoteBodyTextSizeSelect />
 		<span class="save-status">{saving ? 'Saving…' : ''}</span>
 	</div>
 

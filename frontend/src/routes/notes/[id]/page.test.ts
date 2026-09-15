@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import NotePage from './+page.svelte';
+import { noteBodyTextSize } from '$lib/stores/noteBodyTextSize.svelte';
 
 vi.mock('@milkdown/kit/preset/commonmark', () => ({
 	toggleStrongCommand: { key: 'ToggleStrong' },
@@ -144,6 +145,7 @@ const SAVED_AT = new Date(Date.parse(FAKE_NOW) + DEBOUNCE_MS).toISOString();
 beforeEach(() => {
 	routeState.params.id = '42';
 	vi.clearAllMocks();
+	noteBodyTextSize.set('medium');
 	// clearAllMocks() clears calls but KEEPS implementations, and the Vitest
 	// config sets no mockReset. Without this an api.notes.update rejection
 	// configured by one test leaks into every later test in the file.
@@ -439,6 +441,19 @@ describe('/notes/[id] page', () => {
 		await waitFor(() =>
 			expect(screen.getAllByRole('toolbar', { name: /formatting/i }).length).toBeGreaterThan(0)
 		);
+	});
+
+	it('offers the four named body text sizes in the desktop toolbar without editing the note', async () => {
+		render(NotePage);
+		const select = await screen.findByRole('combobox', { name: 'Text size' }) as HTMLSelectElement;
+
+		expect(Array.from(select.options).map((option) => option.text)).toEqual([
+			'Small', 'Medium', 'Large', 'X-large',
+		]);
+		expect(select.value).toBe('medium');
+		await fireEvent.change(select, { target: { value: 'x-large' } });
+		expect(noteBodyTextSize.current).toBe('x-large');
+		expect(api.notes.update).not.toHaveBeenCalled();
 	});
 
 	it('shows existing tags as checkboxes in the popover when opened', async () => {
