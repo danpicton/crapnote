@@ -502,17 +502,23 @@ func (r *Repo) Unarchive(ctx context.Context, id, userID int64) error {
 }
 
 // ListArchived returns archived, non-trashed notes for a user ordered by
-// updated_at DESC. limit <= 0 disables pagination.
-func (r *Repo) ListArchived(ctx context.Context, userID int64, limit, offset int) ([]*Note, error) {
+// updated_at DESC, optionally filtered with the same full-text search as List.
+// limit <= 0 disables pagination.
+func (r *Repo) ListArchived(ctx context.Context, userID int64, search string, limit, offset int) ([]*Note, error) {
 	query := `
 		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,
 		       n.pin_order, n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.user_id = ?
 		  AND n.archived = 1
-		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)
-		ORDER BY n.updated_at DESC`
+		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)`
 	args := []any{userID}
+	if search != "" {
+		escaped := strings.ReplaceAll(search, `"`, `""`)
+		query += ` AND n.id IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?)`
+		args = append(args, `"`+escaped+`"*`)
+	}
+	query += ` ORDER BY n.updated_at DESC`
 	if limit > 0 {
 		query += ` LIMIT ? OFFSET ?`
 		args = append(args, limit, offset)

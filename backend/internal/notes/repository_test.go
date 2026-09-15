@@ -115,7 +115,7 @@ func TestNoteRepo_List_FilterStarred(t *testing.T) {
 	ctx := context.Background()
 
 	n1, _ := repo.Create(ctx, userID, "A", "")
-	repo.Create(ctx, userID, "B", "") //nolint:errcheck
+	repo.Create(ctx, userID, "B", "")         //nolint:errcheck
 	repo.SetStarred(ctx, n1.ID, userID, true) //nolint:errcheck
 
 	starred := true
@@ -188,7 +188,7 @@ func TestNoteRepo_Update_ArchivedNoteDoesNotWrite(t *testing.T) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 
-	archived, err := repo.ListArchived(ctx, userID, 0, 0)
+	archived, err := repo.ListArchived(ctx, userID, "", 0, 0)
 	if err != nil {
 		t.Fatalf("ListArchived: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestNoteRepo_Archive(t *testing.T) {
 	}
 
 	// But it must appear in ListArchived.
-	archived, err := repo.ListArchived(ctx, userID, 0, 0)
+	archived, err := repo.ListArchived(ctx, userID, "", 0, 0)
 	if err != nil {
 		t.Fatalf("ListArchived: %v", err)
 	}
@@ -381,6 +381,35 @@ func TestNoteRepo_Unarchive(t *testing.T) {
 	}
 }
 
+func TestNoteRepo_ListArchived_SearchesTitleAndBody(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	ctx := context.Background()
+
+	titleMatch, _ := repo.Create(ctx, userID, "Archived elephant", "unrelated")
+	bodyMatch, _ := repo.Create(ctx, userID, "Archived body", "contains elephantine detail")
+	activeMatch, _ := repo.Create(ctx, userID, "Active elephant", "")
+	trashedMatch, _ := repo.Create(ctx, userID, "Trashed elephant", "")
+	for _, note := range []*notes.Note{titleMatch, bodyMatch, trashedMatch} {
+		repo.Archive(ctx, note.ID, userID) //nolint:errcheck
+	}
+	repo.SoftDelete(ctx, trashedMatch.ID, userID) //nolint:errcheck
+
+	results, err := repo.ListArchived(ctx, userID, "eleph", 0, 0)
+	if err != nil {
+		t.Fatalf("ListArchived search: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected title and body matches only, got %+v", results)
+	}
+	for _, result := range results {
+		if result.ID == activeMatch.ID || result.ID == trashedMatch.ID {
+			t.Fatalf("search leaked note outside archive: %+v", result)
+		}
+	}
+}
+
 func TestNoteRepo_ListArchived_ExcludesTrashed(t *testing.T) {
 	database := openTestDB(t)
 	userID := seedUser(t, database)
@@ -388,10 +417,10 @@ func TestNoteRepo_ListArchived_ExcludesTrashed(t *testing.T) {
 	ctx := context.Background()
 
 	note, _ := repo.Create(ctx, userID, "Both", "")
-	repo.Archive(ctx, note.ID, userID)  //nolint:errcheck
+	repo.Archive(ctx, note.ID, userID)    //nolint:errcheck
 	repo.SoftDelete(ctx, note.ID, userID) //nolint:errcheck
 
-	archived, _ := repo.ListArchived(ctx, userID, 0, 0)
+	archived, _ := repo.ListArchived(ctx, userID, "", 0, 0)
 	for _, n := range archived {
 		if n.ID == note.ID {
 			t.Fatal("trashed+archived note should not appear in ListArchived")
@@ -405,8 +434,8 @@ func TestNoteRepo_List_PrefixSearch(t *testing.T) {
 	repo := notes.NewRepo(database)
 	ctx := context.Background()
 
-	repo.Create(ctx, userID, "Elephants are large", "big body text")  //nolint:errcheck
-	repo.Create(ctx, userID, "Nothing matches", "other content")       //nolint:errcheck
+	repo.Create(ctx, userID, "Elephants are large", "big body text") //nolint:errcheck
+	repo.Create(ctx, userID, "Nothing matches", "other content")     //nolint:errcheck
 
 	// Typing the first few characters of "Elephants" should match the first note.
 	results, err := repo.List(ctx, userID, notes.ListFilter{Search: "Eleph"})
