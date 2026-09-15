@@ -33,9 +33,9 @@ cli/
 | Command | Endpoint |
 |---|---|
 | `notes list [--starred] [--tag ID] [--limit N] [--offset N]` | `GET /api/notes` |
-| `notes create --title T [--body B \| --body-file F \| -]` | `POST /api/notes` |
+| `notes create --title T [--body B \| --body-file F \| -] [--private]` | `POST /api/notes` |
 | `notes get ID` | `GET /api/notes/{id}` |
-| `notes update ID [--title T] [--body B \| --body-file F]` | `PUT /api/notes/{id}` |
+| `notes update ID [--title T] [--body B \| --body-file F] [--private=true\|false]` | `PUT /api/notes/{id}` |
 | `notes delete ID` (moves to trash) | `DELETE /api/notes/{id}` |
 | `notes star ID` / `notes pin ID` (toggles) | `PATCH /api/notes/{id}/star` / `…/pin` |
 | `notes archive ID` / `notes unarchive ID` | `PATCH /api/notes/{id}/archive` / `…/unarchive` |

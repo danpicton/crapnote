@@ -287,7 +287,7 @@
       "scope": "write",
       "admin_only": false,
       "cookie_only": false,
-      "description": "Create a note (markdown body).",
+      "description": "Create a note (markdown body). Privacy defaults to false when omitted.",
       "params": [
         {
           "name": "title",
@@ -302,6 +302,13 @@
           "type": "string",
           "required": false,
           "description": "Markdown body, max 500k chars."
+        },
+        {
+          "name": "private",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Whether to hide the note from MCP; omitted defaults to false."
         }
       ],
       "request": "json",
@@ -334,7 +341,7 @@
       "scope": "write",
       "admin_only": false,
       "cookie_only": false,
-      "description": "Update a note's title and/or body. Omitted fields are left unchanged. Fails with 423 if the note is locked.",
+      "description": "Update a note's title, body, and/or privacy. Omitted fields are left unchanged. Fails with 423 if the note is locked.",
       "params": [
         {
           "name": "id",
@@ -356,6 +363,13 @@
           "type": "string",
           "required": false,
           "description": "New markdown body, max 500k chars."
+        },
+        {
+          "name": "private",
+          "in": "body",
+          "type": "boolean",
+          "required": false,
+          "description": "Explicitly set or clear privacy; omitted preserves the current value."
         }
       ],
       "request": "json",

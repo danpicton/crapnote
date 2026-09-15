@@ -244,10 +244,11 @@ func Registry() []Operation {
 		},
 		{
 			Name: "notes_create", Method: "POST", Path: "/api/notes", Scope: ScopeWrite,
-			Description: "Create a note (markdown body).",
+			Description: "Create a note (markdown body). Privacy defaults to false when omitted.",
 			Params: []Param{
 				{Name: "title", In: InBody, Type: TypeString, Required: true, Description: "Title, max 500 chars."},
 				{Name: "body", In: InBody, Type: TypeString, Description: "Markdown body, max 500k chars."},
+				{Name: "private", In: InBody, Type: TypeBoolean, Description: "Whether to hide the note from MCP; omitted defaults to false."},
 			},
 		},
 		{
@@ -257,11 +258,12 @@ func Registry() []Operation {
 		},
 		{
 			Name: "notes_update", Method: "PUT", Path: "/api/notes/{id}", Scope: ScopeWrite,
-			Description: "Update a note's title and/or body. Omitted fields are left unchanged. Fails with 423 if the note is locked.",
+			Description: "Update a note's title, body, and/or privacy. Omitted fields are left unchanged. Fails with 423 if the note is locked.",
 			Params: []Param{
 				noteID(),
 				{Name: "title", In: InBody, Type: TypeString, Description: "New title, max 500 chars."},
 				{Name: "body", In: InBody, Type: TypeString, Description: "New markdown body, max 500k chars."},
+				{Name: "private", In: InBody, Type: TypeBoolean, Description: "Explicitly set or clear privacy; omitted preserves the current value."},
 			},
 		},
 		{

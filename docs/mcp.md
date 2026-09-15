@@ -35,6 +35,8 @@ claude mcp add --transport http crapnote https://notes.example.com/mcp \
 
 ## What it exposes
 
+Private notes are an explicit exception to the otherwise bearer-reachable API surface. A note marked `private` is invisible to MCP: it is omitted from lists, search, archive, trash, tag counts/associations, and exports; direct reads and every direct or bulk mutation return no note data; and images referenced only by private notes cannot be fetched. MCP cannot set or clear privacy. The same bearer token used directly against REST (including through the CLI) can still read and change its owner's private notes under the normal scope rules. This boundary protects MCP context only—it cannot prevent a REST or CLI client from independently sending note data to an LLM. Public-link sharing is a separate boundary: private notes cannot be shared publicly, and making a shared note private revokes its link.
+
 One tool per bearer-reachable API operation — notes CRUD, star/pin/lock,
 pin reordering, archive, tags, note–tag associations, trash, export
 (base64 ZIP), image upload/fetch, `auth_me`, and token list/revoke. Tool
@@ -64,8 +66,7 @@ behaviour. Its tool list is generated from the apispec registry
 request through the server's own mux, carrying the caller's already-verified
 identity on the request context (the token itself is verified once, at
 `/mcp`). Token scopes, cookie-only gates, and validation are all applied by
-the same middleware and handlers the REST API uses — the MCP surface
-*cannot* permit anything the API does not. The replay also passes through
+the same middleware and handlers the REST API uses. Replayed calls carry a trusted internal MCP-origin marker so repositories apply the additional private-note boundary without restricting direct bearer REST calls. The replay also passes through
 the metrics and access-log middleware, so a note created over MCP is
 recorded as `POST /api/notes` like any other request.
 
