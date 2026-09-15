@@ -332,6 +332,15 @@ describe('Mobile navigation', () => {
 		mockViewport(true); // mobile for every test in this block
 	});
 
+	it('keeps the mobile note list usable when the desktop sidebar is hidden', async () => {
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: true, width: 420 }));
+		render(Page);
+
+		await waitFor(() => expect(screen.getByText('Test Note')).toBeInTheDocument());
+		expect(screen.queryByRole('button', { name: /sidebar/i })).not.toBeInTheDocument();
+		expect(screen.queryByRole('separator', { name: /sidebar/i })).not.toBeInTheDocument();
+	});
+
 	it('clicking a note navigates to /notes/[id] on mobile', async () => {
 		const { goto } = await import('$app/navigation');
 		render(Page);
