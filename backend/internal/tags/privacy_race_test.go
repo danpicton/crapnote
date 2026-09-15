@@ -55,12 +55,13 @@ func TestTagRepo_MutationRechecksCommittedPrivacy(t *testing.T) {
 				}
 				privateID := noteID
 				wantCount := 0
-				if operation == "remove" {
+				switch operation {
+				case "remove":
 					if err := repo.AddToNote(ctx, noteID, tag.ID, userID); err != nil {
 						t.Fatal(err)
 					}
 					wantCount = 1
-				} else if operation == "add tag becoming private-only" {
+				case "add tag becoming private-only":
 					privateID = seedNote(t, database, userID, "other note with tag")
 					if err := repo.AddToNote(ctx, privateID, tag.ID, userID); err != nil {
 						t.Fatal(err)
