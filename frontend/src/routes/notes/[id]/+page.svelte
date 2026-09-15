@@ -689,11 +689,11 @@
 					<button class="mob-footer-tag" onclick={() => (showTagSheet = true)}>{tag.name}</button>
 				{/each}
 				<button class="mob-footer-tag-btn" onclick={() => (showTagSheet = true)} aria-label="Manage tags">
-					<TagIcon size={14} aria-hidden="true" />
+					<TagIcon size={20} aria-hidden="true" />
 					{#if noteTags.length === 0}<span class="mob-footer-tag-label">tag</span>{/if}
 				</button>
 				<button class="mob-footer-action-btn" onclick={() => (showActionSheet = true)} aria-label="Note actions">
-					<MoreHorizontal size={18} aria-hidden="true" />
+					<MoreHorizontal size={22} aria-hidden="true" />
 				</button>
 			</div>
 		</div>
@@ -714,18 +714,18 @@
 					</div>
 				{/if}
 			</div>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.strong} onclick={() => cmd(toggleStrongCommand.key)} aria-label="Bold"><Bold size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.emphasis} onclick={() => cmd(toggleEmphasisCommand.key)} aria-label="Italic"><Italic size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.underline} onclick={() => cmd(toggleUnderlineCommand.key)} aria-label="Underline"><Underline size={20} /></button>
-			<button class="mob-tb-btn" onclick={openLinkDialog} aria-label="Insert link"><Link size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.blockquote} onclick={() => cmd(wrapInBlockquoteCommand.key)} aria-label="Quote"><Quote size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.inlineCode} onclick={() => cmd(toggleInlineCodeCommand.key)} aria-label="Inline code"><Code size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.bulletList} onclick={() => cmd(wrapSelectedInBulletListCommand.key)} aria-label="Bullet list"><List size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.orderedList} onclick={() => cmd(wrapInOrderedListCommand.key)} aria-label="Ordered list"><ListOrdered size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.taskList} onclick={() => cmd(wrapInTaskListCommand.key)} aria-label="Checklist"><ListTodo size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(insertHrCommand.key)} aria-label="Horizontal rule"><Minus size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(undoCommand.key)} aria-label="Undo"><Undo2 size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(redoCommand.key)} aria-label="Redo"><Redo2 size={20} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.strong} onclick={() => cmd(toggleStrongCommand.key)} aria-label="Bold"><Bold size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.emphasis} onclick={() => cmd(toggleEmphasisCommand.key)} aria-label="Italic"><Italic size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.underline} onclick={() => cmd(toggleUnderlineCommand.key)} aria-label="Underline"><Underline size={22} /></button>
+			<button class="mob-tb-btn" onclick={openLinkDialog} aria-label="Insert link"><Link size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.blockquote} onclick={() => cmd(wrapInBlockquoteCommand.key)} aria-label="Quote"><Quote size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.inlineCode} onclick={() => cmd(toggleInlineCodeCommand.key)} aria-label="Inline code"><Code size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.bulletList} onclick={() => cmd(wrapSelectedInBulletListCommand.key)} aria-label="Bullet list"><List size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.orderedList} onclick={() => cmd(wrapInOrderedListCommand.key)} aria-label="Ordered list"><ListOrdered size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.taskList} onclick={() => cmd(wrapInTaskListCommand.key)} aria-label="Checklist"><ListTodo size={22} /></button>
+			<button class="mob-tb-btn" onclick={() => cmd(insertHrCommand.key)} aria-label="Horizontal rule"><Minus size={22} /></button>
+			<button class="mob-tb-btn" onclick={() => cmd(undoCommand.key)} aria-label="Undo"><Undo2 size={22} /></button>
+			<button class="mob-tb-btn" onclick={() => cmd(redoCommand.key)} aria-label="Redo"><Redo2 size={22} /></button>
 		</div>
 	</div>
 
@@ -1209,7 +1209,7 @@
 			color: var(--text-3);
 			letter-spacing: 0.2px;
 			padding: 0 4px 0 12px;
-			min-height: 36px;
+			min-height: 44px;
 			border-top: 1px solid var(--border);
 			background: var(--bg-alt);
 			flex-shrink: 0;
@@ -1233,11 +1233,18 @@
 			display: flex;
 			align-items: center;
 			gap: 2px;
-			flex-shrink: 0;
+			flex: 1 1 auto;
+			min-width: 0;
+			overflow-x: auto;
+			scrollbar-width: none;
 		}
+		.mob-footer-right::-webkit-scrollbar { display: none; }
 		.mob-footer-tag {
 			display: inline-flex;
 			align-items: center;
+			justify-content: center;
+			min-width: 44px;
+			min-height: 44px;
 			padding: 4px 8px;
 			background: var(--accent-lt);
 			color: var(--accent);
@@ -1251,13 +1258,15 @@
 			max-width: 72px;
 			overflow: hidden;
 			text-overflow: ellipsis;
+			flex-shrink: 0;
 		}
 		.mob-footer-tag-btn {
 			display: flex;
 			align-items: center;
 			gap: 3px;
-			width: 36px;
+			width: 44px;
 			height: 44px;
+			flex-shrink: 0;
 			justify-content: center;
 			background: none;
 			border: none;
@@ -1275,6 +1284,7 @@
 			justify-content: center;
 			width: 44px;
 			height: 44px;
+			flex-shrink: 0;
 			background: none;
 			border: none;
 			cursor: pointer;
@@ -1299,6 +1309,7 @@
 		.mob-toolbar-scroll {
 			display: flex;
 			align-items: center;
+			gap: 2px;
 			overflow-x: auto;
 			scrollbar-width: none;
 			padding: 0 4px;
@@ -1307,8 +1318,8 @@
 
 		.mob-tb-wrap { position: relative; display: inline-flex; }
 		.mob-tb-btn {
-			width: 42px;
-			height: 42px;
+			width: 44px;
+			height: 44px;
 			flex-shrink: 0;
 			display: flex;
 			align-items: center;
@@ -1320,7 +1331,7 @@
 			color: var(--text-2);
 			font-family: var(--serif);
 			font-weight: 700;
-			font-size: 15px;
+			font-size: 17px;
 		}
 		.mob-tb-btn:hover { background: var(--bg-hover); }
 		/* Pronounced active state: accent icon on a tinted pill */

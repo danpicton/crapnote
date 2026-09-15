@@ -1957,23 +1957,23 @@
 		>
 			<span class="mob-sync-dot" aria-hidden="true"></span>
 			{#if mobileSyncState === 'synced'}
-				<CheckCircle2 size={13} aria-hidden="true" />
+				<CheckCircle2 size={18} aria-hidden="true" />
 				<span>SYNCED</span>
 				<span class="mob-sync-spacer"></span>
 				{#if lastSyncAt}<span class="mob-sync-time">just now</span>{/if}
 			{:else if mobileSyncState === 'syncing'}
-				<RefreshCw size={13} class="mob-spin" aria-hidden="true" />
+				<RefreshCw size={18} class="mob-spin" aria-hidden="true" />
 				<span>SYNCING…</span>
 			{:else if mobileSyncState === 'pending'}
-				<CloudUpload size={13} aria-hidden="true" />
+				<CloudUpload size={18} aria-hidden="true" />
 				<span>NOT SYNCED</span>
 				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
 			{:else if mobileSyncState === 'offline-pending'}
-				<WifiOff size={13} aria-hidden="true" />
+				<WifiOff size={18} aria-hidden="true" />
 				<span>OFFLINE · UNSYNCED</span>
 				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
 			{:else}
-				<WifiOff size={13} aria-hidden="true" />
+				<WifiOff size={18} aria-hidden="true" />
 				<span>OFFLINE</span>
 				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
 			{/if}
@@ -3414,8 +3414,8 @@
 		.mob-sync-row {
 			display: flex;
 			align-items: center;
-			gap: 5px;
-			height: 28px;
+			gap: 7px;
+			min-height: 44px;
 			padding: 0 18px;
 			border-top: 1px solid var(--border);
 			font-family: var(--sans);
