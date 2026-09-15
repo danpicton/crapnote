@@ -270,6 +270,23 @@ describe('Notes page', () => {
 		vi.unstubAllGlobals();
 	});
 
+	it('updates accessible resize bounds when the window grows', async () => {
+		vi.stubGlobal('innerWidth', 700);
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: false, width: 480 }));
+		render(Page);
+		const resize = await screen.findByRole('separator', { name: 'Resize sidebar' });
+		expect(resize).toHaveAttribute('aria-valuemax', '380');
+
+		vi.stubGlobal('innerWidth', 1024);
+		window.dispatchEvent(new Event('resize'));
+
+		await waitFor(() => {
+			expect(resize).toHaveAttribute('aria-valuenow', '480');
+			expect(resize).toHaveAttribute('aria-valuemax', '480');
+		});
+		vi.unstubAllGlobals();
+	});
+
 	it('renders preview links underlined and unbracketed', async () => {
 		vi.mocked(api.notes.list).mockResolvedValue([
 			mockNote({

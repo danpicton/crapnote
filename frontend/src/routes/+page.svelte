@@ -343,6 +343,7 @@
 	let showShortcutHelp = $state(false);
 	let sidebarHidden = $state(false);
 	let sidebarWidth = $state(300);
+	let sidebarMaxWidth = $state(480);
 	let sidebarPreferredWidth = 300;
 	let sidebarResizePointer = $state<number | null>(null);
 	let sidebarResizeStartX = 0;
@@ -906,8 +907,10 @@
 		const sidebarPreferences = loadSidebarPreferences();
 		sidebarHidden = sidebarPreferences.hidden;
 		sidebarPreferredWidth = sidebarPreferences.width;
+		sidebarMaxWidth = clampSidebarWidth(Number.POSITIVE_INFINITY, window.innerWidth);
 		sidebarWidth = clampSidebarWidth(sidebarPreferredWidth, window.innerWidth);
 		const handleWindowResize = () => {
+			sidebarMaxWidth = clampSidebarWidth(Number.POSITIVE_INFINITY, window.innerWidth);
 			sidebarWidth = clampSidebarWidth(sidebarPreferredWidth, window.innerWidth);
 		};
 
@@ -1991,7 +1994,7 @@
 			aria-label="Resize sidebar"
 			aria-orientation="vertical"
 			aria-valuemin="220"
-			aria-valuemax={clampSidebarWidth(Number.POSITIVE_INFINITY, typeof window === 'undefined' ? 1024 : window.innerWidth)}
+			aria-valuemax={sidebarMaxWidth}
 			aria-valuenow={sidebarWidth}
 			tabindex="0"
 			use:sidebarResize
