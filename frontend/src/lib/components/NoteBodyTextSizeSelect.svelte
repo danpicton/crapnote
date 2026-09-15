@@ -31,7 +31,7 @@
 	}
 
 	select {
-		min-height: 1.75rem;
+		min-height: 2rem;
 		border: 1px solid var(--border-md);
 		border-radius: 0.25rem;
 		padding: 0.15rem 1.5rem 0.15rem 0.35rem;
