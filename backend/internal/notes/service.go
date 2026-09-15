@@ -18,10 +18,15 @@ func NewService(repo *Repo) *Service {
 
 // Create creates a new note. If title is empty a default is generated.
 func (s *Service) Create(ctx context.Context, userID int64, title, body string) (*Note, error) {
+	return s.CreateWithPrivacy(ctx, userID, title, body, false)
+}
+
+// CreateWithPrivacy creates a note with the requested privacy state.
+func (s *Service) CreateWithPrivacy(ctx context.Context, userID int64, title, body string, private bool) (*Note, error) {
 	if title == "" {
 		title = defaultTitle(time.Now().UTC())
 	}
-	return s.repo.Create(ctx, userID, title, body)
+	return s.repo.CreateWithPrivacy(ctx, userID, title, body, private)
 }
 
 // defaultTitle returns the auto-generated title used when the caller supplies
@@ -50,11 +55,16 @@ func (s *Service) ListForExport(ctx context.Context, userID int64) ([]*Note, err
 // Returns ErrLocked if the note is locked — the repo's UPDATE enforces that in
 // the write itself, so there is no check-then-write gap to race.
 func (s *Service) Update(ctx context.Context, id, userID int64, title, body *string) (*Note, error) {
+	return s.UpdateWithPrivacy(ctx, id, userID, title, body, nil)
+}
+
+// UpdateWithPrivacy preserves every omitted field, including privacy.
+func (s *Service) UpdateWithPrivacy(ctx context.Context, id, userID int64, title, body *string, private *bool) (*Note, error) {
 	if title != nil && *title == "" {
 		t := defaultTitle(time.Now().UTC())
 		title = &t
 	}
-	return s.repo.Update(ctx, id, userID, title, body)
+	return s.repo.UpdateWithPrivacy(ctx, id, userID, title, body, private)
 }
 
 // Delete moves a note to the trash. Returns ErrLocked if the note is locked.

@@ -23,10 +23,15 @@ func NewRepo(database *db.DB) *Repo {
 
 // Create inserts a new note and returns it.
 func (r *Repo) Create(ctx context.Context, userID int64, title, body string) (*Note, error) {
+	return r.CreateWithPrivacy(ctx, userID, title, body, false)
+}
+
+// CreateWithPrivacy inserts the note and its privacy state atomically.
+func (r *Repo) CreateWithPrivacy(ctx context.Context, userID int64, title, body string, private bool) (*Note, error) {
 	now := time.Now().UTC()
 	res, err := r.db.ExecContext(ctx,
-		`INSERT INTO notes(user_id, title, body, created_at, updated_at) VALUES(?, ?, ?, ?, ?)`,
-		userID, title, body, now, now,
+		`INSERT INTO notes(user_id, title, body, private, created_at, updated_at) VALUES(?, ?, ?, ?, ?, ?)`,
+		userID, title, body, private, now, now,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create note: %w", err)
@@ -42,9 +47,9 @@ func (r *Repo) Create(ctx context.Context, userID int64, title, body string) (*N
 // Returns ErrNotFound if not found, trashed, archived, or owned by a different user.
 func (r *Repo) Get(ctx context.Context, id, userID int64) (*Note, error) {
 	n := &Note{}
-	var starred, pinned, archived, locked int
+	var starred, pinned, archived, locked, private int
 	err := r.db.QueryRowContext(ctx, `
-		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,
+		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked, n.private,
 		       n.pin_order, n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.id = ? AND n.user_id = ?
@@ -52,7 +57,7 @@ func (r *Repo) Get(ctx context.Context, id, userID int64) (*Note, error) {
 		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = n.id)
 	`, id, userID).Scan(
 		&n.ID, &n.UserID, &n.Title, &n.Body,
-		&starred, &pinned, &archived, &locked, &n.PinOrder, &n.CreatedAt, &n.UpdatedAt,
+		&starred, &pinned, &archived, &locked, &private, &n.PinOrder, &n.CreatedAt, &n.UpdatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -64,6 +69,7 @@ func (r *Repo) Get(ctx context.Context, id, userID int64) (*Note, error) {
 	n.Pinned = pinned != 0
 	n.Archived = archived != 0
 	n.Locked = locked != 0
+	n.Private = private != 0
 	return n, nil
 }
 
@@ -90,7 +96,7 @@ func (r *Repo) IsLocked(ctx context.Context, id, userID int64) (bool, error) {
 // updated_at DESC.
 func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*Note, error) {
 	query := `
-		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,
+		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked, n.private,
 		       n.pin_order, n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.user_id = ?
@@ -144,7 +150,7 @@ func (r *Repo) List(ctx context.Context, userID int64, filter ListFilter) ([]*No
 // duplicate a note between separate reads.
 func (r *Repo) ListForExport(ctx context.Context, userID int64) ([]*Note, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,
+		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked, n.private,
 		       n.pin_order, n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.user_id = ?
@@ -167,15 +173,21 @@ func (r *Repo) ListForExport(ctx context.Context, userID int64) ([]*Note, error)
 // preceding SELECT, so a concurrent SetLocked or AutoLockStale cannot slip in
 // between the check and the write.
 func (r *Repo) Update(ctx context.Context, id, userID int64, title, body *string) (*Note, error) {
+	return r.UpdateWithPrivacy(ctx, id, userID, title, body, nil)
+}
+
+// UpdateWithPrivacy performs an explicit partial update, preserving nil fields.
+func (r *Repo) UpdateWithPrivacy(ctx context.Context, id, userID int64, title, body *string, private *bool) (*Note, error) {
 	now := time.Now().UTC()
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE notes
 		SET title      = CASE WHEN ? IS NOT NULL THEN ? ELSE title END,
 		    body       = CASE WHEN ? IS NOT NULL THEN ? ELSE body  END,
+		    private    = CASE WHEN ? IS NOT NULL THEN ? ELSE private END,
 		    updated_at = ?
 		WHERE id = ? AND user_id = ? AND archived = 0 AND locked = 0
 		  AND NOT EXISTS (SELECT 1 FROM trash t WHERE t.note_id = notes.id)`,
-		title, title, body, body, now, id, userID,
+		title, title, body, body, private, private, now, id, userID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update note: %w", err)
@@ -204,10 +216,10 @@ func scanNotes(rows *sql.Rows) ([]*Note, error) {
 	var result []*Note
 	for rows.Next() {
 		n := &Note{}
-		var starred, pinned, archived, locked int
+		var starred, pinned, archived, locked, private int
 		if err := rows.Scan(
 			&n.ID, &n.UserID, &n.Title, &n.Body,
-			&starred, &pinned, &archived, &locked, &n.PinOrder, &n.CreatedAt, &n.UpdatedAt,
+			&starred, &pinned, &archived, &locked, &private, &n.PinOrder, &n.CreatedAt, &n.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -215,6 +227,7 @@ func scanNotes(rows *sql.Rows) ([]*Note, error) {
 		n.Pinned = pinned != 0
 		n.Archived = archived != 0
 		n.Locked = locked != 0
+		n.Private = private != 0
 		result = append(result, n)
 	}
 	return result, rows.Err()
@@ -506,7 +519,7 @@ func (r *Repo) Unarchive(ctx context.Context, id, userID int64) error {
 // limit <= 0 disables pagination.
 func (r *Repo) ListArchived(ctx context.Context, userID int64, search string, limit, offset int) ([]*Note, error) {
 	query := `
-		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked,
+		SELECT n.id, n.user_id, n.title, n.body, n.starred, n.pinned, n.archived, n.locked, n.private,
 		       n.pin_order, n.created_at, n.updated_at
 		FROM notes n
 		WHERE n.user_id = ?

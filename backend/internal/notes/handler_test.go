@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 
@@ -58,6 +59,44 @@ func TestNotesHandler_Create(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp) //nolint:errcheck
 	if resp["title"] != "Hello" {
 		t.Fatalf("unexpected title: %v", resp["title"])
+	}
+}
+
+func TestNotesHandler_CreateAndUpdatePrivacy(t *testing.T) {
+	h, user := newHandlerFixture(t)
+
+	create := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(`{"title":"Personal","body":"unchanged","private":true}`))
+	create = withUser(create, user)
+	createdRec := httptest.NewRecorder()
+	h.Create(createdRec, create)
+	if createdRec.Code != http.StatusCreated {
+		t.Fatalf("create status = %d: %s", createdRec.Code, createdRec.Body.String())
+	}
+	var created struct {
+		ID      int64 `json:"id"`
+		Private bool  `json:"private"`
+	}
+	if err := json.NewDecoder(createdRec.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if !created.Private {
+		t.Fatal("private create did not persist private=true")
+	}
+
+	update := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/notes/%d", created.ID), bytes.NewBufferString(`{"private":false}`))
+	update.SetPathValue("id", strconv.FormatInt(created.ID, 10))
+	update = withUser(update, user)
+	updatedRec := httptest.NewRecorder()
+	h.Update(updatedRec, update)
+	if updatedRec.Code != http.StatusOK {
+		t.Fatalf("update status = %d: %s", updatedRec.Code, updatedRec.Body.String())
+	}
+	var updated map[string]any
+	if err := json.NewDecoder(updatedRec.Body).Decode(&updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated["private"] != false || updated["title"] != "Personal" || updated["body"] != "unchanged" {
+		t.Fatalf("privacy-only update changed unexpected fields: %#v", updated)
 	}
 }
 
@@ -493,7 +532,7 @@ func TestNotesHandler_List_ClampsExcessiveLimit(t *testing.T) {
 
 	var resp []map[string]any
 	json.NewDecoder(w.Body).Decode(&resp) //nolint:errcheck
-	if len(resp) != 100 { // MaxPageSize from httpx
+	if len(resp) != 100 {                 // MaxPageSize from httpx
 		t.Fatalf("expected response clamped to 100, got %d", len(resp))
 	}
 }

@@ -76,8 +76,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Title string `json:"title"`
-		Body  string `json:"body"`
+		Title   string `json:"title"`
+		Body    string `json:"body"`
+		Private bool   `json:"private"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -92,7 +93,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note, err := h.svc.Create(r.Context(), u.ID, req.Title, req.Body)
+	note, err := h.svc.CreateWithPrivacy(r.Context(), u.ID, req.Title, req.Body, req.Private)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -143,8 +144,9 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Title *string `json:"title"`
-		Body  *string `json:"body"`
+		Title   *string `json:"title"`
+		Body    *string `json:"body"`
+		Private *bool   `json:"private"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -159,7 +161,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note, err := h.svc.Update(r.Context(), id, u.ID, req.Title, req.Body)
+	note, err := h.svc.UpdateWithPrivacy(r.Context(), id, u.ID, req.Title, req.Body, req.Private)
 	if errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "note not found")
 		return
@@ -363,6 +365,7 @@ type noteResponse struct {
 	Pinned    bool   `json:"pinned"`
 	Archived  bool   `json:"archived"`
 	Locked    bool   `json:"locked"`
+	Private   bool   `json:"private"`
 	PinOrder  int    `json:"pin_order"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
@@ -377,6 +380,7 @@ func noteToResponse(n *Note) noteResponse {
 		Pinned:    n.Pinned,
 		Archived:  n.Archived,
 		Locked:    n.Locked,
+		Private:   n.Private,
 		PinOrder:  n.PinOrder,
 		CreatedAt: n.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt: n.UpdatedAt.Format("2006-01-02T15:04:05Z"),

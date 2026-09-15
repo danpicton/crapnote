@@ -115,7 +115,7 @@ func TestNoteRepo_List_FilterStarred(t *testing.T) {
 	ctx := context.Background()
 
 	n1, _ := repo.Create(ctx, userID, "A", "")
-	repo.Create(ctx, userID, "B", "") //nolint:errcheck
+	repo.Create(ctx, userID, "B", "")         //nolint:errcheck
 	repo.SetStarred(ctx, n1.ID, userID, true) //nolint:errcheck
 
 	starred := true
@@ -417,7 +417,7 @@ func TestNoteRepo_ListArchived_ExcludesTrashed(t *testing.T) {
 	ctx := context.Background()
 
 	note, _ := repo.Create(ctx, userID, "Both", "")
-	repo.Archive(ctx, note.ID, userID)  //nolint:errcheck
+	repo.Archive(ctx, note.ID, userID)    //nolint:errcheck
 	repo.SoftDelete(ctx, note.ID, userID) //nolint:errcheck
 
 	archived, _ := repo.ListArchived(ctx, userID, "", 0, 0)
@@ -434,8 +434,8 @@ func TestNoteRepo_List_PrefixSearch(t *testing.T) {
 	repo := notes.NewRepo(database)
 	ctx := context.Background()
 
-	repo.Create(ctx, userID, "Elephants are large", "big body text")  //nolint:errcheck
-	repo.Create(ctx, userID, "Nothing matches", "other content")       //nolint:errcheck
+	repo.Create(ctx, userID, "Elephants are large", "big body text") //nolint:errcheck
+	repo.Create(ctx, userID, "Nothing matches", "other content")     //nolint:errcheck
 
 	// Typing the first few characters of "Elephants" should match the first note.
 	results, err := repo.List(ctx, userID, notes.ListFilter{Search: "Eleph"})

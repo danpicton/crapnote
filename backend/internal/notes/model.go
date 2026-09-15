@@ -25,6 +25,7 @@ type Note struct {
 	PinOrder  int
 	Archived  bool
 	Locked    bool
+	Private   bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
