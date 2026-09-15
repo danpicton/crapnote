@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -194,6 +195,79 @@ func TestMCP_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestMCP_PrivateNoteIsInvisibleAndImmutable(t *testing.T) {
+	mux, cookie := newAuthedMux(t)
+	token := createToken(t, mux, cookie, "read_write")
+
+	create := httptest.NewRequest(http.MethodPost, "/api/notes", strings.NewReader(`{"title":"secret-title","body":"secret-body","private":true}`))
+	create.Header.Set("Authorization", "Bearer "+token)
+	createdRec := httptest.NewRecorder()
+	mux.ServeHTTP(createdRec, create)
+	if createdRec.Code != http.StatusCreated {
+		t.Fatalf("direct private create = %d: %s", createdRec.Code, createdRec.Body.String())
+	}
+	var privateNote struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(createdRec.Body.Bytes(), &privateNote); err != nil {
+		t.Fatal(err)
+	}
+
+	var imageBody bytes.Buffer
+	mw := multipart.NewWriter(&imageBody)
+	part, _ := mw.CreateFormFile("image", "private.png")
+	_, _ = part.Write([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00"))
+	_ = mw.Close()
+	upload := httptest.NewRequest(http.MethodPost, "/api/images", &imageBody)
+	upload.Header.Set("Authorization", "Bearer "+token)
+	upload.Header.Set("Content-Type", mw.FormDataContentType())
+	uploadRec := httptest.NewRecorder()
+	mux.ServeHTTP(uploadRec, upload)
+	if uploadRec.Code != http.StatusCreated {
+		t.Fatalf("upload = %d: %s", uploadRec.Code, uploadRec.Body.String())
+	}
+	var uploaded struct {
+		URL string `json:"url"`
+	}
+	_ = json.Unmarshal(uploadRec.Body.Bytes(), &uploaded)
+	imageID := strings.TrimPrefix(uploaded.URL, "/api/images/")
+	attach := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/notes/%d", privateNote.ID), strings.NewReader(fmt.Sprintf(`{"body":%q}`, "![secret]("+uploaded.URL+")")))
+	attach.Header.Set("Authorization", "Bearer "+token)
+	attachRec := httptest.NewRecorder()
+	mux.ServeHTTP(attachRec, attach)
+	if attachRec.Code != http.StatusOK {
+		t.Fatalf("attach image = %d: %s", attachRec.Code, attachRec.Body.String())
+	}
+
+	for _, call := range []struct{ name, args string }{
+		{"notes_list", `{}`},
+		{"notes_list", `{"search":"secret-body"}`},
+		{"notes_get", fmt.Sprintf(`{"id":%d}`, privateNote.ID)},
+		{"notes_update", fmt.Sprintf(`{"id":%d,"private":false}`, privateNote.ID)},
+		{"notes_delete", fmt.Sprintf(`{"id":%d}`, privateNote.ID)},
+		{"notes_archive", fmt.Sprintf(`{"id":%d}`, privateNote.ID)},
+		{"images_get", fmt.Sprintf(`{"id":%q}`, imageID)},
+	} {
+		_, resp := mcpCall(t, mux, token, toolCallBody(call.name, call.args))
+		text, isErr := toolText(t, resp)
+		if call.name == "notes_list" {
+			if isErr || strings.Contains(text, "secret") || strings.Contains(text, fmt.Sprint(privateNote.ID)) {
+				t.Fatalf("%s leaked private note: %q (error=%v)", call.name, text, isErr)
+			}
+		} else if !isErr || strings.Contains(text, "secret") {
+			t.Fatalf("%s private access = %q (error=%v), want data-free error", call.name, text, isErr)
+		}
+	}
+
+	get := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/notes/%d", privateNote.ID), nil)
+	get.Header.Set("Authorization", "Bearer "+token)
+	gotRec := httptest.NewRecorder()
+	mux.ServeHTTP(gotRec, get)
+	if gotRec.Code != http.StatusOK || !strings.Contains(gotRec.Body.String(), "secret-title") || !strings.Contains(gotRec.Body.String(), `"private":true`) {
+		t.Fatalf("direct private get = %d: %s", gotRec.Code, gotRec.Body.String())
+	}
+}
+
 func TestMCP_ReadOnlyTokenCannotWrite(t *testing.T) {
 	mux, cookie := newAuthedMux(t)
 	token := createToken(t, mux, cookie, "read")
@@ -209,6 +283,14 @@ func TestMCP_ReadOnlyTokenCannotWrite(t *testing.T) {
 	text, isErr := toolText(t, resp)
 	if !isErr || !strings.Contains(text, "read-only") {
 		t.Fatalf("notes_create with read token = %q isErr=%v, want read-only refusal", text, isErr)
+	}
+
+	direct := httptest.NewRequest(http.MethodPut, "/api/notes/1", strings.NewReader(`{"private":true}`))
+	direct.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, direct)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("privacy update with read token = %d, want 403", rec.Code)
 	}
 }
 

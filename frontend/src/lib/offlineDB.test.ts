@@ -111,17 +111,18 @@ describe('offlineDB', () => {
 });
 
 describe('noteFlags', () => {
-	const full = { starred: true, pinned: true, locked: true, pin_order: -3 };
+	const full = { starred: true, pinned: true, locked: true, private: true, pin_order: -3 };
 
 	it('takes every field from the source', () => {
 		expect(noteFlags(full)).toEqual(full);
 	});
 
 	it('falls back per field for whatever the source omits', () => {
-		expect(noteFlags({ starred: true }, { pinned: true, locked: true, pin_order: -9 })).toEqual({
+		expect(noteFlags({ starred: true }, { pinned: true, locked: true, private: true, pin_order: -9 })).toEqual({
 			starred: true,
 			pinned: true,
 			locked: true,
+			private: true,
 			pin_order: -9,
 		});
 	});
@@ -138,6 +139,7 @@ describe('noteFlags', () => {
 			starred: false,
 			pinned: false,
 			locked: false,
+			private: false,
 			pin_order: 0,
 		});
 	});
@@ -147,6 +149,7 @@ describe('noteFlags', () => {
 			'locked',
 			'pin_order',
 			'pinned',
+			'private',
 			'starred',
 		]);
 	});

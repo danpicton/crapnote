@@ -1,6 +1,7 @@
 package notes
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/httpx"
+	"github.com/danpicton/crapnote/internal/requestctx"
 )
 
 const (
@@ -76,11 +78,21 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Title string `json:"title"`
-		Body  string `json:"body"`
+		Title   string          `json:"title"`
+		Body    string          `json:"body"`
+		Private json.RawMessage `json:"private"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	private, err := optionalBool(req.Private)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "private must be a boolean")
+		return
+	}
+	if private != nil && *private && requestctx.IsMCP(r.Context()) {
+		writeError(w, http.StatusNotFound, "note not found")
 		return
 	}
 	if len(req.Title) > maxTitleLen {
@@ -92,7 +104,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note, err := h.svc.Create(r.Context(), u.ID, req.Title, req.Body)
+	note, err := h.svc.CreateWithPrivacy(r.Context(), u.ID, req.Title, req.Body, private != nil && *private)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -143,11 +155,21 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Title *string `json:"title"`
-		Body  *string `json:"body"`
+		Title   *string         `json:"title"`
+		Body    *string         `json:"body"`
+		Private json.RawMessage `json:"private"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	private, err := optionalBool(req.Private)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "private must be a boolean")
+		return
+	}
+	if private != nil && requestctx.IsMCP(r.Context()) {
+		writeError(w, http.StatusNotFound, "note not found")
 		return
 	}
 	if req.Title != nil && len(*req.Title) > maxTitleLen {
@@ -159,7 +181,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note, err := h.svc.Update(r.Context(), id, u.ID, req.Title, req.Body)
+	note, err := h.svc.UpdateWithPrivacy(r.Context(), id, u.ID, req.Title, req.Body, private)
 	if errors.Is(err, ErrNotFound) {
 		writeError(w, http.StatusNotFound, "note not found")
 		return
@@ -341,6 +363,17 @@ func (h *Handler) toggleFlag(
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+func optionalBool(raw json.RawMessage) (*bool, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	var value bool
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, &value) != nil {
+		return nil, errors.New("not a boolean")
+	}
+	return &value, nil
+}
+
 func parseID(r *http.Request) (int64, error) {
 	return strconv.ParseInt(r.PathValue("id"), 10, 64)
 }
@@ -363,6 +396,7 @@ type noteResponse struct {
 	Pinned    bool   `json:"pinned"`
 	Archived  bool   `json:"archived"`
 	Locked    bool   `json:"locked"`
+	Private   bool   `json:"private"`
 	PinOrder  int    `json:"pin_order"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
@@ -377,6 +411,7 @@ func noteToResponse(n *Note) noteResponse {
 		Pinned:    n.Pinned,
 		Archived:  n.Archived,
 		Locked:    n.Locked,
+		Private:   n.Private,
 		PinOrder:  n.PinOrder,
 		CreatedAt: n.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		UpdatedAt: n.UpdatedAt.Format("2006-01-02T15:04:05Z"),

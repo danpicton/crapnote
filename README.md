@@ -241,7 +241,17 @@ header — bearer auth is checked first.
 ```bash
 CNP_TOKEN=cnp_xxx curl -H "Authorization: Bearer $CNP_TOKEN" \
   http://localhost:8080/api/notes
+
+# Create private atomically (omitting private defaults to false).
+curl -H "Authorization: Bearer $CNP_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"title":"Personal","body":"...","private":true}' http://localhost:8080/api/notes
+
+# Explicit, retry-safe set/clear; omitting private on update preserves its value.
+curl -X PUT -H "Authorization: Bearer $CNP_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"private":false}' http://localhost:8080/api/notes/7
 ```
+
+Note responses include `private`. It is a JSON boolean; non-boolean values are rejected.
 
 ### CLI
 
@@ -252,6 +262,8 @@ CGO):
 go install github.com/danpicton/crapnote/cli/cmd/crapnote@latest   # or: make build-cli
 export CNP_TOKEN=cnp_xxx           # CRAPNOTE_URL defaults to http://localhost:8080
 crapnote notes create --title "Idea" --body-file -   # body from stdin
+crapnote notes create --title "Personal" --private  # hidden from MCP
+crapnote notes update 7 --private=false              # explicit, retry-safe clear
 crapnote search "quarterly report" --json            # FTS5, agent-friendly output
 crapnote help                                        # command summary
 crapnote help notes                                  # details for one command
@@ -266,9 +278,7 @@ found). See `docs/cli-plan.md` for the full surface.
 
 The server has a built-in [MCP](https://modelcontextprotocol.io) endpoint at
 `POST /mcp` (Streamable HTTP, stateless) authenticated with the same bearer
-tokens. It exposes one tool per bearer-reachable API operation — token scopes
-and the cookie-only restrictions below apply identically, because every tool
-call is dispatched through the real API middleware:
+tokens. Private notes are omitted from every MCP read and protected from every MCP mutation, while direct REST/CLI access remains available under normal ownership and scope rules. This MCP-only boundary does not stop an API or CLI client from sending data elsewhere. Other token scopes and cookie-only restrictions apply identically because every tool call is dispatched through the real API middleware:
 
 ```bash
 claude mcp add --transport http crapnote http://localhost:8080/mcp \

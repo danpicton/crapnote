@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/danpicton/crapnote/internal/db"
+	"github.com/danpicton/crapnote/internal/requestctx"
 	"github.com/danpicton/crapnote/internal/tags"
 )
 
@@ -80,6 +81,44 @@ func TestTagRepo_List_NoteCount(t *testing.T) {
 	list, _ := repo.List(ctx, userID, 0, 0)
 	if list[0].NoteCount != 2 {
 		t.Fatalf("expected NoteCount=2, got %d", list[0].NoteCount)
+	}
+}
+
+func TestTagRepo_MCPDoesNotDiscloseOrMutatePrivateAssociations(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := tags.NewRepo(database)
+	ctx := context.Background()
+	publicTag, _ := repo.Create(ctx, userID, "public-tag")
+	secretTag, _ := repo.Create(ctx, userID, "secret-tag")
+	publicID := seedNote(t, database, userID, "public")
+	privateID := seedNote(t, database, userID, "private")
+	_, _ = database.Exec(`UPDATE notes SET private=1 WHERE id=?`, privateID)
+	_ = repo.AddToNote(ctx, publicID, publicTag.ID, userID)
+	_ = repo.AddToNote(ctx, privateID, secretTag.ID, userID)
+	mcpCtx := requestctx.WithMCP(ctx)
+
+	listed, err := repo.List(mcpCtx, userID, 0, 0)
+	if err != nil || len(listed) != 1 || listed[0].Name != "public-tag" || listed[0].NoteCount != 1 {
+		t.Fatalf("MCP tags list = %#v, %v", listed, err)
+	}
+	if got, err := repo.ListForNote(mcpCtx, privateID, userID); err != nil || len(got) != 0 {
+		t.Fatalf("MCP private note tags = %#v, %v", got, err)
+	}
+	if err := repo.AddToNote(mcpCtx, privateID, publicTag.ID, userID); err != tags.ErrNotFound {
+		t.Fatalf("MCP add tag to private note = %v", err)
+	}
+	if err := repo.AddToNote(mcpCtx, publicID, secretTag.ID, userID); err != tags.ErrNotFound {
+		t.Fatalf("MCP add private-only tag to public note = %v", err)
+	}
+	if err := repo.RemoveFromNote(mcpCtx, privateID, secretTag.ID, userID); err != tags.ErrNotFound {
+		t.Fatalf("MCP remove tag from private note = %v", err)
+	}
+	if _, err := repo.Rename(mcpCtx, secretTag.ID, userID, "leaked"); err != tags.ErrNotFound {
+		t.Fatalf("MCP rename private-only tag = %v", err)
+	}
+	if err := repo.Delete(mcpCtx, secretTag.ID, userID); err != tags.ErrNotFound {
+		t.Fatalf("MCP delete private-only tag = %v", err)
 	}
 }
 
@@ -180,6 +219,70 @@ func TestTagRepo_AddRemoveFromNote(t *testing.T) {
 	list, _ = repo.ListForNote(ctx, noteID, userID)
 	if len(list) != 0 {
 		t.Fatal("expected 0 tags after remove")
+	}
+}
+
+func TestTagRepo_AssociationMutationsRemainIdempotent(t *testing.T) {
+	for _, origin := range []string{"REST", "MCP"} {
+		t.Run(origin, func(t *testing.T) {
+			database := openTestDB(t)
+			userID := seedUser(t, database)
+			noteID := seedNote(t, database, userID, "Note")
+			repo := tags.NewRepo(database)
+			ctx := context.Background()
+			if origin == "MCP" {
+				ctx = requestctx.WithMCP(ctx)
+			}
+			tag, err := repo.Create(ctx, userID, "label")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if err := repo.AddToNote(ctx, noteID, tag.ID, userID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			list, err := repo.ListForNote(ctx, noteID, userID)
+			if err != nil || len(list) != 1 {
+				t.Fatalf("repeated add: %v, %v", list, err)
+			}
+			for range 2 {
+				if err := repo.RemoveFromNote(ctx, noteID, tag.ID, userID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			list, err = repo.ListForNote(ctx, noteID, userID)
+			if err != nil || len(list) != 0 {
+				t.Fatalf("repeated remove: %v, %v", list, err)
+			}
+			// Missing/inaccessible notes aren't successful no-op removals.
+			if err := repo.RemoveFromNote(ctx, noteID, tag.ID, userID+999); err != tags.ErrNotFound {
+				t.Fatalf("foreign note removal: %v", err)
+			}
+			if err := repo.RemoveFromNote(ctx, noteID+999, tag.ID, userID); err != tags.ErrNotFound {
+				t.Fatalf("missing note removal: %v", err)
+			}
+			if err := repo.AddToNote(ctx, noteID, tag.ID+999, userID); err != tags.ErrNotFound {
+				t.Fatalf("missing tag addition: %v", err)
+			}
+
+			// The tag, not just the target note, must belong to this user.
+			res, err := database.Exec(`INSERT INTO users(username,password_hash) VALUES('other','h')`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			otherID, err := res.LastInsertId()
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreignTag, err := repo.Create(context.Background(), otherID, "foreign")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := repo.AddToNote(ctx, noteID, foreignTag.ID, userID); err != tags.ErrNotFound {
+				t.Fatalf("foreign tag addition: %v", err)
+			}
+		})
 	}
 }
 

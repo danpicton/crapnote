@@ -7,6 +7,7 @@ import (
 
 	"github.com/danpicton/crapnote/internal/db"
 	"github.com/danpicton/crapnote/internal/notes"
+	"github.com/danpicton/crapnote/internal/requestctx"
 )
 
 func strPtr(s string) *string { return &s }
@@ -67,6 +68,40 @@ func TestNoteRepo_CreateAndGet(t *testing.T) {
 	}
 }
 
+func TestNoteRepo_MCPContextHidesAndProtectsPrivateNotes(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	repo := notes.NewRepo(database)
+	public, _ := repo.Create(context.Background(), userID, "Public", "visible")
+	private, _ := repo.CreateWithPrivacy(context.Background(), userID, "Secret", "hidden", true)
+	ctx := requestctx.WithMCP(context.Background())
+
+	listed, err := repo.List(ctx, userID, notes.ListFilter{})
+	if err != nil || len(listed) != 1 || listed[0].ID != public.ID {
+		t.Fatalf("MCP list = %#v, %v", listed, err)
+	}
+	exported, err := repo.ListForExport(ctx, userID)
+	if err != nil || len(exported) != 1 || exported[0].ID != public.ID {
+		t.Fatalf("MCP export list = %#v, %v", exported, err)
+	}
+	if _, err := repo.Get(ctx, private.ID, userID); err != notes.ErrNotFound {
+		t.Fatalf("MCP private get error = %v, want ErrNotFound", err)
+	}
+	if _, err := repo.UpdateWithPrivacy(ctx, private.ID, userID, strPtr("leaked"), nil, nil); err != notes.ErrNotFound {
+		t.Fatalf("MCP private update error = %v, want ErrNotFound", err)
+	}
+	if err := repo.SoftDelete(ctx, private.ID, userID); err != notes.ErrNotFound {
+		t.Fatalf("MCP private delete error = %v, want ErrNotFound", err)
+	}
+	if err := repo.Archive(ctx, private.ID, userID); err != notes.ErrNotFound {
+		t.Fatalf("MCP private archive error = %v, want ErrNotFound", err)
+	}
+	got, err := repo.Get(context.Background(), private.ID, userID)
+	if err != nil || got.Title != "Secret" || !got.Private {
+		t.Fatalf("direct private get = %#v, %v", got, err)
+	}
+}
+
 func TestNoteRepo_Get_WrongUser(t *testing.T) {
 	database := openTestDB(t)
 	userID := seedUser(t, database)
@@ -115,7 +150,7 @@ func TestNoteRepo_List_FilterStarred(t *testing.T) {
 	ctx := context.Background()
 
 	n1, _ := repo.Create(ctx, userID, "A", "")
-	repo.Create(ctx, userID, "B", "") //nolint:errcheck
+	repo.Create(ctx, userID, "B", "")         //nolint:errcheck
 	repo.SetStarred(ctx, n1.ID, userID, true) //nolint:errcheck
 
 	starred := true
@@ -417,7 +452,7 @@ func TestNoteRepo_ListArchived_ExcludesTrashed(t *testing.T) {
 	ctx := context.Background()
 
 	note, _ := repo.Create(ctx, userID, "Both", "")
-	repo.Archive(ctx, note.ID, userID)  //nolint:errcheck
+	repo.Archive(ctx, note.ID, userID)    //nolint:errcheck
 	repo.SoftDelete(ctx, note.ID, userID) //nolint:errcheck
 
 	archived, _ := repo.ListArchived(ctx, userID, "", 0, 0)
@@ -434,8 +469,8 @@ func TestNoteRepo_List_PrefixSearch(t *testing.T) {
 	repo := notes.NewRepo(database)
 	ctx := context.Background()
 
-	repo.Create(ctx, userID, "Elephants are large", "big body text")  //nolint:errcheck
-	repo.Create(ctx, userID, "Nothing matches", "other content")       //nolint:errcheck
+	repo.Create(ctx, userID, "Elephants are large", "big body text") //nolint:errcheck
+	repo.Create(ctx, userID, "Nothing matches", "other content")     //nolint:errcheck
 
 	// Typing the first few characters of "Elephants" should match the first note.
 	results, err := repo.List(ctx, userID, notes.ListFilter{Search: "Eleph"})

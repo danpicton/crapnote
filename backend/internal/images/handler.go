@@ -6,12 +6,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/ratelimit"
+	"github.com/danpicton/crapnote/internal/requestctx"
 )
 
 const maxImageSize = 10 << 20 // 10 MB
@@ -74,9 +77,85 @@ func FetchByIDs(ctx context.Context, db *sql.DB, userID int64, ids []string) (ma
 		if err != nil {
 			return nil, fmt.Errorf("fetch image %s: %w", id, err)
 		}
+		allowed, err := mcpImageAllowed(ctx, db, userID, id)
+		if err != nil {
+			return nil, fmt.Errorf("authorize image %s: %w", id, err)
+		}
+		if !allowed {
+			continue
+		}
 		out[id] = Data{MimeType: mime, Bytes: data}
 	}
 	return out, nil
+}
+
+// mcpImageAllowed requires a public reference and denies any image identity
+// mentioned by a private note. Deliberately match the opaque ID, not the URL:
+// browsers resolve relative URLs, dot segments and repeated slashes, and a
+// canonical-path test would let an MCP-created carrier launder private bytes.
+// This conservative check may also deny an ID mentioned as plain text. It is
+// shared by image serving and export; direct REST access is unaffected.
+func mcpImageAllowed(ctx context.Context, db *sql.DB, userID int64, id string) (bool, error) {
+	if !requestctx.IsMCP(ctx) {
+		return true, nil
+	}
+
+	rows, err := db.QueryContext(ctx, `SELECT body, private FROM notes WHERE user_id=?`, userID)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	publicReference := false
+	for rows.Next() {
+		var body string
+		var private bool
+		if err := rows.Scan(&body, &private); err != nil {
+			return false, err
+		}
+		body = normalizeImageReferenceText(body)
+		if !strings.Contains(body, id) {
+			continue
+		}
+		if private {
+			return false, nil
+		}
+		publicReference = true
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return publicReference, nil
+}
+
+var imageReferenceIgnorables = strings.NewReplacer("\\", "", "\t", "", "\r", "", "\n", "")
+
+// normalizeImageReferenceText is deliberately conservative rather than a
+// Markdown parser. Decode HTML first, then remove Markdown escapes and the
+// ASCII tab/newline characters stripped by WHATWG URL parsing. Removal must
+// precede percent decoding: even an escape such as %2&#9;d becomes %2d in a
+// browser. Also strip decoded controls to fail closed on ambiguous references.
+func normalizeImageReferenceText(body string) string {
+	body = imageReferenceIgnorables.Replace(html.UnescapeString(body))
+	return imageReferenceIgnorables.Replace(decodePercentEscapes(body))
+}
+
+// decodePercentEscapes decodes valid URL escapes without letting an unrelated
+// malformed percent sign elsewhere in Markdown suppress reference detection.
+func decodePercentEscapes(value string) string {
+	var decoded strings.Builder
+	decoded.Grow(len(value))
+	for i := 0; i < len(value); i++ {
+		if value[i] == '%' && i+2 < len(value) {
+			if b, err := strconv.ParseUint(value[i+1:i+3], 16, 8); err == nil {
+				decoded.WriteByte(byte(b))
+				i += 2
+				continue
+			}
+		}
+		decoded.WriteByte(value[i])
+	}
+	return decoded.String()
 }
 
 // Handler holds HTTP handlers for image upload and serving.
@@ -222,6 +301,15 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 
 	// Users can only access their own images.
 	if userID != u.ID {
+		http.NotFound(w, r)
+		return
+	}
+	allowed, err := mcpImageAllowed(r.Context(), h.db, u.ID, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if !allowed {
 		http.NotFound(w, r)
 		return
 	}

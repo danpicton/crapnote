@@ -320,7 +320,9 @@ async function runReplayPhases(db: IDBDatabase, note: CachedNote, result: SyncRe
  * carried by the create itself, so is_dirty clears.
  */
 async function syncNewNote(db: IDBDatabase, note: CachedNote, result: SyncResult): Promise<CachedNote> {
-	const serverNote = await api.notes.create(note.title, note.body);
+	const serverNote = note.private
+		? await api.notes.create(note.title, note.body, true)
+		: await api.notes.create(note.title, note.body);
 	await deleteNote(db, note.id);
 	const entry: CachedNote = {
 		...note,
@@ -399,6 +401,9 @@ async function reconcileFlagsCheckpoint(
 		// The server owns these now — in particular pin_order, where a note
 		// pinned offline carries only the client's guess (nextPinOrder).
 		...noteFlags(current, note),
+		// Privacy belongs to pending content, not just the latest flag response.
+		// Persist the stricter value across failed content pushes and retries.
+		...(note.is_dirty ? { private: !!(note.private || current.private) } : {}),
 		...(lockDeferred ? { locked: true } : {}),
 		flags_dirty: lockDeferred,
 		flags_toggled: lockDeferred ? { locked: true } : undefined,
@@ -441,9 +446,28 @@ async function pushContentCheckpoint(
 		throw err;
 	}
 
+	// A privacy change made on either side applies to both conflict copies.
+	// In particular, an older public cache must never republish content after
+	// another device has made the original note private.
+	const conflictPrivate = !!(note.private || serverNote.private);
+	const createConflict = async (title: string, body: string) => {
+		if (conflictPrivate) {
+			await api.notes.create(title, body, true);
+		} else {
+			await api.notes.create(title, body);
+		}
+	};
+
+	// The original note can receive private offline content too, not just the
+	// conflict copy. Never clear server privacy as a side effect of content sync.
+	const pushLocalContent = () => api.notes.update(note.id, {
+		title: note.title, body: note.body,
+		...(conflictPrivate ? { private: true } : {}),
+	});
+
 	/** Accept the server's version, preserving the local edit as a conflict note. */
 	const preserveLocalAsConflict = async (): Promise<CachedNote> => {
-		await api.notes.create(`[sync conflict] ${note.title}`, note.body);
+		await createConflict(`[sync conflict] ${note.title}`, note.body);
 		const entry: CachedNote = {
 			...note,
 			title: serverNote.title,
@@ -461,7 +485,7 @@ async function pushContentCheckpoint(
 		// No server-side change since we last synced — our version wins cleanly
 		let updated;
 		try {
-			updated = await api.notes.update(note.id, { title: note.title, body: note.body });
+			updated = await pushLocalContent();
 		} catch (err) {
 			if (!isLockedServerSide(err)) throw err;
 			result.locked++;
@@ -471,6 +495,7 @@ async function pushContentCheckpoint(
 			...note,
 			title: updated.title,
 			body: updated.body,
+			private: updated.private ?? conflictPrivate,
 			server_updated_at: updated.updated_at,
 			local_updated_at: updated.updated_at,
 			is_dirty: false,
@@ -490,10 +515,10 @@ async function pushContentCheckpoint(
 
 	if (localWins) {
 		// Preserve the server's version as the conflict note, then push local.
-		await api.notes.create(`[sync conflict] ${serverNote.title}`, serverNote.body);
+		await createConflict(`[sync conflict] ${serverNote.title}`, serverNote.body);
 		let updated;
 		try {
-			updated = await api.notes.update(note.id, { title: note.title, body: note.body });
+			updated = await pushLocalContent();
 		} catch (err) {
 			if (!isLockedServerSide(err)) throw err;
 			// Locked server-side — the local edit can't win after all. Keep
@@ -506,6 +531,7 @@ async function pushContentCheckpoint(
 			...note,
 			title: updated.title,
 			body: updated.body,
+			private: updated.private ?? conflictPrivate,
 			server_updated_at: updated.updated_at,
 			local_updated_at: updated.updated_at,
 			is_dirty: false,

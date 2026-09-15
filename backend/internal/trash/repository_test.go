@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/danpicton/crapnote/internal/db"
+	"github.com/danpicton/crapnote/internal/requestctx"
 	"github.com/danpicton/crapnote/internal/trash"
 )
 
@@ -65,6 +66,37 @@ func TestTrashRepo_List(t *testing.T) {
 	}
 	if e.PermanentDeleteAt.IsZero() {
 		t.Fatal("PermanentDeleteAt must be set")
+	}
+}
+
+func TestTrashRepo_MCPHidesAndProtectsPrivateEntries(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	publicID := seedNote(t, database, userID, "public")
+	privateID := seedNote(t, database, userID, "secret")
+	_, _ = database.Exec(`UPDATE notes SET private=1 WHERE id=?`, privateID)
+	trashNote(t, database, publicID, userID)
+	trashNote(t, database, privateID, userID)
+	repo := trash.NewRepo(database)
+	ctx := requestctx.WithMCP(context.Background())
+
+	entries, err := repo.List(ctx, userID, "", 0, 0)
+	if err != nil || len(entries) != 1 || entries[0].NoteID != publicID {
+		t.Fatalf("MCP trash list = %#v, %v", entries, err)
+	}
+	if err := repo.Restore(ctx, privateID, userID); err != trash.ErrNotFound {
+		t.Fatalf("MCP private restore = %v", err)
+	}
+	if err := repo.DeleteOne(ctx, privateID, userID); err != trash.ErrNotFound {
+		t.Fatalf("MCP private purge = %v", err)
+	}
+	if err := repo.Empty(ctx, userID); err != nil {
+		t.Fatal(err)
+	}
+	var privateCount int
+	_ = database.QueryRow(`SELECT COUNT(*) FROM notes WHERE id=?`, privateID).Scan(&privateCount)
+	if privateCount != 1 {
+		t.Fatal("MCP empty trash deleted private note")
 	}
 }
 

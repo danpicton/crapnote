@@ -35,6 +35,12 @@ claude mcp add --transport http crapnote https://notes.example.com/mcp \
 
 ## What it exposes
 
+Private notes are an explicit exception to the otherwise bearer-reachable API surface. A note marked `private` is invisible to MCP: it is omitted from lists, search, archive, trash, tag counts/associations, and exports; direct reads and every direct or bulk mutation return no note data; and images referenced only by private notes cannot be fetched. MCP cannot set or clear privacy. The same bearer token used directly against REST (including through the CLI) can still read and change its owner's private notes under the normal scope rules. This boundary protects MCP context only—it cannot prevent a REST or CLI client from independently sending note data to an LLM. Public-link sharing is a separate boundary tracked in #172: that integration must refuse private notes and revoke existing links when privacy is enabled, including through REST/CLI. It is not implemented by this MCP boundary.
+
+Offline conflict recovery retains the stricter privacy observed locally or on the server, including across queued flag changes and failed retries. Both conflict copies and private content written back to the original are protected; sync never implicitly clears privacy. Queued star/pin/lock changes cannot override server privacy in the UI. An explicit privacy change on either editor updates the local cache as well as the server, without discarding unsynced content, so later offline replay honors an intentional clear. Duplicating a private note creates a private copy atomically.
+
+Image authorization is conservative: an image ID mentioned in a private note is withheld from MCP fetches and exports, even if a public note also references it (or the private mention is plain text). URL escapes, relative paths and dot segments cannot bypass this check. Direct REST image access is unchanged.
+
 One tool per bearer-reachable API operation — notes CRUD, star/pin/lock,
 pin reordering, archive, tags, note–tag associations, trash, export
 (base64 ZIP), image upload/fetch, `auth_me`, and token list/revoke. Tool
@@ -64,8 +70,7 @@ behaviour. Its tool list is generated from the apispec registry
 request through the server's own mux, carrying the caller's already-verified
 identity on the request context (the token itself is verified once, at
 `/mcp`). Token scopes, cookie-only gates, and validation are all applied by
-the same middleware and handlers the REST API uses — the MCP surface
-*cannot* permit anything the API does not. The replay also passes through
+the same middleware and handlers the REST API uses. Replayed calls carry a trusted internal MCP-origin marker so repositories apply the additional private-note boundary without restricting direct bearer REST calls. The replay also passes through
 the metrics and access-log middleware, so a note created over MCP is
 recorded as `POST /api/notes` like any other request.
 

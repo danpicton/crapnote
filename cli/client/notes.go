@@ -10,10 +10,20 @@ import (
 
 // CreateNote creates a note and returns the server's representation.
 func (c *Client) CreateNote(ctx context.Context, title, body string) (*Note, error) {
+	return c.createNote(ctx, title, body, nil)
+}
+
+// CreateNoteWithPrivacy creates a note with an explicit privacy value.
+func (c *Client) CreateNoteWithPrivacy(ctx context.Context, title, body string, private bool) (*Note, error) {
+	return c.createNote(ctx, title, body, &private)
+}
+
+func (c *Client) createNote(ctx context.Context, title, body string, private *bool) (*Note, error) {
 	req := struct {
-		Title string `json:"title"`
-		Body  string `json:"body"`
-	}{title, body}
+		Title   string `json:"title"`
+		Body    string `json:"body"`
+		Private *bool  `json:"private,omitempty"`
+	}{title, body, private}
 	var n Note
 	if err := c.do(ctx, http.MethodPost, "/api/notes", nil, req, &n); err != nil {
 		return nil, err
@@ -33,10 +43,16 @@ func (c *Client) GetNote(ctx context.Context, id int64) (*Note, error) {
 // UpdateNote updates a note's title and/or body. Nil fields are omitted from
 // the request and left unchanged by the server.
 func (c *Client) UpdateNote(ctx context.Context, id int64, title, body *string) (*Note, error) {
+	return c.UpdateNoteWithPrivacy(ctx, id, title, body, nil)
+}
+
+// UpdateNoteWithPrivacy updates provided fields and omits nil fields.
+func (c *Client) UpdateNoteWithPrivacy(ctx context.Context, id int64, title, body *string, private *bool) (*Note, error) {
 	req := struct {
-		Title *string `json:"title,omitempty"`
-		Body  *string `json:"body,omitempty"`
-	}{title, body}
+		Title   *string `json:"title,omitempty"`
+		Body    *string `json:"body,omitempty"`
+		Private *bool   `json:"private,omitempty"`
+	}{title, body, private}
 	var n Note
 	if err := c.do(ctx, http.MethodPut, notePath(id), nil, req, &n); err != nil {
 		return nil, err

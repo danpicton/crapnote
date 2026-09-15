@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/svelte';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Page from './+page.svelte';
 import { shortcuts } from '$lib/stores/shortcuts.svelte';
@@ -1598,6 +1598,17 @@ describe('Title drafts', () => {
 		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(1));
 	});
 
+	it('duplicates private content atomically without publishing the title or body', async () => {
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ private: true })]);
+		vi.mocked(api.notes.create).mockResolvedValue(mockNote({ id: 2, private: true }));
+		render(Page);
+		await screen.findByDisplayValue('Test Note');
+		await fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: /duplicate note/i }));
+		expect(api.notes.create).toHaveBeenCalledWith('Test Note (copy)', '# Hello', true);
+		expect(api.notes.update).not.toHaveBeenCalled();
+	});
+
 	it('commits the source draft before selecting a duplicate', async () => {
 		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Edited source' }));
 		vi.mocked(api.notes.create).mockResolvedValue(mockNote({ id: 2, title: 'Edited source (copy)' }));
@@ -1610,7 +1621,7 @@ describe('Title drafts', () => {
 		await fireEvent.click(screen.getByRole('menuitem', { name: /duplicate note/i }));
 
 		expect(api.notes.update).toHaveBeenCalledWith(1, { title: 'Edited source' });
-		expect(api.notes.create).toHaveBeenCalledWith('Edited source (copy)');
+		expect(api.notes.create).toHaveBeenCalledWith('Edited source (copy)', '# Hello', false);
 		await waitFor(() => expect(screen.getByDisplayValue('Edited source (copy)')).toBeInTheDocument());
 	});
 
@@ -1665,6 +1676,22 @@ describe('Note locking', () => {
 
 		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(1));
 		await waitFor(() => expect(screen.getByTitle('Unlock note')).toBeTruthy());
+	});
+
+	it('shows and persists privacy for the selected desktop note', async () => {
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ private: true }));
+		await openNote();
+
+		const toggle = screen.getByRole('button', { name: 'Make note private' });
+		expect(toggle).toHaveAttribute('aria-pressed', 'false');
+		await fireEvent.click(toggle);
+
+		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(1, { private: true }));
+		expect(await screen.findByRole('button', { name: 'Make note visible to MCP' })).toHaveAttribute('aria-pressed', 'true');
+		cleanup();
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ private: true })]);
+		await openNote();
+		expect(screen.getByRole('button', { name: 'Make note visible to MCP' })).toHaveAttribute('aria-pressed', 'true');
 	});
 
 	it('makes the title read-only while the note is locked', async () => {

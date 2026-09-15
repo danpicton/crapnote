@@ -44,6 +44,7 @@ type Note struct {
 	Pinned    bool   `json:"pinned"`
 	Archived  bool   `json:"archived"`
 	Locked    bool   `json:"locked"`
+	Private   bool   `json:"private"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }

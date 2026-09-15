@@ -26,13 +26,14 @@
 		Bold, Italic, Underline, Quote, Code, FileCode2,
 		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Link,
 		Plus, ChevronLeft, Tag as TagIcon,
-		Star, Pin, Lock, LockOpen, Archive, Trash2, MoreHorizontal, RefreshCw, X,
+		Star, Pin, Lock, LockOpen, EyeOff, Archive, Trash2, MoreHorizontal, RefreshCw, X,
 	} from 'lucide-svelte';
 	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
 	import { wrapSelectedInBulletListCommand } from '$lib/milkdown/listedit';
 	import { EMPTY_FORMATS, type ActiveFormats } from '$lib/milkdown/formatState';
 	import { finishTitleDraft } from '$lib/titleDraft';
-	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, SaveRequests } from '$lib/noteSave';
+	import { mergeCachedNote } from '$lib/noteMerge';
+	import { cacheSavedNote, cacheLearnedPrivacy, mergeSavedFlag, type ToggleFlag, CACHE_SAVE_WARNING, latestTimestamp, learnedPrivacy, SaveRequests } from '$lib/noteSave';
 
 	const noteId = $derived(Number($page.params.id));
 
@@ -101,11 +102,19 @@
 		note = toggled;
 	}
 
+	async function applyFlagResponse(updated: Note, flag: ToggleFlag, acceptPrivacy: () => boolean) {
+		if (note?.id === updated.id) note = mergeSavedFlag(note, updated, flag, acceptPrivacy());
+		if (!await cacheLearnedPrivacy(openOwnedCache, updated, acceptPrivacy)) {
+			offlineWriteError = CACHE_SAVE_WARNING;
+		}
+	}
+
 	async function mobToggleStar() {
 		if (!note) return;
+		const acceptPrivacy = saveRequests.guardPrivacy(noteId);
 		try {
 			const updated = await api.notes.toggleStar(noteId);
-			note = note ? { ...updated, title: note.title } : updated;
+			await applyFlagResponse(updated, 'starred', acceptPrivacy);
 		} catch (err) {
 			await toggleFlagOffline(err, 'starred');
 		}
@@ -113,9 +122,10 @@
 
 	async function mobTogglePin() {
 		if (!note) return;
+		const acceptPrivacy = saveRequests.guardPrivacy(noteId);
 		try {
 			const updated = await api.notes.togglePin(noteId);
-			note = note ? { ...updated, title: note.title } : updated;
+			await applyFlagResponse(updated, 'pinned', acceptPrivacy);
 		} catch (err) {
 			await toggleFlagOffline(err, 'pinned');
 		}
@@ -126,12 +136,25 @@
 		if (!note) return;
 		const id = note.id;
 		await finishTitleSaves();
+		const acceptPrivacy = saveRequests.guardPrivacy(id);
 		try {
 			const updated = await api.notes.toggleLock(id);
-			note = note ? { ...updated, title: note.title } : updated;
+			await applyFlagResponse(updated, 'locked', acceptPrivacy);
 		} catch (err) {
 			await toggleFlagOffline(err, 'locked');
 		}
+		showActionSheet = false;
+	}
+
+	async function togglePrivacy() {
+		if (!note) return;
+		const updated = await api.notes.update(note.id, { private: !note.private });
+		saveRequests.privacyChanged(updated.id);
+		if (!await cacheSavedNote(openOwnedCache, 'private', updated, () => true,
+			noteTags.map(({ id, name }) => ({ id, name })))) {
+			offlineWriteError = CACHE_SAVE_WARNING;
+		}
+		if (note?.id === updated.id) note = { ...note, private: updated.private };
 		showActionSheet = false;
 	}
 
@@ -294,7 +317,7 @@
 				note = {
 					id: cached.id, title: cached.title, body: cached.body,
 					starred: cached.starred, pinned: cached.pinned, archived: false,
-					locked: cached.locked ?? false,
+					locked: cached.locked ?? false, private: cached.private ?? false,
 					created_at: cached.server_updated_at, updated_at: cached.local_updated_at,
 				};
 				noteTags = (cached.tags ?? []) as Tag[];
@@ -315,16 +338,7 @@
 			const db = await openOwnedCache();
 			const cached = db ? await getOfflineNote(db, noteId) : null;
 			db?.close();
-			if (cached && cached.is_dirty && !cached.is_new) {
-				note = {
-					...serverNote,
-					title: cached.title,
-					body: cached.body,
-					updated_at: cached.local_updated_at,
-				};
-			} else {
-				note = serverNote;
-			}
+			note = mergeCachedNote(serverNote, cached);
 			noteTags = fetchedTags;
 			allTags = allTagsList;
 			await maybeFocusTitleForNewNote();
@@ -337,7 +351,7 @@
 				note = {
 					id: cached.id, title: cached.title, body: cached.body,
 					starred: cached.starred, pinned: cached.pinned, archived: false,
-					locked: cached.locked ?? false,
+					locked: cached.locked ?? false, private: cached.private ?? false,
 					created_at: cached.server_updated_at, updated_at: cached.local_updated_at,
 				};
 				noteTags = (cached.tags ?? []) as Tag[];
@@ -418,6 +432,7 @@
 	async function saveField(source: Note, field: 'title' | 'body', value: string) {
 		if (source.locked) return;
 		const isLatestRequest = saveRequests.begin(source.id, field);
+		const acceptPrivacy = saveRequests.guardPrivacy(source.id);
 		const tags = noteTags.map(({ id, name }) => ({ id, name }));
 		saving = true;
 		try {
@@ -436,9 +451,10 @@
 			if (note?.id === source.id) note = {
 				...note,
 				body: field === 'body' && isLatestRequest() ? updated.body : note.body,
+				...learnedPrivacy(updated, acceptPrivacy()),
 				updated_at: latestTimestamp(note.updated_at, updated.updated_at),
 			};
-			if (!await cacheSavedNote(openOwnedCache, field, updated, isLatestRequest, tags)) {
+			if (!await cacheSavedNote(openOwnedCache, field, updated, isLatestRequest, tags, acceptPrivacy)) {
 				offlineWriteError = CACHE_SAVE_WARNING;
 			}
 		} finally {
@@ -560,6 +576,9 @@
 		<span class="tb-sep"></span>
 		<button class="tb-btn" class:tb-lock-on={note.locked} onclick={toggleLock} title={note.locked ? 'Unlock note' : 'Lock note'} aria-pressed={note.locked}>
 			{#if note.locked}<Lock size={14} />{:else}<LockOpen size={14} />{/if}
+		</button>
+		<button class="tb-btn" class:tb-private-on={note.private} onclick={togglePrivacy} title={note.private ? 'Private: hidden from MCP' : 'Visible to MCP'} aria-label={note.private ? 'Make note visible to MCP' : 'Make note private'} aria-pressed={!!note.private} disabled={note.locked}>
+			<EyeOff size={14} />
 		</button>
 		<span class="tb-spacer"></span>
 		<span class="save-status">{saving ? 'Saving…' : ''}</span>
@@ -745,6 +764,10 @@
 				{#if note.locked}<Lock size={18} aria-hidden="true" />{:else}<LockOpen size={18} aria-hidden="true" />{/if}
 				<span>{note.locked ? 'Unlock note' : 'Lock note'}</span>
 			</button>
+			<button class="mob-sheet-row" onclick={togglePrivacy} disabled={note.locked}>
+				<EyeOff size={18} aria-hidden="true" />
+				<span>{note.private ? 'Make visible to MCP' : 'Make private'}</span>
+			</button>
 			<button class="mob-sheet-row" onclick={mobArchive}>
 				<Archive size={18} aria-hidden="true" />
 				<span>Archive</span>
@@ -882,6 +905,7 @@
 	.tb-spacer { flex: 1; }
 	.save-status { font-size: 0.75rem; color: var(--text-4); white-space: nowrap; }
 	.tb-lock-on { color: var(--accent) !important; }
+	.tb-private-on { color: var(--accent) !important; background: var(--accent-lt); }
 
 	.link-btn-wrap {
 		position: relative;

@@ -41,6 +41,8 @@ export interface Note {
 	pinned: boolean;
 	archived: boolean;
 	locked: boolean;
+	/** Private notes remain available here but are hidden from MCP. */
+	private?: boolean;
 	/**
 	 * Position among the user's pinned notes, ascending; always 0 when unpinned.
 	 * Optional because notes built locally (offline creates, cached records
@@ -204,10 +206,10 @@ export const api = {
 	notes: {
 		list: (params?: { starred?: boolean; tag?: number; search?: string }, signal?: AbortSignal) =>
 			requestAllPages<Note>('/api/notes', params, signal),
-		create: (title?: string, body?: string) =>
-			request<Note>('POST', '/api/notes', { title, body }),
+		create: (title?: string, body?: string, privateNote?: boolean) =>
+			request<Note>('POST', '/api/notes', { title, body, private: privateNote }),
 		get: (id: number) => request<Note>('GET', `/api/notes/${id}`),
-		update: (id: number, data: Partial<Pick<Note, 'title' | 'body'>>) =>
+		update: (id: number, data: Partial<Pick<Note, 'title' | 'body' | 'private'>>) =>
 			request<Note>('PUT', `/api/notes/${id}`, data),
 		delete: (id: number) => request<void>('DELETE', `/api/notes/${id}`),
 		toggleStar: (id: number) => request<Note>('PATCH', `/api/notes/${id}/star`),

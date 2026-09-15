@@ -37,6 +37,35 @@ func TestNotesCreateSendsTitleAndBodyFlag(t *testing.T) {
 	}
 }
 
+func TestNotesCreatePrivateAndPrivacyOnlyUpdate(t *testing.T) {
+	var bodies [][]byte
+	srv := newAPIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, body)
+		if r.Method == http.MethodPost {
+			w.WriteHeader(http.StatusCreated)
+		}
+		_, _ = w.Write([]byte(strings.Replace(testNoteJSON, `"archived":false`, `"archived":false,"private":true`, 1)))
+	})
+	_, stderr, code := runCLI(t, nil, "--url", srv.URL, "--token", "t", "notes", "create", "--title", "Personal", "--private")
+	if code != 0 {
+		t.Fatalf("create exit=%d: %s", code, stderr)
+	}
+	_, stderr, code = runCLI(t, nil, "--url", srv.URL, "--token", "t", "notes", "update", "7", "--private=false")
+	if code != 0 {
+		t.Fatalf("update exit=%d: %s", code, stderr)
+	}
+	var create, update map[string]any
+	_ = json.Unmarshal(bodies[0], &create)
+	_ = json.Unmarshal(bodies[1], &update)
+	if create["private"] != true {
+		t.Fatalf("create body=%v", create)
+	}
+	if update["private"] != false || len(update) != 1 {
+		t.Fatalf("update body=%v", update)
+	}
+}
+
 func TestNotesGetPrintsNote(t *testing.T) {
 	srv := newAPIServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/notes/7" {
@@ -66,6 +95,14 @@ func TestNotesGetHumanOutputShowsTitleAndBody(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "T") || !strings.Contains(stdout, "B") {
 		t.Errorf("human output should include title and body, got %q", stdout)
+	}
+
+	privateSrv := newAPIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(strings.Replace(testNoteJSON, `"archived":false`, `"archived":false,"private":true`, 1)))
+	})
+	privateOut, _, _ := runCLI(t, nil, "--url", privateSrv.URL, "--token", "t", "notes", "get", "7")
+	if !strings.Contains(privateOut, "V") {
+		t.Errorf("private status not visible: %q", privateOut)
 	}
 }
 

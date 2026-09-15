@@ -31,8 +31,9 @@
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 	import { sortNotes, reorderPinned, nextPinOrder } from '$lib/noteOrder';
 	import { finishTitleDraft } from '$lib/titleDraft';
+	import { mergeCachedNote } from '$lib/noteMerge';
 	import { TitleCommits } from '$lib/titleCommits';
-	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, SaveRequests } from '$lib/noteSave';
+	import { cacheSavedNote, cacheLearnedPrivacy, mergeSavedFlag, type ToggleFlag, CACHE_SAVE_WARNING, latestTimestamp, learnedPrivacy, SaveRequests } from '$lib/noteSave';
 	import {
 		dropIndexFromY,
 		findScrollParent,
@@ -55,7 +56,7 @@
 		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Image, Link,
 		Plus, Star, Pin, GripVertical, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search,
-		CloudUpload, CheckCircle2, Lock, LockOpen, ImageOff, MoreHorizontal,
+		CloudUpload, CheckCircle2, Lock, LockOpen, EyeOff, ImageOff, MoreHorizontal,
 		RefreshCw, WifiOff, X,
 	} from 'lucide-svelte';
 	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
@@ -519,7 +520,7 @@
 		}
 	}
 
-	async function cacheNotesForOffline(serverNotes: Note[], protectTitles: (notes: Note[]) => Note[]): Promise<void> {
+	async function cacheNotesForOffline(serverNotes: Note[], protectTitles: (notes: Note[]) => Note[], isCurrent: () => boolean): Promise<void> {
 		// Writing into someone else's store would defeat the read guard: the
 		// rows would then sit under an owner id that matches that user, who
 		// would be shown this account's notes on their next offline start.
@@ -547,6 +548,9 @@
 			// Fetch tags for this note so they're available offline
 			const noteTags = await api.tags.listForNote(note.id).catch(() => existing?.tags ?? []);
 			await updateCachedNote(db, note.id, (current) => {
+				// A later action invalidates the list snapshot and its background
+				// cache writes, even when flag writes share the same updated_at.
+				if (!isCurrent()) return null;
 				// Recheck after fetching tags, inside the same write transaction.
 				if (current?.is_dirty || current?.flags_dirty || current?.deleted_offline || current?.archived_offline) return null;
 				if (current && latestTimestamp(current.server_updated_at, note.updated_at) !== note.updated_at) return null;
@@ -568,7 +572,7 @@
 		// for a delete or archive replay)
 		const allCached = await getAllNotes(db);
 		for (const c of allCached) {
-			if (!toKeep.has(c.id) && !c.is_dirty && !c.flags_dirty && !c.is_new && !c.deleted_offline && !c.archived_offline) {
+			if (isCurrent() && !toKeep.has(c.id) && !c.is_dirty && !c.flags_dirty && !c.is_new && !c.deleted_offline && !c.archived_offline) {
 				await deleteOfflineNote(db, c.id);
 			}
 		}
@@ -606,18 +610,7 @@
 		}
 		const merged: Note[] = serverNotes
 			.filter((n) => !hiddenIds.has(n.id))
-			.map((n) => {
-				const d = dirtyById.get(n.id);
-				if (!d) return n;
-				// The desired local state wins, falling back to the server's for
-				// anything the cache entry doesn't carry. pin_order matters
-				// here: a note pinned offline holds a client-assigned slot the
-				// server hasn't seen, and without it the note would sort by the
-				// server's stale 0 instead of at the top.
-				const flags = d.flags_dirty ? noteFlags(d, n) : {};
-				if (!d.is_dirty) return { ...n, ...flags };
-				return { ...n, ...flags, title: d.title, body: d.body, updated_at: d.local_updated_at };
-			});
+			.map((n) => mergeCachedNote(n, dirtyById.get(n.id)));
 
 		// Include offline-created notes (not yet on the server) — apply the
 		// same filters the server query applies so the list stays consistent.
@@ -693,7 +686,7 @@
 			notes = protectTitles(merged);
 			// Cache top-N when no filter is active (we want the canonical recent list)
 			if (!search && activeTagId === null && !starredOnly) {
-				cacheNotesForOffline(fetched, protectTitles); // fire-and-forget
+				cacheNotesForOffline(fetched, protectTitles, () => version === listVersion); // fire-and-forget
 			}
 		} catch {
 			if (version !== listVersion) return; // cancelled by a newer load/mutation
@@ -1080,9 +1073,7 @@
 		const note = notes.find(n => n.id === id);
 		if (!note) return;
 		showNoteMenu = false;
-		const dup = await api.notes.create((note.title || 'Untitled') + ' (copy)');
-		if (note.body) await api.notes.update(dup.id, { body: note.body });
-		dup.body = note.body;
+		const dup = await api.notes.create((note.title || 'Untitled') + ' (copy)', note.body, !!note.private);
 		const firstUnpinned = notes.findIndex(n => !n.pinned);
 		notes = firstUnpinned === -1 ? [...notes, dup] : [...notes.slice(0, firstUnpinned), dup, ...notes.slice(firstUnpinned)];
 		selectedId = dup.id;
@@ -1258,6 +1249,7 @@
 		if (syncInFlight) await syncInFlight;
 		const id = rekeyedNoteIds.get(note.id) ?? note.id;
 		const isLatestRequest = saveRequests.begin(id, field);
+		const acceptPrivacy = saveRequests.guardPrivacy(id);
 		note = { ...note, id };
 		saving = true;
 		try {
@@ -1275,9 +1267,10 @@
 			notes = notes.map((n) => n.id === id ? preservePendingTitle({
 				...n,
 				...(isLatestRequest() ? { [field]: updated[field] } : {}),
+				...learnedPrivacy(updated, acceptPrivacy()),
 				updated_at: latestTimestamp(n.updated_at, updated.updated_at),
 			}) : n);
-			if (!await cacheSavedNote(openOwnedCache, field, updated, isLatestRequest, tags)) {
+			if (!await cacheSavedNote(openOwnedCache, field, updated, isLatestRequest, tags, acceptPrivacy)) {
 				offlineWriteError = CACHE_SAVE_WARNING;
 				syncStatus = 'unknown';
 			}
@@ -1325,38 +1318,36 @@
 		return toggled;
 	}
 
+	async function applyFlagResponse(updated: Note, flag: ToggleFlag, acceptPrivacy: () => boolean) {
+		invalidateList();
+		notes = notes.map((n) => n.id === updated.id
+			? preservePendingTitle(mergeSavedFlag(n, updated, flag, acceptPrivacy())) : n);
+		if (flag === 'pinned') notes = sortNotes(notes, (n) => n.updated_at);
+		if (!await cacheLearnedPrivacy(openOwnedCache, updated, acceptPrivacy)) {
+			offlineWriteError = CACHE_SAVE_WARNING;
+		}
+	}
+
 	async function toggleStar(id: number) {
+		const acceptPrivacy = saveRequests.guardPrivacy(id);
 		let updated: Note | null;
 		try {
 			updated = await api.notes.toggleStar(id);
 		} catch (err) {
 			updated = await toggleFlagOffline(err, id, 'starred');
 		}
-		if (!updated) return;
-		invalidateList(); // invalidate in-flight list loads carrying the old state
-		notes = notes.map((n) => (n.id === updated.id
-			? preservePendingTitle({ ...updated, title: n.title })
-			: n));
+		if (updated) await applyFlagResponse(updated, 'starred', acceptPrivacy);
 	}
 
 	async function togglePin(id: number) {
+		const acceptPrivacy = saveRequests.guardPrivacy(id);
 		let updated: Note | null;
 		try {
 			updated = await api.notes.togglePin(id);
 		} catch (err) {
 			updated = await toggleFlagOffline(err, id, 'pinned');
 		}
-		if (!updated) return;
-		invalidateList(); // invalidate in-flight list loads carrying the old state
-		// A freshly pinned note claims the top slot — server-side when online,
-		// via nextPinOrder when not — so re-sorting on the shared comparator
-		// puts it at the top and leaves the rest as they were.
-		notes = sortNotes(
-			notes.map((n) => (n.id === updated.id
-				? preservePendingTitle({ ...updated, title: n.title })
-				: n)),
-			(n) => n.updated_at
-		);
+		if (updated) await applyFlagResponse(updated, 'pinned', acceptPrivacy);
 	}
 
 	/** Drain the target note's draft/queue before an action can make it read-only
@@ -1377,17 +1368,27 @@
 
 	async function toggleLock(id: number) {
 		id = await finishTitleForNote(id);
+		const acceptPrivacy = saveRequests.guardPrivacy(id);
 		let updated: Note | null;
 		try {
 			updated = await api.notes.toggleLock(id);
 		} catch (err) {
 			updated = await toggleFlagOffline(err, id, 'locked');
 		}
-		if (!updated) return;
-		invalidateList(); // invalidate in-flight list loads carrying the old state
-		notes = notes.map((n) => (n.id === updated.id
-			? preservePendingTitle({ ...updated, title: n.title })
-			: n));
+		if (updated) await applyFlagResponse(updated, 'locked', acceptPrivacy);
+	}
+
+	async function togglePrivacy(id: number) {
+		id = await finishTitleForNote(id);
+		const current = notes.find((n) => n.id === id);
+		if (!current || current.locked) return;
+		const updated = await api.notes.update(id, { private: !current.private });
+		saveRequests.privacyChanged(id);
+		invalidateList();
+		if (!await cacheSavedNote(openOwnedCache, 'private', updated, () => true)) {
+			offlineWriteError = CACHE_SAVE_WARNING;
+		}
+		notes = notes.map((n) => n.id === id ? { ...n, private: updated.private } : n);
 	}
 
 	/** Remove a note from the visible list after an archive/delete. */
@@ -1950,6 +1951,9 @@
 						<button class="tb-btn tb-star" class:tb-star-on={selectedNote.starred} onclick={() => toggleStar(selectedNote.id)} title={selectedNote.starred ? 'Unstar' : 'Star'}><Star size={13} /></button>
 						<button class="tb-btn tb-lock" class:tb-lock-on={selectedNote.locked} onclick={() => toggleLock(selectedNote.id)} title={selectedNote.locked ? 'Unlock note' : 'Lock note'} aria-pressed={selectedNote.locked}>
 							{#if selectedNote.locked}<Lock size={13} />{:else}<LockOpen size={13} />{/if}
+						</button>
+						<button class="tb-btn tb-private" class:tb-private-on={selectedNote.private} onclick={() => togglePrivacy(selectedNote.id)} title={selectedNote.private ? 'Private: hidden from MCP' : 'Visible to MCP'} aria-label={selectedNote.private ? 'Make note visible to MCP' : 'Make note private'} aria-pressed={!!selectedNote.private} disabled={selectedNote.locked}>
+							<EyeOff size={13} />
 						</button>
 						<div class="note-menu-wrap">
 							<button class="tb-btn" onclick={() => (showNoteMenu = !showNoteMenu)} title="More actions" aria-label="More actions"><MoreHorizontal size={13} /></button>
@@ -2581,6 +2585,7 @@
 	.tb-btn:hover { background: var(--bg-hover); color: var(--text-2); }
 	.tb-star-on { color: var(--accent) !important; }
 	.tb-lock-on { color: var(--accent) !important; }
+	.tb-private-on { color: var(--accent) !important; background: var(--accent-lt); }
 
 	.tb-sep {
 		width: 1px;
