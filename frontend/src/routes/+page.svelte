@@ -32,6 +32,11 @@
 	import { sortNotes, reorderPinned, nextPinOrder } from '$lib/noteOrder';
 	import { finishTitleDraft } from '$lib/titleDraft';
 	import { TitleCommits } from '$lib/titleCommits';
+	import {
+		clampSidebarWidth,
+		loadSidebarPreferences,
+		saveSidebarPreferences,
+	} from '$lib/sidebarPreferences';
 	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, SaveRequests } from '$lib/noteSave';
 	import {
 		dropIndexFromY,
@@ -336,6 +341,13 @@
 	let titleInput = $state<HTMLInputElement | null>(null);
 	let searchInput = $state<HTMLInputElement | null>(null);
 	let showShortcutHelp = $state(false);
+	let sidebarHidden = $state(false);
+	let sidebarWidth = $state(300);
+
+	function setSidebarHidden(hidden: boolean) {
+		sidebarHidden = hidden;
+		saveSidebarPreferences({ hidden, width: sidebarWidth });
+	}
 
 	// Tags
 	let allTags = $state<Tag[]>([]);
@@ -829,6 +841,9 @@
 
 	onMount(() => {
 		isOnline = navigator.onLine;
+		const sidebarPreferences = loadSidebarPreferences();
+		sidebarHidden = sidebarPreferences.hidden;
+		sidebarWidth = clampSidebarWidth(sidebarPreferences.width, window.innerWidth);
 
 		// Load per-user keyboard shortcut overrides from localStorage. This
 		// callback runs before the root layout has resolved /api/auth/me, so
@@ -1529,7 +1544,8 @@
 
 <div class="app">
 	<!-- ── Sidebar ── -->
-	<aside class="sidebar">
+	{#if isMobileLayout || !sidebarHidden}
+	<aside class="sidebar" style:width={isMobileLayout ? undefined : `${sidebarWidth}px`}>
 		<!-- Desktop header -->
 		<header class="sidebar-header">
 			<a href="/" class="wordmark app-name" onclick={(e) => { e.preventDefault(); void goHome(); }}>Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
@@ -1544,6 +1560,11 @@
 			<button class="hdr-btn new-btn" onclick={newNote} title="New note" aria-label="New note">
 				<Plus size={16} />
 			</button>
+			{#if !isMobileLayout}
+				<button class="hdr-btn sidebar-hide-btn" onclick={() => setSidebarHidden(true)} title="Hide sidebar" aria-label="Hide sidebar">
+					<span class="sidebar-hide-icon"><ChevronRight size={16} /></span>
+				</button>
+			{/if}
 		</header>
 
 		<!-- Mobile header (wordmark row + search + tabs) — only rendered on mobile -->
@@ -1890,6 +1911,13 @@
 			</div>
 		</div>
 	</aside>
+	{/if}
+
+	{#if !isMobileLayout && sidebarHidden}
+		<button class="sidebar-show-btn" onclick={() => setSidebarHidden(false)} title="Show sidebar" aria-label="Show sidebar">
+			<ChevronRight size={18} />
+		</button>
+	{/if}
 
 	<!-- Mobile tab bar -->
 	<MobileTabBar activeTab="notes" />
@@ -2153,6 +2181,27 @@
 		align-items: center;
 	}
 	.hdr-btn:hover { color: var(--text); }
+	.sidebar-hide-btn { flex-shrink: 0; }
+	.sidebar-hide-icon { display: flex; transform: rotate(180deg); }
+
+	.sidebar-show-btn {
+		position: absolute;
+		top: 0.4rem;
+		left: 0.4rem;
+		z-index: 10;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 30px;
+		height: 30px;
+		padding: 0;
+		border: 1px solid var(--border);
+		border-radius: 3px;
+		background: var(--bg-toolbar);
+		color: var(--text-3);
+		cursor: pointer;
+	}
+	.sidebar-show-btn:hover { color: var(--text); background: var(--bg-hover); }
 
 	.new-btn {
 		width: 26px;

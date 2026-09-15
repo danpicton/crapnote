@@ -176,6 +176,7 @@ const mockNote = (overrides = {}) => ({
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	localStorage.clear();
 	vi.mocked(api.notes.list).mockResolvedValue([mockNote()]);
 	vi.mocked(api.tags.list).mockResolvedValue([]);
 });
@@ -197,6 +198,20 @@ describe('Notes page', () => {
 	it('shows the note list after load', async () => {
 		render(Page);
 		await waitFor(() => expect(screen.getByText('Test Note')).toBeInTheDocument());
+	});
+
+	it('hides the complete desktop sidebar and leaves a control to restore it', async () => {
+		const { container } = render(Page);
+		const hide = await screen.findByRole('button', { name: 'Hide sidebar' });
+
+		await fireEvent.click(hide);
+
+		expect(container.querySelector('aside')).not.toBeInTheDocument();
+		const show = screen.getByRole('button', { name: 'Show sidebar' });
+		expect(JSON.parse(localStorage.getItem('crapnote-sidebar')!)).toEqual({ hidden: true, width: 300 });
+
+		await fireEvent.click(show);
+		expect(container.querySelector('aside')).toBeInTheDocument();
 	});
 
 	it('renders preview links underlined and unbracketed', async () => {
