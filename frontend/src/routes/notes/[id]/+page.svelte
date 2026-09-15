@@ -106,6 +106,8 @@
 
 	async function toggleLock() {
 		if (!note) return;
+		await commitTitleDraft();
+		await titleSaveQueue;
 		try {
 			note = await api.notes.toggleLock(noteId);
 		} catch (err) {

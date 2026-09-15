@@ -1332,6 +1332,8 @@
 	}
 
 	async function toggleLock(id: number) {
+		await commitTitleDraft();
+		await titleSaveQueues.get(id);
 		let updated: Note | null;
 		try {
 			updated = await api.notes.toggleLock(id);

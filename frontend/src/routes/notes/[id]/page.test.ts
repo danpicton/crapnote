@@ -240,6 +240,23 @@ describe('/notes/[id] page', () => {
 		expect((title as HTMLInputElement).value).toBe('Second edit');
 	});
 
+	it('saves a title draft before locking the note', async () => {
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ title: 'Edited before lock', locked: true }));
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Edited before lock' } });
+
+		await fireEvent.click(screen.getByTitle('Lock note'));
+
+		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Edited before lock' });
+		expect(api.notes.toggleLock).not.toHaveBeenCalled();
+		resolveTitle(mockNote({ title: 'Edited before lock' }));
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(42));
+	});
+
 	it('keeps a committed title when an older body save responds later', async () => {
 		let resolveBody!: (note: ReturnType<typeof mockNote>) => void;
 		vi.mocked(api.notes.update).mockImplementation((_id, update) => {

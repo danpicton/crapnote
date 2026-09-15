@@ -1141,6 +1141,23 @@ describe('Title drafts', () => {
 		expect((title as HTMLInputElement).value).toBe('Second edit');
 	});
 
+	it('saves a title draft before locking the note', async () => {
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ title: 'Edited before lock', locked: true }));
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Edited before lock' } });
+
+		await fireEvent.click(screen.getByTitle('Lock note'));
+
+		expect(api.notes.update).toHaveBeenCalledWith(1, { title: 'Edited before lock' });
+		expect(api.notes.toggleLock).not.toHaveBeenCalled();
+		resolveTitle(mockNote({ title: 'Edited before lock' }));
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(1));
+	});
+
 	it('commits the source draft before selecting a duplicate', async () => {
 		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Edited source' }));
 		vi.mocked(api.notes.create).mockResolvedValue(mockNote({ id: 2, title: 'Edited source (copy)' }));
