@@ -113,9 +113,7 @@ func mcpImageAllowed(ctx context.Context, db *sql.DB, userID int64, id string) (
 		if err := rows.Scan(&body, &private); err != nil {
 			return false, err
 		}
-		body = decodePercentEscapes(html.UnescapeString(body))
-		// Markdown permits backslash-escaped punctuation inside destinations.
-		body = strings.ReplaceAll(body, `\`, "")
+		body = normalizeImageReferenceText(body)
 		if !strings.Contains(body, id) {
 			continue
 		}
@@ -128,6 +126,18 @@ func mcpImageAllowed(ctx context.Context, db *sql.DB, userID int64, id string) (
 		return false, err
 	}
 	return publicReference, nil
+}
+
+var imageReferenceIgnorables = strings.NewReplacer("\\", "", "\t", "", "\r", "", "\n", "")
+
+// normalizeImageReferenceText is deliberately conservative rather than a
+// Markdown parser. Decode HTML first, then remove Markdown escapes and the
+// ASCII tab/newline characters stripped by WHATWG URL parsing. Removal must
+// precede percent decoding: even an escape such as %2&#9;d becomes %2d in a
+// browser. Also strip decoded controls to fail closed on ambiguous references.
+func normalizeImageReferenceText(body string) string {
+	body = imageReferenceIgnorables.Replace(html.UnescapeString(body))
+	return imageReferenceIgnorables.Replace(decodePercentEscapes(body))
 }
 
 // decodePercentEscapes decodes valid URL escapes without letting an unrelated

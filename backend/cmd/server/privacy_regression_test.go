@@ -27,11 +27,30 @@ func privacyREST(t *testing.T, mux *http.ServeMux, token, method, path, body str
 }
 
 func TestMCP_PrivateImageURLSpellingsAndExport(t *testing.T) {
+	type referenceCase struct {
+		name string
+		url  func(string) string
+	}
+	var cases []referenceCase
 	for _, spelling := range []string{
 		"/api/images/%s", "/api/./images/%s", "/api/other/../images/%s", "/api//images/%s",
 		"%%2Fapi%%2Fimages%%2F%s", "https://notes.example/api/./images/%s", "../api/images/%s",
 	} {
-		t.Run(spelling, func(t *testing.T) {
+		cases = append(cases, referenceCase{spelling, func(id string) string { return fmt.Sprintf(spelling, id) }})
+	}
+	// WHATWG URL parsing removes ASCII tabs and newlines anywhere in a URL,
+	// including after HTML entities have been decoded by the renderer.
+	for _, control := range []string{"&#9;", "&#x9;", "&Tab;", "&#10;", "&#13;", "\t", "\r\n"} {
+		cases = append(cases, referenceCase{"control-" + control, func(id string) string {
+			return "/api/images/" + id[:8] + control + id[8:]
+		}})
+	}
+	cases = append(cases, referenceCase{"control-inside-percent-escape", func(id string) string {
+		escaped := fmt.Sprintf("%%%02x", id[8])
+		return "/api/images/" + id[:8] + escaped[:2] + "&#9;" + escaped[2:] + id[9:]
+	}})
+	for _, ref := range cases {
+		t.Run(ref.name, func(t *testing.T) {
 			mux, cookie := newAuthedMux(t)
 			token := createToken(t, mux, cookie, "read_write")
 			secret := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00")
@@ -62,7 +81,7 @@ func TestMCP_PrivateImageURLSpellingsAndExport(t *testing.T) {
 				t.Fatal(err)
 			}
 			id := strings.TrimPrefix(upload.URL, "/api/images/")
-			privateID := privacyID(t, privacyREST(t, mux, token, "POST", "/api/notes", fmt.Sprintf(`{"title":"confidential","body":%q,"private":true}`, "![secret]("+fmt.Sprintf(spelling, id)+")"), 201))
+			privateID := privacyID(t, privacyREST(t, mux, token, "POST", "/api/notes", fmt.Sprintf(`{"title":"confidential","body":%q,"private":true}`, "![secret]("+ref.url(id)+")"), 201))
 			// The MCP caller knows the URL and tries to launder it through a public carrier.
 			_, created := mcpCall(t, mux, token, toolCallBody("notes_create", fmt.Sprintf(`{"title":"carrier","body":%q}`, "![image]("+upload.URL+")")))
 			if text, bad := toolText(t, created); bad {

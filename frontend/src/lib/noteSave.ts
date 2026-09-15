@@ -1,4 +1,5 @@
 import { noteFlags, updateCachedNote, type CachedNote, type NoteFlags } from './offlineDB';
+import type { Note } from './api';
 
 type ContentField = 'title' | 'body';
 type SavedContent = { id: number; title: string; body: string; updated_at: string } & Partial<NoteFlags>;
@@ -21,6 +22,33 @@ export function latestTimestamp(current: string, incoming: string): string {
  */
 export function learnedPrivacy(updated: Partial<NoteFlags>, acceptPrivacy = true): { private?: boolean } {
 	return acceptPrivacy && updated.private ? { private: true } : {};
+}
+
+export type ToggleFlag = 'starred' | 'pinned' | 'locked';
+
+/** A flag response acknowledges only that flag, not its entire note snapshot.
+ * Preserve newer content, other flags and explicit privacy writes. As with
+ * content saves, newly observed privacy may only add protection.
+ */
+export function mergeSavedFlag(current: Note, updated: Note, flag: ToggleFlag, acceptPrivacy = true): Note {
+	return {
+		...current,
+		[flag]: updated[flag],
+		...(flag === 'pinned' ? { pin_order: noteFlags(updated, current).pin_order } : {}),
+		...learnedPrivacy(updated, acceptPrivacy),
+	};
+}
+
+/** Cache privacy learned from a response without acknowledging its stale
+ * content or flags. The guard is checked again inside the write transaction.
+ */
+export async function cacheLearnedPrivacy(
+	openCache: () => Promise<IDBDatabase | null>,
+	updated: SavedContent,
+	acceptPrivacy: () => boolean,
+): Promise<boolean> {
+	if (!updated.private || !acceptPrivacy()) return true;
+	return cacheSavedNote(openCache, 'private', updated, acceptPrivacy);
 }
 
 /** Acknowledgement is field-specific, even when the cache has unsynced edits.

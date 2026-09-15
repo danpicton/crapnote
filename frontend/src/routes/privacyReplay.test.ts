@@ -66,6 +66,7 @@ beforeEach(async () => {
 			return json(server);
 		}
 		if (url.pathname === '/api/notes/7/star') { server = { ...server, starred: !server.starred }; return json(server); }
+		if (url.pathname === '/api/notes/7/pin') { server = { ...server, pinned: !server.pinned, pin_order: server.pinned ? 0 : -1 }; return json(server); }
 		throw new Error(`Unexpected request: ${method} ${path}`);
 	}));
 });
@@ -84,6 +85,69 @@ describe('route privacy through the offline cache', () => {
 	});
 
 	for (const [name, Route] of [['desktop', Home], ['detail', Detail]] as const) {
+		it.each([
+			{ flag: 'star', desired: true }, { flag: 'star', desired: false },
+			{ flag: 'pin', desired: true }, { flag: 'pin', desired: false },
+		])(`${name}: a delayed $flag cannot undo explicit private=$desired or publish a duplicate`, async ({ flag, desired }) => {
+			server.private = !desired;
+			await upsertNote(db, cached({ private: !desired }));
+			render(Route);
+			await screen.findByDisplayValue('Sensitive title');
+			const request = vi.mocked(fetch).getMockImplementation()!;
+			let release!: () => void;
+			let received = false;
+			const held = new Promise<void>((resolve) => { release = resolve; });
+			vi.mocked(fetch).mockImplementation(async (...args) => {
+				const response = await request(...args);
+				if (String(args[0]).endsWith(`/${flag}`)) { received = true; await held; }
+				return response;
+			});
+			if (flag === 'star') {
+				await fireEvent.click(name === 'desktop' ? screen.getAllByTitle('Star').at(-1)!
+					: screen.getByRole('button', { name: 'Star note' }));
+			} else {
+				await fireEvent.click(screen.getByRole('button', { name: name === 'desktop' ? 'More actions' : 'Note actions' }));
+				await fireEvent.click(screen.getByRole(name === 'desktop' ? 'menuitem' : 'button', { name: name === 'desktop' ? 'Pin note' : 'Pin to top' }));
+			}
+			await waitFor(() => expect(received).toBe(true));
+			await fireEvent.click(screen.getByRole('button', { name: desired ? 'Make note private' : 'Make note visible to MCP' }));
+			await waitFor(async () => expect(await getNote(db, 7)).toMatchObject({ private: desired }));
+			await screen.findByRole('button', { name: desired ? 'Make note visible to MCP' : 'Make note private' });
+			if (flag === 'pin' && name === 'detail') await fireEvent.click(screen.getByRole('button', { name: 'Note actions' }));
+			release();
+			if (name === 'desktop') {
+				await waitFor(() => expect(screen.getAllByTitle(flag === 'star' ? 'Unstar' : 'Unpin').length).toBeGreaterThan(0));
+			} else if (flag === 'star') {
+				await screen.findByRole('button', { name: 'Unstar note' });
+			} else {
+				// The pending pin handler closes the sheet after applying its response.
+				await waitFor(() => expect(screen.queryByRole('button', { name: 'Pin to top' })).not.toBeInTheDocument());
+				await fireEvent.click(screen.getByRole('button', { name: 'Note actions' }));
+				await screen.findByRole('button', { name: 'Unpin from top' });
+			}
+			if (name === 'desktop') {
+				await fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+				await fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate note' }));
+				await waitFor(() => expect(copies).toHaveLength(1));
+				expect(copies[0]).toMatchObject({ private: desired, title: 'Sensitive title (copy)', body: 'Sensitive body' });
+			}
+			expect(screen.getByRole('button', { name: desired ? 'Make note visible to MCP' : 'Make note private' }))
+				.toHaveAttribute('aria-pressed', String(desired));
+			expect(await getNote(db, 7)).toMatchObject({ private: desired });
+		});
+
+		it(`${name}: learns and caches remote privacy from a current star response`, async () => {
+			server.private = false;
+			await upsertNote(db, cached({ private: false }));
+			render(Route);
+			await screen.findByDisplayValue('Sensitive title');
+			server.private = true;
+			await fireEvent.click(name === 'desktop' ? screen.getAllByTitle('Star').at(-1)!
+				: screen.getByRole('button', { name: 'Star note' }));
+			await screen.findByRole('button', { name: 'Make note visible to MCP' });
+			await waitFor(async () => expect(await getNote(db, 7)).toMatchObject({ private: true }));
+		});
+
 		it.each(['title', 'body'] as const)(`${name}: learns server privacy from a successful %s save before subsequent actions`, async (field) => {
 			server.private = false;
 			await upsertNote(db, cached({ private: false }));

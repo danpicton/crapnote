@@ -33,7 +33,7 @@
 	import { finishTitleDraft } from '$lib/titleDraft';
 	import { mergeCachedNote } from '$lib/noteMerge';
 	import { TitleCommits } from '$lib/titleCommits';
-	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, learnedPrivacy, SaveRequests } from '$lib/noteSave';
+	import { cacheSavedNote, cacheLearnedPrivacy, mergeSavedFlag, type ToggleFlag, CACHE_SAVE_WARNING, latestTimestamp, learnedPrivacy, SaveRequests } from '$lib/noteSave';
 	import {
 		dropIndexFromY,
 		findScrollParent,
@@ -520,7 +520,7 @@
 		}
 	}
 
-	async function cacheNotesForOffline(serverNotes: Note[], protectTitles: (notes: Note[]) => Note[]): Promise<void> {
+	async function cacheNotesForOffline(serverNotes: Note[], protectTitles: (notes: Note[]) => Note[], isCurrent: () => boolean): Promise<void> {
 		// Writing into someone else's store would defeat the read guard: the
 		// rows would then sit under an owner id that matches that user, who
 		// would be shown this account's notes on their next offline start.
@@ -548,6 +548,9 @@
 			// Fetch tags for this note so they're available offline
 			const noteTags = await api.tags.listForNote(note.id).catch(() => existing?.tags ?? []);
 			await updateCachedNote(db, note.id, (current) => {
+				// A later action invalidates the list snapshot and its background
+				// cache writes, even when flag writes share the same updated_at.
+				if (!isCurrent()) return null;
 				// Recheck after fetching tags, inside the same write transaction.
 				if (current?.is_dirty || current?.flags_dirty || current?.deleted_offline || current?.archived_offline) return null;
 				if (current && latestTimestamp(current.server_updated_at, note.updated_at) !== note.updated_at) return null;
@@ -569,7 +572,7 @@
 		// for a delete or archive replay)
 		const allCached = await getAllNotes(db);
 		for (const c of allCached) {
-			if (!toKeep.has(c.id) && !c.is_dirty && !c.flags_dirty && !c.is_new && !c.deleted_offline && !c.archived_offline) {
+			if (isCurrent() && !toKeep.has(c.id) && !c.is_dirty && !c.flags_dirty && !c.is_new && !c.deleted_offline && !c.archived_offline) {
 				await deleteOfflineNote(db, c.id);
 			}
 		}
@@ -683,7 +686,7 @@
 			notes = protectTitles(merged);
 			// Cache top-N when no filter is active (we want the canonical recent list)
 			if (!search && activeTagId === null && !starredOnly) {
-				cacheNotesForOffline(fetched, protectTitles); // fire-and-forget
+				cacheNotesForOffline(fetched, protectTitles, () => version === listVersion); // fire-and-forget
 			}
 		} catch {
 			if (version !== listVersion) return; // cancelled by a newer load/mutation
@@ -1315,38 +1318,36 @@
 		return toggled;
 	}
 
+	async function applyFlagResponse(updated: Note, flag: ToggleFlag, acceptPrivacy: () => boolean) {
+		invalidateList();
+		notes = notes.map((n) => n.id === updated.id
+			? preservePendingTitle(mergeSavedFlag(n, updated, flag, acceptPrivacy())) : n);
+		if (flag === 'pinned') notes = sortNotes(notes, (n) => n.updated_at);
+		if (!await cacheLearnedPrivacy(openOwnedCache, updated, acceptPrivacy)) {
+			offlineWriteError = CACHE_SAVE_WARNING;
+		}
+	}
+
 	async function toggleStar(id: number) {
+		const acceptPrivacy = saveRequests.guardPrivacy(id);
 		let updated: Note | null;
 		try {
 			updated = await api.notes.toggleStar(id);
 		} catch (err) {
 			updated = await toggleFlagOffline(err, id, 'starred');
 		}
-		if (!updated) return;
-		invalidateList(); // invalidate in-flight list loads carrying the old state
-		notes = notes.map((n) => (n.id === updated.id
-			? preservePendingTitle({ ...updated, title: n.title })
-			: n));
+		if (updated) await applyFlagResponse(updated, 'starred', acceptPrivacy);
 	}
 
 	async function togglePin(id: number) {
+		const acceptPrivacy = saveRequests.guardPrivacy(id);
 		let updated: Note | null;
 		try {
 			updated = await api.notes.togglePin(id);
 		} catch (err) {
 			updated = await toggleFlagOffline(err, id, 'pinned');
 		}
-		if (!updated) return;
-		invalidateList(); // invalidate in-flight list loads carrying the old state
-		// A freshly pinned note claims the top slot — server-side when online,
-		// via nextPinOrder when not — so re-sorting on the shared comparator
-		// puts it at the top and leaves the rest as they were.
-		notes = sortNotes(
-			notes.map((n) => (n.id === updated.id
-				? preservePendingTitle({ ...updated, title: n.title })
-				: n)),
-			(n) => n.updated_at
-		);
+		if (updated) await applyFlagResponse(updated, 'pinned', acceptPrivacy);
 	}
 
 	/** Drain the target note's draft/queue before an action can make it read-only
@@ -1367,17 +1368,14 @@
 
 	async function toggleLock(id: number) {
 		id = await finishTitleForNote(id);
+		const acceptPrivacy = saveRequests.guardPrivacy(id);
 		let updated: Note | null;
 		try {
 			updated = await api.notes.toggleLock(id);
 		} catch (err) {
 			updated = await toggleFlagOffline(err, id, 'locked');
 		}
-		if (!updated) return;
-		invalidateList(); // invalidate in-flight list loads carrying the old state
-		notes = notes.map((n) => (n.id === updated.id
-			? preservePendingTitle({ ...updated, title: n.title })
-			: n));
+		if (updated) await applyFlagResponse(updated, 'locked', acceptPrivacy);
 	}
 
 	async function togglePrivacy(id: number) {

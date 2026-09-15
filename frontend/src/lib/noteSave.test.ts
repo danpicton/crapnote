@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import 'fake-indexeddb/auto';
 import { openOfflineDB, upsertNote, updateCachedNote, getNote, deleteNote, type CachedNote } from './offlineDB';
-import { acknowledgeCachedSave, acknowledgeCachedPrivacy, cacheSavedNote, latestTimestamp, SaveRequests } from './noteSave';
+import { acknowledgeCachedSave, acknowledgeCachedPrivacy, cacheSavedNote, cacheLearnedPrivacy, mergeSavedFlag, latestTimestamp, SaveRequests } from './noteSave';
 
 const t0 = '2026-09-15T10:00:00.000000001Z';
 const t1 = '2026-09-15T10:00:00.000000002Z';
@@ -80,6 +80,41 @@ describe('content save acknowledgements', () => {
 		requests.begin(1, 'title');
 		requests.begin(2, 'body');
 		expect(body()).toBe(true);
+	});
+});
+
+describe('flag response acknowledgements', () => {
+	const current = { id: 1, title: 'New title', body: 'New body', private: true,
+		starred: false, pinned: false, locked: false, pin_order: 0, archived: false,
+		created_at: t0, updated_at: t2 };
+	const stale = { ...current, title: 'Old title', body: 'Old body', private: false,
+		starred: true, pinned: true, locked: true, pin_order: -3, updated_at: t0 };
+	it.each(['starred', 'pinned', 'locked'] as const)('acknowledges only %s without rolling back content or privacy', (flag) => {
+		expect(mergeSavedFlag(current, stale, flag)).toEqual({
+			...current, [flag]: true, ...(flag === 'pinned' ? { pin_order: -3 } : {}),
+		});
+	});
+	it.each(['starred', 'pinned', 'locked'] as const)('applies the explicit privacy guard to a late %s response', (flag) => {
+		const requests = new SaveRequests();
+		const acceptPrivacy = requests.guardPrivacy(1);
+		requests.privacyChanged(1);
+		expect(mergeSavedFlag({ ...current, private: false }, { ...stale, private: true }, flag, acceptPrivacy()).private).toBe(false);
+	});
+	it.each(['starred', 'pinned', 'locked'] as const)('learns private=true from a current %s response', (flag) => {
+		expect(mergeSavedFlag({ ...current, private: false }, { ...stale, private: true }, flag).private).toBe(true);
+	});
+	it('persists learned privacy without acknowledging cached content or flag work', async () => {
+		const db = await openOfflineDB();
+		try {
+			const original = cached({ private: false, is_dirty: true, body: 'Offline body',
+				flags_dirty: true, flags_toggled: { starred: true }, starred: true });
+			await upsertNote(db, original);
+			expect(await cacheLearnedPrivacy(openOfflineDB, { ...stale, private: true }, () => true)).toBe(true);
+			expect(await getNote(db, 1)).toEqual({ ...original, private: true });
+			await updateCachedNote(db, 1, (note) => ({ ...note!, private: false }));
+			expect(await cacheLearnedPrivacy(openOfflineDB, { ...stale, private: true }, () => false)).toBe(true);
+			expect(await getNote(db, 1)).toMatchObject({ private: false });
+		} finally { await deleteNote(db, 1); db.close(); }
 	});
 });
 

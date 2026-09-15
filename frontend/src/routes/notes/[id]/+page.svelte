@@ -33,7 +33,7 @@
 	import { EMPTY_FORMATS, type ActiveFormats } from '$lib/milkdown/formatState';
 	import { finishTitleDraft } from '$lib/titleDraft';
 	import { mergeCachedNote } from '$lib/noteMerge';
-	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, learnedPrivacy, SaveRequests } from '$lib/noteSave';
+	import { cacheSavedNote, cacheLearnedPrivacy, mergeSavedFlag, type ToggleFlag, CACHE_SAVE_WARNING, latestTimestamp, learnedPrivacy, SaveRequests } from '$lib/noteSave';
 
 	const noteId = $derived(Number($page.params.id));
 
@@ -102,11 +102,19 @@
 		note = toggled;
 	}
 
+	async function applyFlagResponse(updated: Note, flag: ToggleFlag, acceptPrivacy: () => boolean) {
+		if (note?.id === updated.id) note = mergeSavedFlag(note, updated, flag, acceptPrivacy());
+		if (!await cacheLearnedPrivacy(openOwnedCache, updated, acceptPrivacy)) {
+			offlineWriteError = CACHE_SAVE_WARNING;
+		}
+	}
+
 	async function mobToggleStar() {
 		if (!note) return;
+		const acceptPrivacy = saveRequests.guardPrivacy(noteId);
 		try {
 			const updated = await api.notes.toggleStar(noteId);
-			note = note ? { ...updated, title: note.title } : updated;
+			await applyFlagResponse(updated, 'starred', acceptPrivacy);
 		} catch (err) {
 			await toggleFlagOffline(err, 'starred');
 		}
@@ -114,9 +122,10 @@
 
 	async function mobTogglePin() {
 		if (!note) return;
+		const acceptPrivacy = saveRequests.guardPrivacy(noteId);
 		try {
 			const updated = await api.notes.togglePin(noteId);
-			note = note ? { ...updated, title: note.title } : updated;
+			await applyFlagResponse(updated, 'pinned', acceptPrivacy);
 		} catch (err) {
 			await toggleFlagOffline(err, 'pinned');
 		}
@@ -127,9 +136,10 @@
 		if (!note) return;
 		const id = note.id;
 		await finishTitleSaves();
+		const acceptPrivacy = saveRequests.guardPrivacy(id);
 		try {
 			const updated = await api.notes.toggleLock(id);
-			note = note ? { ...updated, title: note.title } : updated;
+			await applyFlagResponse(updated, 'locked', acceptPrivacy);
 		} catch (err) {
 			await toggleFlagOffline(err, 'locked');
 		}
