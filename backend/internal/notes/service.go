@@ -84,10 +84,10 @@ func (s *Service) Unarchive(ctx context.Context, id, userID int64) error {
 	return s.repo.Unarchive(ctx, id, userID)
 }
 
-// ListArchived returns archived notes for a user, optionally paginated.
+// ListArchived returns archived notes for a user, optionally searched and paginated.
 // limit <= 0 disables pagination.
-func (s *Service) ListArchived(ctx context.Context, userID int64, limit, offset int) ([]*Note, error) {
-	return s.repo.ListArchived(ctx, userID, limit, offset)
+func (s *Service) ListArchived(ctx context.Context, userID int64, search string, limit, offset int) ([]*Note, error) {
+	return s.repo.ListArchived(ctx, userID, search, limit, offset)
 }
 
 // ToggleLock flips the locked flag and returns the updated note. This is the

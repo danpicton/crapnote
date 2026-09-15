@@ -323,6 +323,17 @@ func TestNotesHandler_ListArchived(t *testing.T) {
 	if len(list) != 1 || list[0]["title"] != "In Archive" {
 		t.Fatalf("unexpected archived list: %v", list)
 	}
+
+	// A search query is applied before pagination and keeps results in archive.
+	req4 := httptest.NewRequest(http.MethodGet, "/api/archive?search=In+Arch", nil)
+	req4 = withUser(req4, user)
+	w4 := httptest.NewRecorder()
+	h.ListArchived(w4, req4)
+	var searched []map[string]any
+	json.NewDecoder(w4.Body).Decode(&searched) //nolint:errcheck
+	if len(searched) != 1 || searched[0]["title"] != "In Archive" {
+		t.Fatalf("unexpected archived search: %v", searched)
+	}
 }
 
 func TestNotesHandler_Unarchive(t *testing.T) {

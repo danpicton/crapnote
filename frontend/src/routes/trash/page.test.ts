@@ -55,6 +55,140 @@ describe('Trash page', () => {
 		});
 	});
 
+	it('searches deleted note titles and bodies as the user types', async () => {
+		vi.mocked(api.trash.list)
+			.mockResolvedValueOnce([mockEntry(), mockEntry({ note_id: 2, title: 'Other note' })])
+			.mockResolvedValueOnce([mockEntry()]);
+		render(TrashPage);
+		const input = await screen.findByRole('searchbox', { name: /search trash/i });
+
+		await fireEvent.input(input, { target: { value: 'eleph' } });
+
+		await waitFor(() => expect(api.trash.list).toHaveBeenLastCalledWith(
+			{ search: 'eleph' }, expect.any(AbortSignal)
+		));
+	});
+
+	it('shows no results and clearing search restores the trash', async () => {
+		vi.mocked(api.trash.list)
+			.mockResolvedValueOnce([mockEntry()])
+			.mockResolvedValueOnce([])
+			.mockResolvedValueOnce([mockEntry()]);
+		render(TrashPage);
+		const input = await screen.findByRole('searchbox', { name: /search trash/i });
+		await fireEvent.input(input, { target: { value: 'missing' } });
+		await screen.findByText(/no deleted notes match/i);
+
+		await fireEvent.click(screen.getByRole('button', { name: /clear search/i }));
+
+		await waitFor(() => expect(screen.getByText('Deleted Note')).toBeInTheDocument());
+		expect(input).toHaveValue('');
+		expect(api.trash.list).toHaveBeenLastCalledWith({}, expect.any(AbortSignal));
+	});
+
+	it('restores a note from filtered results', async () => {
+		vi.mocked(api.trash.list)
+			.mockResolvedValueOnce([mockEntry(), mockEntry({ note_id: 2, title: 'Matching note' })])
+			.mockResolvedValueOnce([mockEntry({ note_id: 2, title: 'Matching note' })]);
+		vi.mocked(api.trash.restore).mockResolvedValueOnce(undefined);
+		render(TrashPage);
+		await fireEvent.input(await screen.findByRole('searchbox', { name: /search trash/i }), {
+			target: { value: 'matching' },
+		});
+		await screen.findByText('Matching note');
+
+		await fireEvent.click(screen.getByRole('button', { name: /restore note/i }));
+
+		await waitFor(() => expect(api.trash.restore).toHaveBeenCalledWith(2));
+	});
+
+	it('does not resurrect a restored note when an older search finishes', async () => {
+		let resolveSearch!: (entries: ReturnType<typeof mockEntry>[]) => void;
+		const searchResponse = new Promise<ReturnType<typeof mockEntry>[]>((resolve) => {
+			resolveSearch = resolve;
+		});
+		vi.mocked(api.trash.list)
+			.mockResolvedValueOnce([mockEntry()])
+			.mockReturnValueOnce(searchResponse);
+		vi.mocked(api.trash.restore).mockResolvedValueOnce(undefined);
+		render(TrashPage);
+		const input = await screen.findByRole('searchbox', { name: /search trash/i });
+		await screen.findByText('Deleted Note');
+		await fireEvent.input(input, { target: { value: 'deleted' } });
+		await fireEvent.click(screen.getByRole('button', { name: /restore note/i }));
+		await waitFor(() => expect(screen.queryByText('Deleted Note')).not.toBeInTheDocument());
+
+		resolveSearch([mockEntry()]);
+		await searchResponse;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(screen.queryByText('Deleted Note')).not.toBeInTheDocument();
+	});
+
+	it('does not resurrect a permanently deleted note when an older search finishes', async () => {
+		let resolveSearch!: (entries: ReturnType<typeof mockEntry>[]) => void;
+		const searchResponse = new Promise<ReturnType<typeof mockEntry>[]>((resolve) => {
+			resolveSearch = resolve;
+		});
+		vi.mocked(api.trash.list)
+			.mockResolvedValueOnce([mockEntry()])
+			.mockReturnValueOnce(searchResponse);
+		vi.mocked(api.trash.deleteOne).mockResolvedValueOnce(undefined);
+		render(TrashPage);
+		const input = await screen.findByRole('searchbox', { name: /search trash/i });
+		await screen.findByText('Deleted Note');
+		await fireEvent.input(input, { target: { value: 'deleted' } });
+		await fireEvent.click(screen.getByRole('button', { name: /delete permanently/i }));
+		await waitFor(() => expect(screen.queryByText('Deleted Note')).not.toBeInTheDocument());
+
+		resolveSearch([mockEntry()]);
+		await searchResponse;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(screen.queryByText('Deleted Note')).not.toBeInTheDocument();
+	});
+
+	it('does not refill emptied trash when an older search finishes', async () => {
+		let resolveSearch!: (entries: ReturnType<typeof mockEntry>[]) => void;
+		const searchResponse = new Promise<ReturnType<typeof mockEntry>[]>((resolve) => {
+			resolveSearch = resolve;
+		});
+		vi.mocked(api.trash.list)
+			.mockResolvedValueOnce([mockEntry()])
+			.mockReturnValueOnce(searchResponse);
+		vi.mocked(api.trash.empty).mockResolvedValueOnce(undefined);
+		vi.stubGlobal('confirm', () => true);
+		render(TrashPage);
+		const input = await screen.findByRole('searchbox', { name: /search trash/i });
+		await screen.findByText('Deleted Note');
+		await fireEvent.input(input, { target: { value: 'deleted' } });
+		await fireEvent.click(screen.getByRole('button', { name: /empty trash/i }));
+		await waitFor(() => expect(screen.queryByText('Deleted Note')).not.toBeInTheDocument());
+
+		resolveSearch([mockEntry()]);
+		await searchResponse;
+		await new Promise((resolve) => setTimeout(resolve, 0));
+
+		expect(screen.queryByText('Deleted Note')).not.toBeInTheDocument();
+		vi.unstubAllGlobals();
+	});
+
+	it('permanently deletes a note from filtered results', async () => {
+		vi.mocked(api.trash.list)
+			.mockResolvedValueOnce([mockEntry(), mockEntry({ note_id: 2, title: 'Matching note' })])
+			.mockResolvedValueOnce([mockEntry({ note_id: 2, title: 'Matching note' })]);
+		vi.mocked(api.trash.deleteOne).mockResolvedValueOnce(undefined);
+		render(TrashPage);
+		await fireEvent.input(await screen.findByRole('searchbox', { name: /search trash/i }), {
+			target: { value: 'matching' },
+		});
+		await screen.findByText('Matching note');
+
+		await fireEvent.click(screen.getByRole('button', { name: /delete permanently/i }));
+
+		await waitFor(() => expect(api.trash.deleteOne).toHaveBeenCalledWith(2));
+	});
+
 	it('shows empty trash button', async () => {
 		render(TrashPage);
 		await waitFor(() => {

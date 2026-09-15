@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/danpicton/crapnote/internal/db"
@@ -20,16 +21,21 @@ func NewRepo(database *db.DB) *Repo {
 	return &Repo{db: database}
 }
 
-// List returns trashed notes for the given user. limit <= 0 disables
-// pagination.
-func (r *Repo) List(ctx context.Context, userID int64, limit, offset int) ([]*Entry, error) {
+// List returns trashed notes for the given user, optionally filtered with the
+// notes full-text search. limit <= 0 disables pagination.
+func (r *Repo) List(ctx context.Context, userID int64, search string, limit, offset int) ([]*Entry, error) {
 	query := `
 		SELECT t.note_id, t.user_id, n.title, t.deleted_at
 		FROM trash t
 		JOIN notes n ON n.id = t.note_id
-		WHERE t.user_id = ?
-		ORDER BY t.deleted_at DESC`
+		WHERE t.user_id = ?`
 	args := []any{userID}
+	if search != "" {
+		escaped := strings.ReplaceAll(search, `"`, `""`)
+		query += ` AND n.id IN (SELECT rowid FROM notes_fts WHERE notes_fts MATCH ?)`
+		args = append(args, `"`+escaped+`"*`)
+	}
+	query += ` ORDER BY t.deleted_at DESC`
 	if limit > 0 {
 		query += ` LIMIT ? OFFSET ?`
 		args = append(args, limit, offset)

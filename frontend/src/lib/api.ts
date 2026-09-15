@@ -217,7 +217,8 @@ export const api = {
 		toggleLock: (id: number) => request<Note>('PATCH', `/api/notes/${id}/lock`),
 		archive: (id: number) => request<void>('PATCH', `/api/notes/${id}/archive`),
 		unarchive: (id: number) => request<void>('PATCH', `/api/notes/${id}/unarchive`),
-		listArchived: () => requestAllPages<Note>('/api/archive'),
+		listArchived: (params?: { search?: string }, signal?: AbortSignal) =>
+			requestAllPages<Note>('/api/archive', params, signal),
 	},
 
 	tags: {
@@ -274,7 +275,8 @@ export const api = {
 	},
 
 	trash: {
-		list: () => requestAllPages<TrashEntry>('/api/trash'),
+		list: (params?: { search?: string }, signal?: AbortSignal) =>
+			requestAllPages<TrashEntry>('/api/trash', params, signal),
 		restore: (id: number) => request<void>('POST', `/api/trash/${id}/restore`),
 		deleteOne: (id: number) => request<void>('DELETE', `/api/trash/${id}`),
 		empty: () => request<void>('DELETE', '/api/trash'),

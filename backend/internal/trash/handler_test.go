@@ -2,6 +2,7 @@ package trash_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -39,6 +40,33 @@ func TestTrashHandler_ListAndRestore(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("List: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestTrashHandler_ListSearch(t *testing.T) {
+	database := openTestDB(t)
+	userRepo := auth.NewUserRepo(database)
+	user, err := userRepo.Create(context.Background(), "searcher", "$2a$12$x", false)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	matching := seedNote(t, database, user.ID, "Deleted elephant")
+	nonmatching := seedNote(t, database, user.ID, "Other deleted note")
+	trashNote(t, database, matching, user.ID)
+	trashNote(t, database, nonmatching, user.ID)
+	h := trash.NewHandler(trash.NewService(trash.NewRepo(database)))
+
+	req := withUser(httptest.NewRequest(http.MethodGet, "/api/trash?search=eleph", nil), user)
+	w := httptest.NewRecorder()
+	h.List(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("List: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var entries []map[string]any
+	json.NewDecoder(w.Body).Decode(&entries) //nolint:errcheck
+	if len(entries) != 1 || entries[0]["title"] != "Deleted elephant" {
+		t.Fatalf("unexpected trash search: %v", entries)
 	}
 }
 

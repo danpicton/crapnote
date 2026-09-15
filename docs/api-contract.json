@@ -508,8 +508,15 @@
       "scope": "read",
       "admin_only": false,
       "cookie_only": false,
-      "description": "List your archived notes.",
+      "description": "List your archived notes, optionally filtered by full-text search.",
       "params": [
+        {
+          "name": "search",
+          "in": "query",
+          "type": "string",
+          "required": false,
+          "description": "Full-text search query."
+        },
         {
           "name": "limit",
           "in": "query",
@@ -764,8 +771,15 @@
       "scope": "read",
       "admin_only": false,
       "cookie_only": false,
-      "description": "List trashed notes and when each will be permanently deleted.",
+      "description": "List trashed notes and when each will be permanently deleted, optionally filtered by full-text search.",
       "params": [
+        {
+          "name": "search",
+          "in": "query",
+          "type": "string",
+          "required": false,
+          "description": "Full-text search query."
+        },
         {
           "name": "limit",
           "in": "query",

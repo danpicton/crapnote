@@ -124,7 +124,7 @@ func TestNoteRepo_ListArchivedIncludesLockedFlag(t *testing.T) {
 		t.Fatalf("SetLocked: %v", err)
 	}
 
-	list, err := repo.ListArchived(ctx, userID, 0, 0)
+	list, err := repo.ListArchived(ctx, userID, "", 0, 0)
 	if err != nil {
 		t.Fatalf("ListArchived: %v", err)
 	}

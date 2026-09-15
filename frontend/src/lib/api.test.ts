@@ -143,8 +143,8 @@ describe('api.notes', () => {
 			.mockResolvedValueOnce(ok(Array.from({ length: 100 }, (_, index) => ({ ...note, id: index + 1 }))))
 			.mockResolvedValueOnce(ok([{ ...note, id: 101 }]));
 
-		await expect(api.notes.listArchived()).resolves.toHaveLength(101);
-		expect(mockFetch.mock.calls[1][0]).toBe('/api/archive?limit=100&offset=100');
+		await expect(api.notes.listArchived({ search: 'eleph' })).resolves.toHaveLength(101);
+		expect(mockFetch.mock.calls[1][0]).toBe('/api/archive?search=eleph&limit=100&offset=100');
 	});
 });
 
@@ -167,8 +167,8 @@ describe('api.trash', () => {
 			.mockResolvedValueOnce(ok(Array.from({ length: 100 }, (_, index) => ({ ...entry, note_id: index + 1 }))))
 			.mockResolvedValueOnce(ok([{ ...entry, note_id: 101 }]));
 
-		await expect(api.trash.list()).resolves.toHaveLength(101);
-		expect(mockFetch.mock.calls[1][0]).toBe('/api/trash?limit=100&offset=100');
+		await expect(api.trash.list({ search: 'eleph' })).resolves.toHaveLength(101);
+		expect(mockFetch.mock.calls[1][0]).toBe('/api/trash?search=eleph&limit=100&offset=100');
 	});
 });
 

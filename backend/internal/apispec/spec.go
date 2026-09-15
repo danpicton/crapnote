@@ -125,6 +125,13 @@ func pageParams() []Param {
 	}
 }
 
+func searchablePageParams() []Param {
+	return append([]Param{{
+		Name: "search", In: InQuery, Type: TypeString,
+		Description: "Full-text search query.",
+	}}, pageParams()...)
+}
+
 func noteID() Param {
 	return Param{Name: "id", In: InPath, Type: TypeInteger, Required: true, Description: "Note ID."}
 }
@@ -300,8 +307,8 @@ func Registry() []Operation {
 		},
 		{
 			Name: "archive_list", Method: "GET", Path: "/api/archive", Scope: ScopeRead,
-			Description: "List your archived notes.",
-			Params:      pageParams(),
+			Description: "List your archived notes, optionally filtered by full-text search.",
+			Params:      searchablePageParams(),
 		},
 
 		// ── Note–tag associations ───────────────────────────────────────
@@ -391,8 +398,8 @@ func Registry() []Operation {
 		// ── Trash ───────────────────────────────────────────────────────
 		{
 			Name: "trash_list", Method: "GET", Path: "/api/trash", Scope: ScopeRead,
-			Description: "List trashed notes and when each will be permanently deleted.",
-			Params:      pageParams(),
+			Description: "List trashed notes and when each will be permanently deleted, optionally filtered by full-text search.",
+			Params:      searchablePageParams(),
 		},
 		{
 			Name: "trash_restore", Method: "POST", Path: "/api/trash/{id}/restore", Scope: ScopeWrite,

@@ -12,8 +12,8 @@ func NewService(repo *Repo) *Service {
 	return &Service{repo: repo}
 }
 
-func (s *Service) List(ctx context.Context, userID int64, limit, offset int) ([]*Entry, error) {
-	return s.repo.List(ctx, userID, limit, offset)
+func (s *Service) List(ctx context.Context, userID int64, search string, limit, offset int) ([]*Entry, error) {
+	return s.repo.List(ctx, userID, search, limit, offset)
 }
 
 func (s *Service) Restore(ctx context.Context, noteID, userID int64) error {

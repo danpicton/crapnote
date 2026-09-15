@@ -299,7 +299,9 @@ func (h *Handler) ListArchived(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page := httpx.ParsePage(r)
-	notes, err := h.svc.ListArchived(r.Context(), u.ID, page.Limit, page.Offset)
+	notes, err := h.svc.ListArchived(
+		r.Context(), u.ID, r.URL.Query().Get("search"), page.Limit, page.Offset,
+	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
