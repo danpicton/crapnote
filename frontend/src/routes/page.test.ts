@@ -1088,6 +1088,33 @@ describe('Title drafts', () => {
 		vi.useRealTimers();
 	});
 
+	it('keeps the active draft when sync remaps an offline note ID', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([{
+			id: -1, title: 'Offline title', body: '', starred: false, pinned: false, tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
+			is_dirty: true, is_new: true,
+		}]);
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Offline title'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Draft after sync' } });
+
+		vi.stubGlobal('navigator', { ...navigator, onLine: true });
+		vi.mocked(syncOfflineChanges).mockResolvedValue({
+			...emptySyncResult,
+			mappings: [{ tempId: -1, serverId: 7 }],
+		});
+		vi.mocked(offlineDB.getAllNotes).mockResolvedValue([]);
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ id: 7, title: 'Offline title' })]);
+		window.dispatchEvent(new Event('online'));
+
+		await waitFor(() => expect(syncOfflineChanges).toHaveBeenCalled());
+		await waitFor(() => expect((title as HTMLInputElement).value).toBe('Draft after sync'));
+		await fireEvent.blur(title);
+		expect(api.notes.update).toHaveBeenCalledWith(7, { title: 'Draft after sync' });
+	});
+
 	it('commits the original note before switching to another note', async () => {
 		vi.mocked(api.notes.list).mockResolvedValue([
 			mockNote({ id: 1, title: 'First note' }),

@@ -709,7 +709,15 @@
 		// If the note we had open was a temp-ID that just got a real server ID, update selection
 		if (selectedId !== null) {
 			const mapping = result.mappings.find((m) => m.tempId === selectedId);
-			if (mapping) selectedId = mapping.serverId;
+			if (mapping) {
+				selectedId = mapping.serverId;
+				notes = notes.map((note) => note.id === mapping.tempId
+					? { ...note, id: mapping.serverId }
+					: note);
+				if (titleDraft?.noteId === mapping.tempId) {
+					titleDraft = { ...titleDraft, noteId: mapping.serverId };
+				}
+			}
 		}
 
 		// Pull: refresh list so server-side changes (from another device, conflict notes,
