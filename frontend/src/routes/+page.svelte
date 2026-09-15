@@ -377,7 +377,11 @@
 		sidebarResizePointer = e.pointerId;
 		sidebarResizeStartX = e.clientX;
 		sidebarResizeStartWidth = sidebarWidth;
-		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+		try {
+			(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+		} catch {
+			// Capture is best-effort; movement over the handle still resizes.
+		}
 	}
 
 	function onSidebarResizeMove(e: PointerEvent) {

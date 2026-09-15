@@ -235,6 +235,23 @@ describe('Notes page', () => {
 		expect(JSON.parse(localStorage.getItem('crapnote-sidebar')!)).toEqual({ hidden: false, width: 310 });
 	});
 
+	it('resizes the sidebar by dragging its edge', async () => {
+		const { container } = render(Page);
+		const resize = await screen.findByRole('separator', { name: 'Resize sidebar' });
+		const pointer = (type: string, clientX: number) => {
+			const event = new MouseEvent(type, { bubbles: true, button: 0, clientX });
+			Object.defineProperty(event, 'pointerId', { value: 1 });
+			return event;
+		};
+
+		await fireEvent(resize, pointer('pointerdown', 300));
+		await fireEvent(resize, pointer('pointermove', 365));
+		await fireEvent(resize, pointer('pointerup', 365));
+
+		expect(container.querySelector('aside')).toHaveStyle({ width: '365px' });
+		expect(JSON.parse(localStorage.getItem('crapnote-sidebar')!)).toEqual({ hidden: false, width: 365 });
+	});
+
 	it('clamps a restored width when the desktop window is narrower', async () => {
 		vi.stubGlobal('innerWidth', 700);
 		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: false, width: 480 }));
