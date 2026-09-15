@@ -52,7 +52,7 @@ func TestTrashRepo_List(t *testing.T) {
 	trashNote(t, database, noteID, userID)
 
 	repo := trash.NewRepo(database)
-	entries, err := repo.List(context.Background(), userID, 0, 0)
+	entries, err := repo.List(context.Background(), userID, "", 0, 0)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -65,6 +65,31 @@ func TestTrashRepo_List(t *testing.T) {
 	}
 	if e.PermanentDeleteAt.IsZero() {
 		t.Fatal("PermanentDeleteAt must be set")
+	}
+}
+
+func TestTrashRepo_List_SearchesTitleAndBody(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	titleMatch := seedNote(t, database, userID, "Deleted elephant")
+	bodyMatch := seedNote(t, database, userID, "Deleted body")
+	activeMatch := seedNote(t, database, userID, "Active elephant")
+	_, _ = database.Exec(`UPDATE notes SET body = ? WHERE id = ?`, "elephantine detail", bodyMatch)
+	trashNote(t, database, titleMatch, userID)
+	trashNote(t, database, bodyMatch, userID)
+
+	repo := trash.NewRepo(database)
+	entries, err := repo.List(context.Background(), userID, "eleph", 0, 0)
+	if err != nil {
+		t.Fatalf("List search: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected title and body matches only, got %+v", entries)
+	}
+	for _, entry := range entries {
+		if entry.NoteID == activeMatch {
+			t.Fatalf("search leaked active note: %+v", entry)
+		}
 	}
 }
 
@@ -81,7 +106,7 @@ func TestTrashRepo_Restore(t *testing.T) {
 		t.Fatalf("Restore: %v", err)
 	}
 
-	entries, _ := repo.List(ctx, userID, 0, 0)
+	entries, _ := repo.List(ctx, userID, "", 0, 0)
 	if len(entries) != 0 {
 		t.Fatal("note should no longer be in trash after restore")
 	}
@@ -154,7 +179,7 @@ func TestTrashRepo_Empty(t *testing.T) {
 		t.Fatalf("Empty: %v", err)
 	}
 
-	entries, _ := repo.List(ctx, userID, 0, 0)
+	entries, _ := repo.List(ctx, userID, "", 0, 0)
 	if len(entries) != 0 {
 		t.Fatalf("expected empty trash, got %d entries", len(entries))
 	}
@@ -192,7 +217,7 @@ func TestTrashRepo_PurgeExpired(t *testing.T) {
 	}
 
 	// New note should still be in trash.
-	entries, _ := repo.List(ctx, userID, 0, 0)
+	entries, _ := repo.List(ctx, userID, "", 0, 0)
 	if len(entries) != 1 || entries[0].NoteID != newNote {
 		t.Fatalf("recent note should remain in trash, got %v", entries)
 	}

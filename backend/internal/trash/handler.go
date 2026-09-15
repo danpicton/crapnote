@@ -29,7 +29,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	page := httpx.ParsePage(r)
-	entries, err := h.svc.List(r.Context(), u.ID, page.Limit, page.Offset)
+	entries, err := h.svc.List(
+		r.Context(), u.ID, r.URL.Query().Get("search"), page.Limit, page.Offset,
+	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
