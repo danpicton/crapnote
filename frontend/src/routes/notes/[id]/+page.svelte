@@ -17,6 +17,7 @@
 	import { toggleUnderlineCommand } from '$lib/milkdown/underline';
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, OfflineError, type Note, type Tag } from '$lib/api';
+	import { canArchiveOrDelete, isLockRejection, LOCKED_ACTION_MESSAGE } from '$lib/noteActions';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
 	import NoteBodyTextSizeSelect from '$lib/components/NoteBodyTextSizeSelect.svelte';
 	import { getNote as getOfflineNote, updateCachedNote, noteFlags } from '$lib/offlineDB';
@@ -62,6 +63,8 @@
 	 * screen a dropped save is indistinguishable from a successful one.
 	 */
 	let offlineWriteError = $state<string | null>(null);
+	let actionError = $state<string | null>(null);
+	let visibleError = $derived(actionError ?? offlineWriteError);
 	let activeFormats = $state<ActiveFormats>({ ...EMPTY_FORMATS });
 
 	beforeNavigate(() => {
@@ -147,6 +150,11 @@
 				goto('/');
 				return;
 			} catch (err) {
+				if (isLockRejection(err)) {
+					actionError = LOCKED_ACTION_MESSAGE;
+					note = note ? { ...note, locked: true } : note;
+					return;
+				}
 				// Only queue on a connectivity failure — a genuine server
 				// rejection must not hide a note that still exists.
 				if (!(err instanceof OfflineError)) throw err;
@@ -174,6 +182,11 @@
 				goto('/');
 				return;
 			} catch (err) {
+				if (isLockRejection(err)) {
+					actionError = LOCKED_ACTION_MESSAGE;
+					note = note ? { ...note, locked: true } : note;
+					return;
+				}
 				// See mobArchive — only queue on connectivity failure.
 				if (!(err instanceof OfflineError)) throw err;
 			}
@@ -520,10 +533,10 @@
 	onfocusin={() => (editorFocused = true)}
 	onfocusout={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) editorFocused = false; }}
 >
-	{#if offlineWriteError}
+	{#if visibleError}
 		<div class="offline-write-error" role="alert">
-			<span>{offlineWriteError}</span>
-			<button onclick={() => (offlineWriteError = null)} aria-label="Dismiss">
+			<span>{visibleError}</span>
+			<button onclick={() => { offlineWriteError = null; actionError = null; }} aria-label="Dismiss">
 				<X size={14} />
 			</button>
 		</div>
@@ -747,18 +760,22 @@
 				{#if note.locked}<Lock size={18} aria-hidden="true" />{:else}<LockOpen size={18} aria-hidden="true" />{/if}
 				<span>{note.locked ? 'Unlock note' : 'Lock note'}</span>
 			</button>
-			<button class="mob-sheet-row" onclick={mobArchive}>
-				<Archive size={18} aria-hidden="true" />
-				<span>Archive</span>
-			</button>
+			{#if canArchiveOrDelete(note)}
+				<button class="mob-sheet-row" onclick={mobArchive}>
+					<Archive size={18} aria-hidden="true" />
+					<span>Archive</span>
+				</button>
+			{/if}
 			<button class="mob-sheet-row" onclick={mobForceSync}>
 				<RefreshCw size={18} aria-hidden="true" />
 				<span>Force sync</span>
 			</button>
-			<button class="mob-sheet-row mob-sheet-danger" onclick={mobDelete} disabled={note.locked}>
-				<Trash2 size={18} aria-hidden="true" />
-				<span>Delete</span>
-			</button>
+			{#if canArchiveOrDelete(note)}
+				<button class="mob-sheet-row mob-sheet-danger" onclick={mobDelete}>
+					<Trash2 size={18} aria-hidden="true" />
+					<span>Delete</span>
+				</button>
+			{/if}
 		</div>
 	{/if}
 

@@ -30,6 +30,14 @@ beforeEach(async () => {
 });
 
 describe('markNoteDeletedOffline', () => {
+	it('refuses a locked note without changing its cached state', async () => {
+		await expect(markNoteDeletedOffline(OWNER, serverNote({ locked: true })))
+			.rejects.toThrow(/unlock/i);
+		const db = await openOfflineDB();
+		expect(await getNote(db, 10)).toBeNull();
+		db.close();
+	});
+
 	it('flags an already-cached server note for delete replay', async () => {
 		const db = await openOfflineDB();
 		await upsertNote(db, {
@@ -78,6 +86,14 @@ describe('markNoteDeletedOffline', () => {
 });
 
 describe('markNoteArchivedOffline', () => {
+	it('refuses a locked note without queueing an archive', async () => {
+		await expect(markNoteArchivedOffline(OWNER, serverNote({ locked: true })))
+			.rejects.toThrow(/unlock/i);
+		const db = await openOfflineDB();
+		expect(await getNote(db, 10)).toBeNull();
+		db.close();
+	});
+
 	it('flags a server note for archive replay, keeping local edits', async () => {
 		const db = await openOfflineDB();
 		await upsertNote(db, {

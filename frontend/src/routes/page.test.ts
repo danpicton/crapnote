@@ -147,7 +147,7 @@ vi.mock('$lib/offlineSync', () => ({
 
 
 import { beforeNavigate, onNavigate } from '$app/navigation';
-import { api, OfflineError } from '$lib/api';
+import { api, ApiError, OfflineError } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
 import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 import { syncOfflineChanges } from '$lib/offlineSync';
@@ -1872,15 +1872,46 @@ describe('Lock controls in the note list', () => {
 		expect(row().querySelector('.note-meta-icons [title="Unlock"]')).toBeNull();
 	});
 
-	// Deleting a locked note is rejected by the API with 423.
-	it('disables delete in the hover actions while a note is locked', async () => {
+	it('hides archive and delete everywhere in the list while a note is locked', async () => {
 		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ locked: true })]);
 
 		render(Page);
 		await waitFor(() => screen.getByText('Test Note'));
 
-		const del = row().querySelector('.note-hover-actions [title="Delete"]') as HTMLButtonElement;
-		expect(del.disabled).toBe(true);
+		expect(row().querySelector('.note-hover-actions [title="Move to archive"]')).toBeNull();
+		expect(row().querySelector('.note-hover-actions [title="Delete"]')).toBeNull();
+		const item = screen.getByText('Test Note').closest('.note-item') as HTMLElement;
+		expect(item.querySelector('.mob-swipe-archive')).toBeNull();
+		expect(item.querySelector('.mob-swipe-delete')).toBeNull();
+
+		await fireEvent.click(screen.getByText('Test Note').closest('.note-btn') as HTMLElement);
+		await fireEvent.click(await screen.findByTitle('More actions'));
+		expect(screen.queryByRole('menuitem', { name: /move to trash/i })).not.toBeInTheDocument();
+	});
+
+	it.each(['archive', 'delete'] as const)('keeps the note visible and explains a stale 423 from %s', async (action) => {
+		vi.mocked(api.notes[action]).mockRejectedValue(new ApiError(423, 'locked'));
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		await fireEvent.click(row().querySelector(action === 'archive'
+			? '[title="Move to archive"]'
+			: '[title="Delete"]') as HTMLElement);
+
+		await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/unlock/i));
+		expect(screen.getByText('Test Note')).toBeInTheDocument();
+	});
+
+	it('restores archive and delete actions after unlocking', async () => {
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ locked: true })]);
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ locked: false }));
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		await fireEvent.click(row().querySelector('.note-meta-icons [title="Unlock"]') as HTMLElement);
+
+		await waitFor(() => expect(row().querySelector('[title="Move to archive"]')).toBeTruthy());
+		expect(row().querySelector('[title="Delete"]')).toBeTruthy();
 	});
 
 	it('offers lock alongside pin and star in the mobile swipe panel', async () => {
