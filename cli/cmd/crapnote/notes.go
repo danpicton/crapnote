@@ -73,6 +73,7 @@ func notesCreate(e *env, args []string) int {
 	title := fs.String("title", "", "note title (required)")
 	body := fs.String("body", "", "note body (markdown)")
 	bodyFile := fs.String("body-file", "", "read body from file, or '-' for stdin")
+	private := fs.Bool("private", false, "create the note as private (hidden from MCP)")
 	if err := fs.Parse(args); err != nil {
 		return parseCode(err)
 	}
@@ -84,7 +85,13 @@ func notesCreate(e *env, args []string) int {
 		return code
 	}
 
-	note, err := e.client.CreateNote(e.ctx, *title, b)
+	var note *client.Note
+	var err error
+	if *private {
+		note, err = e.client.CreateNoteWithPrivacy(e.ctx, *title, b, true)
+	} else {
+		note, err = e.client.CreateNote(e.ctx, *title, b)
+	}
 	if err != nil {
 		return e.fail(err)
 	}
@@ -139,6 +146,7 @@ func notesUpdate(e *env, args []string) int {
 	title := fs.String("title", "", "new title")
 	body := fs.String("body", "", "new body (markdown)")
 	bodyFile := fs.String("body-file", "", "read new body from file, or '-' for stdin")
+	private := fs.Bool("private", false, "set privacy explicitly: --private=true or --private=false")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
 		return parseCode(err)
@@ -152,6 +160,7 @@ func notesUpdate(e *env, args []string) int {
 	}
 
 	var titlePtr, bodyPtr *string
+	var privatePtr *bool
 	visited := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
 	if visited["title"] {
@@ -164,11 +173,14 @@ func notesUpdate(e *env, args []string) int {
 		}
 		bodyPtr = &b
 	}
-	if titlePtr == nil && bodyPtr == nil {
-		return e.usageError("notes update: provide --title and/or --body/--body-file")
+	if visited["private"] {
+		privatePtr = private
+	}
+	if titlePtr == nil && bodyPtr == nil && privatePtr == nil {
+		return e.usageError("notes update: provide --title, --body/--body-file, and/or --private=true|false")
 	}
 
-	note, err := e.client.UpdateNote(e.ctx, id, titlePtr, bodyPtr)
+	note, err := e.client.UpdateNoteWithPrivacy(e.ctx, id, titlePtr, bodyPtr, privatePtr)
 	if err != nil {
 		return e.fail(err)
 	}
@@ -317,6 +329,9 @@ func noteFlags(n client.Note) string {
 	}
 	if n.Locked {
 		flags += "L"
+	}
+	if n.Private {
+		flags += "V"
 	}
 	if flags == "" {
 		flags = "-"

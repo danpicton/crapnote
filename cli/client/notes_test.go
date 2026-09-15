@@ -62,6 +62,37 @@ func TestCreateNotePostsTitleAndBody(t *testing.T) {
 	}
 }
 
+func TestCreateAndUpdateNotePrivacyPayloads(t *testing.T) {
+	c, rec := newRecordingServer(t, http.StatusCreated, `{"id":7,"title":"T","body":"B","private":true}`)
+	if _, err := c.CreateNoteWithPrivacy(context.Background(), "T", "B", true); err != nil {
+		t.Fatal(err)
+	}
+	var sent map[string]any
+	_ = json.Unmarshal(rec.Body, &sent)
+	if sent["private"] != true {
+		t.Fatalf("create body = %v", sent)
+	}
+
+	private := false
+	if _, err := c.UpdateNoteWithPrivacy(context.Background(), 7, nil, nil, &private); err != nil {
+		t.Fatal(err)
+	}
+	sent = map[string]any{}
+	_ = json.Unmarshal(rec.Body, &sent)
+	if sent["private"] != false || len(sent) != 1 {
+		t.Fatalf("privacy-only update body = %v", sent)
+	}
+
+	if _, err := c.UpdateNoteWithPrivacy(context.Background(), 7, nil, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	sent = map[string]any{}
+	_ = json.Unmarshal(rec.Body, &sent)
+	if _, exists := sent["private"]; exists {
+		t.Fatalf("nil privacy must be omitted: %v", sent)
+	}
+}
+
 func TestGetNoteFetchesByID(t *testing.T) {
 	c, rec := newRecordingServer(t, http.StatusOK, noteJSON)
 

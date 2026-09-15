@@ -48,12 +48,12 @@ Usage:
 Subcommands:
   list [--starred] [--tag TAG_ID] [--limit N] [--offset N]
       List active notes (excludes archived and trashed).
-  create --title T [--body B | --body-file F | --body-file -]
-      Create a note. Body comes from the flag, a file, or stdin ('-').
+  create --title T [--body B | --body-file F | --body-file -] [--private]
+      Create a note. Privacy defaults to false when --private is omitted.
   get ID
       Show one note: title, flags, timestamps, body.
-  update ID [--title T] [--body B | --body-file F]
-      Change title and/or body. Omitted fields are left unchanged.
+  update ID [--title T] [--body B | --body-file F] [--private=true|false]
+      Change title, body, and/or privacy. Omitted fields are left unchanged.
   delete ID
       Move a note to trash (restorable via 'crapnote trash restore ID').
   star ID | pin ID | lock ID
@@ -68,11 +68,13 @@ Subcommands:
 
 Flags column (list/search output and 'notes get'):
   P  pinned      *  starred
-  A  archived    L  locked
+  A  archived    L  locked      V  private (hidden from MCP)
   -  no flags set
 
 Examples:
   crapnote notes create --title "Meeting" --body-file - < notes.md
+  crapnote notes create --title "Personal" --private
+  crapnote notes update 7 --private=false
   crapnote notes list --tag 3 --starred
   crapnote notes get 7 --json
 `,
