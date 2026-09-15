@@ -4,6 +4,7 @@
 	import { page } from '$app/stores';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { theme } from '$lib/stores/theme.svelte';
+	import { noteBodyTextSize } from '$lib/stores/noteBodyTextSize.svelte';
 	import { registerSW } from '$lib/sw-register';
 	import OfflineUnlock from '$lib/components/OfflineUnlock.svelte';
 
@@ -53,6 +54,7 @@
 		// Fire-and-forget: init paints the local theme synchronously, then
 		// fetches the admin-set global default without blocking auth/redirects.
 		void theme.init();
+		noteBodyTextSize.init();
 		await auth.init();
 		const currentPath = $page.url.pathname;
 		if (!auth.user && !isPublicPath(currentPath)) {

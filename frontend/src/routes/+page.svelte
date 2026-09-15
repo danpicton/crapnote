@@ -24,6 +24,7 @@
 	import { shortcuts, matchShortcut, type ShortcutId } from '$lib/stores/shortcuts.svelte';
 	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
+	import NoteBodyTextSizeSelect from '$lib/components/NoteBodyTextSizeSelect.svelte';
 	import { getAllNotes, getNote, getDirtyNotes, upsertNote, updateCachedNote, deleteNote as deleteOfflineNote, noteFlags } from '$lib/offlineDB';
 	import { openOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 	import type { CachedNote } from '$lib/offlineDB';
@@ -2024,7 +2025,7 @@
 			>
 					<div class="toolbar" role="toolbar" aria-label="Formatting" tabindex="-1"
 					style:padding-left={!isMobileLayout && sidebarHidden ? '3rem' : undefined}
-					onmousedown={(e) => { if (!(e.target as Element).closest('input, textarea')) e.preventDefault(); }}
+					onmousedown={(e) => { if (!(e.target as Element).closest('input, textarea, select')) e.preventDefault(); }}
 				>
 						<!-- Headings expanding group -->
 						<div class="tb-heading-wrap">
@@ -2067,6 +2068,7 @@
 						<span class="tb-sep"></span>
 						<button class="tb-btn" onclick={() => cmd(insertImageCommand.key)} title="Insert image"><Image size={13} /></button>
 						<span class="tb-spacer"></span>
+						<NoteBodyTextSizeSelect />
 						<button class="tb-btn tb-star" class:tb-star-on={selectedNote.starred} onclick={() => toggleStar(selectedNote.id)} title={selectedNote.starred ? 'Unstar' : 'Star'}><Star size={13} /></button>
 						<button class="tb-btn tb-lock" class:tb-lock-on={selectedNote.locked} onclick={() => toggleLock(selectedNote.id)} title={selectedNote.locked ? 'Unlock note' : 'Lock note'} aria-pressed={selectedNote.locked}>
 							{#if selectedNote.locked}<Lock size={13} />{:else}<LockOpen size={13} />{/if}

@@ -178,7 +178,7 @@
 		outline: none;
 		min-height: 200px;
 		font-family: var(--sans);
-		font-size: 1rem;
+		font-size: var(--note-body-font-size, 1rem);
 		text-align: left;
 	}
 
