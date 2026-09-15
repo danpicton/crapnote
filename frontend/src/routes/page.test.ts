@@ -1115,6 +1115,22 @@ describe('Title drafts', () => {
 		expect(api.notes.update).toHaveBeenCalledWith(7, { title: 'Draft after sync' });
 	});
 
+	it('commits the source draft before selecting a duplicate', async () => {
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Edited source' }));
+		vi.mocked(api.notes.create).mockResolvedValue(mockNote({ id: 2, title: 'Edited source (copy)' }));
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Edited source' } });
+
+		await fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+		await fireEvent.click(screen.getByRole('menuitem', { name: /duplicate note/i }));
+
+		expect(api.notes.update).toHaveBeenCalledWith(1, { title: 'Edited source' });
+		expect(api.notes.create).toHaveBeenCalledWith('Edited source (copy)');
+		await waitFor(() => expect(screen.getByDisplayValue('Edited source (copy)')).toBeInTheDocument());
+	});
+
 	it('commits the original note before switching to another note', async () => {
 		vi.mocked(api.notes.list).mockResolvedValue([
 			mockNote({ id: 1, title: 'First note' }),

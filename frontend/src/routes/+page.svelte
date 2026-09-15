@@ -1029,6 +1029,7 @@
 	}
 
 	async function duplicateNote(id: number) {
+		commitTitleDraft();
 		const note = notes.find(n => n.id === id);
 		if (!note) return;
 		showNoteMenu = false;
