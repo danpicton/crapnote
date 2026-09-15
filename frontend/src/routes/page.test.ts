@@ -326,6 +326,18 @@ describe('Notes page', () => {
 		await waitFor(() => expect(api.notes.create).toHaveBeenCalled());
 	});
 
+	it('keeps the hide control on the first header row at minimum width while offline', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: false, width: 220 }));
+		render(Page);
+
+		const hide = await screen.findByRole('button', { name: 'Hide sidebar' });
+		const header = hide.closest('header');
+		expect(header?.querySelector('.offline-row')).toHaveTextContent('Offline');
+		expect(hide.parentElement).toBe(header);
+		vi.unstubAllGlobals();
+	});
+
 	it('shows logout button', async () => {
 		render(Page);
 		await waitFor(() => expect(screen.getByTitle(/log out/i)).toBeInTheDocument());

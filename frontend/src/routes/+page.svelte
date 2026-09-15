@@ -1621,7 +1621,9 @@
 		<header class="sidebar-header">
 			<a href="/" class="wordmark app-name" onclick={(e) => { e.preventDefault(); void goHome(); }}>Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
 			{#if !isOnline}
-				<span class="offline-badge" title="You are offline — changes will sync when reconnected">Offline</span>
+				<div class="offline-row">
+					<span class="offline-badge" title="You are offline — changes will sync when reconnected">Offline</span>
+				</div>
 			{/if}
 			{#if selectedId}
 				<button class="hdr-btn mobile-show-editor" onclick={() => goto(`/notes/${selectedId}`)} title="View note" aria-label="View note">
@@ -2210,6 +2212,7 @@
 
 	.sidebar-header {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.5rem;
 		padding: 1.25rem 1.25rem 0.75rem;
@@ -2237,6 +2240,11 @@
 		background: var(--accent);
 		margin-left: 3px;
 		margin-bottom: 1px;
+	}
+
+	.offline-row {
+		order: 2;
+		flex-basis: 100%;
 	}
 
 	.offline-badge {
