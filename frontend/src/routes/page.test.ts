@@ -214,6 +214,14 @@ describe('Notes page', () => {
 		expect(container.querySelector('aside')).toBeInTheDocument();
 	});
 
+	it('reserves toolbar space for the restore control when the sidebar is hidden', async () => {
+		render(Page);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Hide sidebar' }));
+
+		const toolbar = await screen.findByRole('toolbar', { name: /formatting/i });
+		expect(getComputedStyle(toolbar).paddingLeft).toBe('3rem');
+	});
+
 	it('restores the hidden state and last expanded width', async () => {
 		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: true, width: 420 }));
 		const { container } = render(Page);

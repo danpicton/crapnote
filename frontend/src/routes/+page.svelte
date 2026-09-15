@@ -2018,6 +2018,7 @@
 				onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editorFocused = false; showHeadingsMenu = false; } }}
 			>
 					<div class="toolbar" role="toolbar" aria-label="Formatting" tabindex="-1"
+					style:padding-left={!isMobileLayout && sidebarHidden ? '3rem' : undefined}
 					onmousedown={(e) => { if (!(e.target as Element).closest('input, textarea')) e.preventDefault(); }}
 				>
 						<!-- Headings expanding group -->
