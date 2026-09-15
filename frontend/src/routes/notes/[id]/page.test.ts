@@ -56,7 +56,7 @@ vi.mock('$app/stores', async () => {
 	};
 });
 
-vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
+vi.mock('$app/navigation', () => ({ goto: vi.fn(), beforeNavigate: vi.fn(), onNavigate: vi.fn() }));
 
 vi.mock('$lib/api', () => {
 	class ApiError extends Error {
@@ -69,7 +69,7 @@ vi.mock('$lib/api', () => {
 	ApiError,
 	OfflineError,
 	api: {
-		notes: { get: vi.fn(), update: vi.fn(), toggleLock: vi.fn() },
+		notes: { get: vi.fn(), update: vi.fn(), toggleLock: vi.fn(), archive: vi.fn(), delete: vi.fn() },
 		tags: {
 			list: vi.fn(),
 			listForNote: vi.fn(),
@@ -87,6 +87,10 @@ vi.mock('$lib/offlineDB', async (importOriginal) => ({
 	openOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
 	getNote: vi.fn().mockResolvedValue(null),
 	upsertNote: vi.fn().mockResolvedValue(undefined),
+	updateCachedNote: vi.fn(async (db, id, update) => {
+		const next = update(await offlineDB.getNote(db, id));
+		if (next) await offlineDB.upsertNote(db, next);
+	}),
 	getAllNotes: vi.fn().mockResolvedValue([]),
 	getDirtyNotes: vi.fn().mockResolvedValue([]),
 	deleteNote: vi.fn().mockResolvedValue(undefined),
@@ -116,7 +120,7 @@ import { api } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
 import { openOwnedOfflineDB, requireOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 import { auth } from '$lib/stores/auth.svelte';
-import { goto } from '$app/navigation';
+import { beforeNavigate, onNavigate, goto } from '$app/navigation';
 
 const mockNote = (overrides = {}) => ({
 	id: 42, title: 'My Note', body: '# Hello',
@@ -174,22 +178,259 @@ describe('/notes/[id] page', () => {
 		expect(goto).toHaveBeenCalledWith('/');
 	});
 
-	it('title input change schedules auto-save', async () => {
+	it('keeps a cleared focused title as a draft past the body autosave delay', async () => {
 		vi.useFakeTimers();
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Untitled' }));
+
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: '' } });
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+		expect((title as HTMLInputElement).value).toBe('');
+		expect(api.notes.update).not.toHaveBeenCalled();
+		vi.useRealTimers();
+	});
+
+	it('restores the saved title when a whitespace-only draft blurs', async () => {
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: '  \t' } });
+
+		await fireEvent.blur(title);
+
+		expect((title as HTMLInputElement).value).toBe('My Note');
+		expect(api.notes.update).not.toHaveBeenCalled();
+	});
+
+	it('commits a nonblank title when the input blurs', async () => {
 		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'New Title' }));
 
 		render(NotePage);
-		await waitFor(() => screen.getByDisplayValue('My Note'));
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'New Title' } });
+		expect(api.notes.update).not.toHaveBeenCalled();
 
-		await fireEvent.input(screen.getByDisplayValue('My Note'), {
-			target: { value: 'New Title' },
-		});
-
-		// Auto-save fires after 800 ms debounce. waitFor is inert under fake
-		// timers (@testing-library/dom only takes its fake-timer path when a
-		// global `jest` exists), so drive the clock and assert directly.
-		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		await fireEvent.blur(title);
 		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'New Title' });
+	});
+
+	it('serializes repeated title commits so the newest title wins', async () => {
+		let resolveFirst!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockImplementation((_id, update) => {
+			if (update.title === 'First edit') {
+				return new Promise((resolve) => { resolveFirst = resolve; });
+			}
+			return Promise.resolve(mockNote({ title: update.title }));
+		});
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'First edit' } });
+		await fireEvent.blur(title);
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Second edit' } });
+		await fireEvent.blur(title);
+
+		expect(api.notes.update).toHaveBeenCalledTimes(1);
+		expect((title as HTMLInputElement).value).toBe('Second edit');
+
+		resolveFirst(mockNote({ title: 'First edit' }));
+		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Second edit' }));
+		expect((title as HTMLInputElement).value).toBe('Second edit');
+	});
+
+	for (const failure of ['open', 'transaction'] as const) {
+		it.each(['navigation', 'toggleLock', 'archive', 'delete'] as const)(`allows mobile %s after a successful title PUT even if cache ${failure} fails`, async (action) => {
+			vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Saved remotely' }));
+			vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ title: 'Saved remotely', locked: true }));
+			vi.mocked(api.notes.archive).mockResolvedValue(undefined);
+			vi.mocked(api.notes.delete).mockResolvedValue(undefined);
+			render(NotePage);
+			const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+			if (failure === 'open') vi.mocked(openOwnedOfflineDB).mockRejectedValueOnce(new Error('cache unavailable'));
+			else vi.mocked(offlineDB.updateCachedNote).mockRejectedValueOnce(new Error('transaction aborted'));
+			await fireEvent.focus(title);
+			await fireEvent.input(title, { target: { value: 'Saved remotely' } });
+			if (action === 'navigation') {
+				const before = vi.mocked(beforeNavigate).mock.calls[0][0];
+				before({ type: 'popstate' } as Parameters<typeof before>[0]);
+				const navigate = vi.mocked(onNavigate).mock.calls[0][0];
+				await expect(Promise.resolve(navigate({ type: 'popstate' } as Parameters<typeof navigate>[0]))).resolves.toBeUndefined();
+			} else {
+				if (action === 'toggleLock') await fireEvent.click(screen.getByTitle('Lock note'));
+				else {
+					await fireEvent.click(screen.getByRole('button', { name: 'Note actions' }));
+					await fireEvent.click(screen.getByRole('button', { name: action === 'archive' ? 'Archive' : 'Delete' }));
+				}
+				await waitFor(() => expect(api.notes[action]).toHaveBeenCalledWith(42));
+			}
+			expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Saved remotely' });
+			expect(offlineDB.upsertNote).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ is_dirty: true }));
+			expect(screen.getByRole('alert')).toHaveTextContent(/saved.*server.*offline cache/i);
+		});
+	}
+
+	it.each(['archive', 'delete'] as const)('saves the title before mobile %s and destination navigation', async (action) => {
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		vi.mocked(api.notes[action]).mockResolvedValue(undefined);
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved before mobile removal' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Note actions' }));
+		await fireEvent.click(screen.getByRole('button', { name: action === 'archive' ? 'Archive' : 'Delete' }));
+		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Saved before mobile removal' });
+		expect(api.notes[action]).not.toHaveBeenCalled();
+		expect(goto).not.toHaveBeenCalled();
+		resolveTitle(mockNote({ title: 'Saved before mobile removal' }));
+		await waitFor(() => expect(api.notes[action]).toHaveBeenCalledWith(42));
+		await waitFor(() => expect(goto).toHaveBeenCalledWith('/'));
+	});
+
+	it('commits a focused title draft before browser-back navigation', async () => {
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Saved on back' }));
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved on back' } });
+
+		expect(beforeNavigate).toHaveBeenCalled();
+		const navigationHook = vi.mocked(beforeNavigate).mock.calls[0][0];
+		navigationHook({ type: 'popstate' } as Parameters<typeof navigationHook>[0]);
+
+		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Saved on back' });
+	});
+
+	it('waits for the title commit before the destination reads the note on browser back', async () => {
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved on back' } });
+		const before = vi.mocked(beforeNavigate).mock.calls[0][0];
+		before({ type: 'popstate' } as Parameters<typeof before>[0]);
+		expect(onNavigate).toHaveBeenCalled();
+		const navigate = vi.mocked(onNavigate).mock.calls[0][0];
+		let arrived = false;
+		const navigation = Promise.resolve(navigate({ type: 'popstate' } as Parameters<typeof navigate>[0])).then(() => { arrived = true; });
+		await Promise.resolve();
+		expect(arrived).toBe(false);
+		resolveTitle(mockNote({ title: 'Saved on back' }));
+		await navigation;
+		expect(arrived).toBe(true);
+	});
+
+	it('saves a title draft before locking the note', async () => {
+		let resolveTitle!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockReturnValue(new Promise((resolve) => { resolveTitle = resolve; }));
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ title: 'Edited before lock', locked: true }));
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Edited before lock' } });
+
+		await fireEvent.click(screen.getByTitle('Lock note'));
+
+		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Edited before lock' });
+		expect(api.notes.toggleLock).not.toHaveBeenCalled();
+		resolveTitle(mockNote({ title: 'Edited before lock' }));
+		await waitFor(() => expect(api.notes.toggleLock).toHaveBeenCalledWith(42));
+	});
+
+	it('records an acknowledged checkpoint even if the note has not reached the cache yet', async () => {
+		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Saved title', updated_at: '2024-01-03T00:00:00Z' }));
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved title' } });
+		await fireEvent.blur(title);
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+			title: 'Saved title', is_dirty: false, server_updated_at: '2024-01-03T00:00:00Z',
+		})));
+	});
+
+	it('replaces an earlier dirty cached title after a later successful online commit', async () => {
+		const { OfflineError } = await import('$lib/api');
+		vi.mocked(api.notes.update).mockRejectedValueOnce(new OfflineError());
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Earlier offline title' } });
+		await fireEvent.blur(title);
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ title: 'Earlier offline title', is_dirty: true })));
+		const dirty = vi.mocked(offlineDB.upsertNote).mock.calls.at(-1)![1];
+		vi.mocked(offlineDB.getNote).mockResolvedValue(dirty);
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Later online title', updated_at: '2024-01-02T00:00:00Z' }));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Later online title' } });
+		await fireEvent.blur(title);
+		await waitFor(() => expect(offlineDB.upsertNote).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+			title: 'Later online title', is_dirty: false, server_updated_at: '2024-01-02T00:00:00Z',
+		})));
+		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
+	});
+
+	it('does not regress the cached checkpoint when an older body response follows a title response', async () => {
+		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
+		let resolveBody!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockImplementation((_id, update) => {
+			if ('body' in update) return new Promise((resolve) => { resolveBody = resolve; });
+			return Promise.resolve(mockNote({ title: 'Saved title', body: 'Saved body', updated_at: '2024-01-03T00:00:00Z' }));
+		});
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		vi.mocked(offlineDB.getNote).mockResolvedValue({ id: 42, title: 'My Note', body: '# Hello', starred: false, pinned: false, tags: [],
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-01T00:00:00Z', is_dirty: false, is_new: false });
+		vi.useFakeTimers();
+		(editorProps.current!.onchange as (body: string) => void)('Saved body');
+		await vi.advanceTimersByTimeAsync(800);
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Saved title' } });
+		await fireEvent.blur(title);
+		await vi.advanceTimersByTimeAsync(0);
+		const afterTitle = vi.mocked(offlineDB.upsertNote).mock.calls.at(-1)![1];
+		expect(afterTitle.server_updated_at).toBe('2024-01-03T00:00:00Z');
+		vi.mocked(offlineDB.getNote).mockResolvedValue(afterTitle);
+		resolveBody(mockNote({ body: 'Saved body', updated_at: '2024-01-02T00:00:00Z' }));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(vi.mocked(offlineDB.upsertNote).mock.calls.at(-1)![1]).toMatchObject({
+			title: 'Saved title', body: 'Saved body', server_updated_at: '2024-01-03T00:00:00Z', local_updated_at: '2024-01-03T00:00:00Z',
+		});
+		vi.useRealTimers();
+		vi.mocked(offlineDB.getNote).mockResolvedValue(null);
+	});
+
+	it('keeps a committed title when an older body save responds later', async () => {
+		let resolveBody!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockImplementation((_id, update) => {
+			if ('body' in update) return new Promise((resolve) => { resolveBody = resolve; });
+			return Promise.resolve(mockNote({ title: 'Final title', body: '# Hello' }));
+		});
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		vi.useFakeTimers();
+		const onchange = editorProps.current?.onchange as ((body: string) => void) | undefined;
+		expect(onchange).toBeTypeOf('function');
+		onchange!('New body');
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Final title' } });
+		await fireEvent.blur(title);
+		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Final title' });
+
+		resolveBody(mockNote({ title: 'My Note', body: 'New body' }));
+		await vi.advanceTimersByTimeAsync(0);
+		expect((title as HTMLInputElement).value).toBe('Final title');
 		vi.useRealTimers();
 	});
 
@@ -306,6 +547,8 @@ describe('/notes/[id] offline mode', () => {
 		});
 
 		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		await fireEvent.blur(screen.getByDisplayValue('Edited Offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		expect(offlineDB.upsertNote).toHaveBeenCalledWith(
 			expect.anything(),
 			expect.objectContaining({ title: 'Edited Offline', is_dirty: true })
@@ -343,6 +586,8 @@ describe('/notes/[id] offline mode', () => {
 		});
 
 		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		await fireEvent.blur(screen.getByDisplayValue('Edited Offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		expect(offlineDB.upsertNote).toHaveBeenCalled();
 
 		const written = vi.mocked(offlineDB.upsertNote).mock.calls[0][1];
@@ -388,6 +633,8 @@ describe('/notes/[id] offline mode', () => {
 		});
 
 		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		await fireEvent.blur(screen.getByDisplayValue('Edited Offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		expect(offlineDB.upsertNote).toHaveBeenCalled();
 
 		const written = vi.mocked(offlineDB.upsertNote).mock.calls[0][1];
@@ -436,6 +683,8 @@ describe('/notes/[id] offline mode', () => {
 		});
 
 		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		await fireEvent.blur(screen.getByDisplayValue('Edited Offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		expect(offlineDB.upsertNote).toHaveBeenCalled();
 
 		// toEqual, not toMatchObject: a dropped or clobbered field must fail.
@@ -471,6 +720,8 @@ describe('/notes/[id] offline mode', () => {
 		});
 
 		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+		await fireEvent.blur(screen.getByDisplayValue('Edited While Unreachable'));
+		await vi.advanceTimersByTimeAsync(0);
 		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Edited While Unreachable' });
 		expect(offlineDB.upsertNote).toHaveBeenCalled();
 
@@ -802,6 +1053,8 @@ describe('/notes/[id] offline write ownership guard', () => {
 			target: { value: 'Edited Offline' },
 		});
 		await vi.advanceTimersByTimeAsync(1000);
+		await fireEvent.blur(screen.getByDisplayValue('Edited Offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		vi.useRealTimers();
 
 		expect(offlineDB.upsertNote).not.toHaveBeenCalled();
@@ -817,6 +1070,8 @@ describe('/notes/[id] offline write ownership guard', () => {
 			target: { value: 'Edited Offline' },
 		});
 		await vi.advanceTimersByTimeAsync(1000);
+		await fireEvent.blur(screen.getByDisplayValue('Edited Offline'));
+		await vi.advanceTimersByTimeAsync(0);
 		vi.useRealTimers();
 
 		expect(offlineDB.upsertNote).toHaveBeenCalledWith(

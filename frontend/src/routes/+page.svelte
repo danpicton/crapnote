@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { beforeNavigate, onNavigate, goto } from '$app/navigation';
 	import {
 		toggleStrongCommand,
 		toggleEmphasisCommand,
@@ -24,12 +24,15 @@
 	import { shortcuts, matchShortcut, type ShortcutId } from '$lib/stores/shortcuts.svelte';
 	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
-	import { getAllNotes, getNote, getDirtyNotes, upsertNote, deleteNote as deleteOfflineNote, noteFlags } from '$lib/offlineDB';
+	import { getAllNotes, getNote, getDirtyNotes, upsertNote, updateCachedNote, deleteNote as deleteOfflineNote, noteFlags } from '$lib/offlineDB';
 	import { openOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 	import type { CachedNote } from '$lib/offlineDB';
-	import { syncOfflineChanges, type SyncTrigger } from '$lib/offlineSync';
+	import { syncOfflineChanges, type SyncTrigger, type SyncResult } from '$lib/offlineSync';
 	import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 	import { sortNotes, reorderPinned, nextPinOrder } from '$lib/noteOrder';
+	import { finishTitleDraft } from '$lib/titleDraft';
+	import { TitleCommits } from '$lib/titleCommits';
+	import { cacheSavedNote, CACHE_SAVE_WARNING, latestTimestamp, SaveRequests } from '$lib/noteSave';
 	import {
 		dropIndexFromY,
 		findScrollParent,
@@ -78,6 +81,22 @@
 	let search = $state('');
 	let saving = $state(false);
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
+	let titleDraft = $state<{ noteId: number; savedTitle: string; value: string } | null>(null);
+	const titleSaveQueues = new Map<number, Promise<void>>();
+	const saveRequests = new SaveRequests();
+	const titleCommits = new TitleCommits();
+	const rekeyedNoteIds = new Map<number, number>();
+	let syncInFlight: Promise<SyncResult | null> | null = null;
+
+	beforeNavigate(() => { void commitTitleDraft(); });
+	onNavigate(async () => {
+		// History navigation can detach the input without blur. Wait for all
+		// source-note commits before the destination reads its list/cache.
+		while (titleDraft || titleSaveQueues.size) {
+			await commitTitleDraft();
+			await Promise.all([...titleSaveQueues.values()]);
+		}
+	});
 	// Helpers for detecting mobile viewport
 	function isMobile() { return window.matchMedia('(max-width: 640px)').matches; }
 
@@ -500,7 +519,7 @@
 		}
 	}
 
-	async function cacheNotesForOffline(serverNotes: Note[]): Promise<void> {
+	async function cacheNotesForOffline(serverNotes: Note[], protectTitles: (notes: Note[]) => Note[]): Promise<void> {
 		// Writing into someone else's store would defeat the read guard: the
 		// rows would then sit under an owner id that matches that user, who
 		// would be shown this account's notes on their next offline start.
@@ -527,16 +546,21 @@
 			if (existing?.is_dirty || existing?.flags_dirty || existing?.deleted_offline || existing?.archived_offline) continue;
 			// Fetch tags for this note so they're available offline
 			const noteTags = await api.tags.listForNote(note.id).catch(() => existing?.tags ?? []);
-			await upsertNote(db, {
-				id: note.id,
-				title: note.title,
-				body: note.body,
-				...noteFlags(note),
-				tags: noteTags.map(t => ({ id: t.id, name: t.name })),
-				server_updated_at: note.updated_at,
-				local_updated_at: note.updated_at,
-				is_dirty: false,
-				is_new: false,
+			await updateCachedNote(db, note.id, (current) => {
+				// Recheck after fetching tags, inside the same write transaction.
+				if (current?.is_dirty || current?.flags_dirty || current?.deleted_offline || current?.archived_offline) return null;
+				if (current && latestTimestamp(current.server_updated_at, note.updated_at) !== note.updated_at) return null;
+				return {
+					id: note.id,
+					title: protectTitles([note])[0].title,
+					body: note.body,
+					...noteFlags(note),
+					tags: noteTags.map(t => ({ id: t.id, name: t.name })),
+					server_updated_at: note.updated_at,
+					local_updated_at: note.updated_at,
+					is_dirty: false,
+					is_new: false,
+				};
 			});
 		}
 
@@ -631,6 +655,8 @@
 	async function loadNotes() {
 		invalidateList();
 		const version = listVersion;
+		const protectTitles = titleCommits.guardRead();
+		const paintCache = notes.length === 0 || !navigator.onLine;
 
 		// Paint whatever IndexedDB has *immediately* — don't make the first
 		// render wait for a network round-trip (or, worse, for the network to
@@ -640,10 +666,12 @@
 		let serverApplied = false;
 		const cachePaint = loadFromCache()
 			.then((cached) => {
-				if (version !== listVersion || serverApplied) return;
-				notes = cached;
+				// A background cache read must not detach the focused input while
+				// waiting for the authoritative response (e.g. after temp-ID sync).
+				if (version === listVersion && !serverApplied && paintCache) notes = protectTitles(cached);
+				return cached;
 			})
-			.catch(() => {});
+			.catch(() => [] as Note[]);
 
 		if (!navigator.onLine) {
 			isOnline = false;
@@ -662,16 +690,17 @@
 			const merged = await mergeServerWithCache(fetched);
 			if (version !== listVersion) return; // stale — newer load/mutation won
 			serverApplied = true;
-			notes = merged;
+			notes = protectTitles(merged);
 			// Cache top-N when no filter is active (we want the canonical recent list)
 			if (!search && activeTagId === null && !starredOnly) {
-				cacheNotesForOffline(fetched); // fire-and-forget
+				cacheNotesForOffline(fetched, protectTitles); // fire-and-forget
 			}
 		} catch {
 			if (version !== listVersion) return; // cancelled by a newer load/mutation
-			// Network failed despite navigator.onLine — server is unreachable.
+			// Network failed despite navigator.onLine — use the filtered cache.
 			isOnline = false;
-			await cachePaint;
+			const cached = await cachePaint;
+			if (version === listVersion) notes = protectTitles(cached);
 		} finally {
 			if (listRequestController === controller) listRequestController = null;
 		}
@@ -700,15 +729,43 @@
 			isOnline = false;
 			return;
 		}
+		if (syncInFlight) {
+			await syncInFlight;
+			return;
+		}
 		syncStatus = 'syncing';
 
-		const result = await syncOfflineChanges(trigger, auth.user?.id ?? null);
-
-		// If the note we had open was a temp-ID that just got a real server ID, update selection
-		if (selectedId !== null) {
-			const mapping = result.mappings.find((m) => m.tempId === selectedId);
-			if (mapping) selectedId = mapping.serverId;
-		}
+		// The barrier includes rekeying and always settles successfully. A failed
+		// push must release both current save waiters and future sync attempts.
+		const syncPromise = syncOfflineChanges(trigger, auth.user?.id ?? null)
+			.then((result) => {
+				// Rekey every note, including saves whose editor has since closed.
+				for (const mapping of result.mappings) {
+					rekeyedNoteIds.set(mapping.tempId, mapping.serverId);
+					if (selectedId === mapping.tempId) selectedId = mapping.serverId;
+					notes = notes.map((note) => note.id === mapping.tempId
+						? { ...note, id: mapping.serverId }
+						: note);
+					if (titleDraft?.noteId === mapping.tempId) {
+						titleDraft = { ...titleDraft, noteId: mapping.serverId };
+					}
+					titleCommits.remap(mapping.tempId, mapping.serverId);
+					const pendingSave = titleSaveQueues.get(mapping.tempId);
+					if (pendingSave) {
+						titleSaveQueues.delete(mapping.tempId);
+						titleSaveQueues.set(mapping.serverId, pendingSave);
+					}
+				}
+				return result;
+			})
+			.catch(() => {
+				syncStatus = 'unknown';
+				return null;
+			});
+		syncInFlight = syncPromise;
+		const result = await syncPromise;
+		if (syncInFlight === syncPromise) syncInFlight = null;
+		if (!result) return;
 
 		// Pull: refresh list so server-side changes (from another device, conflict notes,
 		// etc.) show up. loadNotes() merges with IDB so still-dirty local edits survive
@@ -973,6 +1030,7 @@
 	}
 
 	async function newNote() {
+		commitTitleDraft();
 		if (!navigator.onLine) {
 			await createNoteOffline();
 			return;
@@ -997,6 +1055,7 @@
 	}
 
 	async function selectNote(id: number) {
+		commitTitleDraft();
 		if (isMobile()) { goto(`/notes/${id}`); return; }
 		selectedId = id;
 		showTagPopover = false;
@@ -1017,6 +1076,7 @@
 	}
 
 	async function duplicateNote(id: number) {
+		commitTitleDraft();
 		const note = notes.find(n => n.id === id);
 		if (!note) return;
 		showNoteMenu = false;
@@ -1039,6 +1099,7 @@
 	}
 
 	async function applyFilter(tagId: number | null, starred: boolean) {
+		commitTitleDraft();
 		activeTagId = tagId;
 		starredOnly = starred;
 		await loadNotes();
@@ -1056,6 +1117,7 @@
 	}
 
 	async function goHome() {
+		commitTitleDraft();
 		search = '';
 		activeTagId = null;
 		starredOnly = false;
@@ -1116,95 +1178,119 @@
 		allTags = await api.tags.list();
 	}
 
-	function scheduleAutoSave(field: 'title' | 'body', value: string) {
-		if (!selectedId) return;
-		if (selectedNote?.locked) return;
-		if (saveTimer) clearTimeout(saveTimer);
-		const idAtSchedule = selectedId;
-		saveTimer = setTimeout(async () => {
-			if (!selectedId) return;
-			saving = true;
-			try {
-				if (!navigator.onLine) {
-					// Save to IndexedDB and mark dirty
-					const db = await openOwnedCache();
-					if (!db) { reportOfflineWriteRefused(); return; }
-					const existing = await getNote(db, idAtSchedule);
-					if (existing) {
-						await upsertNote(db, {
-							...existing,
-							[field]: value,
-							local_updated_at: new Date().toISOString(),
-							is_dirty: true,
-						});
-					} else {
-						// Note not yet in cache (was online when it loaded) — create a cache entry
-						const currentNote = notes.find(n => n.id === idAtSchedule);
-						if (currentNote) {
-							await upsertNote(db, {
-								id: currentNote.id,
-								title: field === 'title' ? value : currentNote.title,
-								body: field === 'body' ? value : currentNote.body,
-								starred: currentNote.starred,
-								pinned: currentNote.pinned,
-								tags: noteTags.map(t => ({ id: t.id, name: t.name })),
-								server_updated_at: currentNote.updated_at,
-								local_updated_at: new Date().toISOString(),
-								is_dirty: true,
-								is_new: false,
-							});
-						}
-					}
-					db.close();
-					notes = notes.map(n => n.id === idAtSchedule ? { ...n, [field]: value } : n);
-					syncStatus = 'unsynced';
-				} else {
-					try {
-						const updated = await api.notes.update(idAtSchedule, { [field]: value });
-						notes = notes.map((n) => (n.id === updated.id ? updated : n));
-						// Keep cache in sync — a refresh of server state, so a
-						// foreign store is simply skipped rather than reported.
-						const db = await openOwnedCache();
-						if (!db) return;
-						const existing = await getNote(db, updated.id);
-						if (existing && !existing.is_dirty) {
-							await upsertNote(db, {
-								...existing,
-								title: updated.title,
-								body: updated.body,
-								server_updated_at: updated.updated_at,
-								local_updated_at: updated.updated_at,
-							});
-						}
-						db.close();
-					} catch {
-						// Lost connectivity during save — fall back to offline save
-						const db = await openOwnedCache();
-						if (!db) { reportOfflineWriteRefused(); return; }
-						const currentNote = notes.find(n => n.id === idAtSchedule);
-						if (currentNote) {
-							const existing = await getNote(db, idAtSchedule);
-							await upsertNote(db, {
-								id: currentNote.id,
-								title: field === 'title' ? value : currentNote.title,
-								body: field === 'body' ? value : currentNote.body,
-								starred: currentNote.starred,
-								pinned: currentNote.pinned,
-								tags: existing?.tags ?? noteTags.map(t => ({ id: t.id, name: t.name })),
-								server_updated_at: currentNote.updated_at,
-								local_updated_at: new Date().toISOString(),
-								is_dirty: true,
-								is_new: existing?.is_new ?? false,
-							});
-						}
-						db.close();
-						notes = notes.map(n => n.id === idAtSchedule ? { ...n, [field]: value } : n);
-					}
-				}
-			} finally {
-				saving = false;
+	function beginTitleDraft(note: Note) {
+		if (note.locked) return;
+		titleDraft = { noteId: note.id, savedTitle: note.title, value: note.title };
+	}
+
+	function updateTitleDraft(value: string) {
+		if (titleDraft) {
+			titleDraft = { ...titleDraft, value };
+		} else if (selectedNote && !selectedNote.locked) {
+			titleDraft = { noteId: selectedNote.id, savedTitle: selectedNote.title, value };
+		}
+	}
+
+	function preservePendingTitle(note: Note): Note {
+		return titleCommits.preserve(note);
+	}
+
+	function queueTitleSave(noteId: number, title: string): Promise<void> {
+		const note = notes.find((note) => note.id === noteId);
+		if (!note) return Promise.resolve();
+		titleCommits.set(noteId, title);
+		const previous = titleSaveQueues.get(noteId);
+		const queued = previous
+			? previous.catch(() => {}).then(() => saveField(note, 'title', title))
+			: saveField(note, 'title', title);
+		titleSaveQueues.set(noteId, queued);
+		const cleanup = () => {
+			for (const [queuedNoteId, pendingSave] of titleSaveQueues) {
+				if (pendingSave !== queued) continue;
+				titleSaveQueues.delete(queuedNoteId);
+				titleCommits.settled(queuedNoteId, title);
 			}
-		}, 800);
+		};
+		void queued.then(cleanup, cleanup);
+		return queued;
+	}
+
+	function commitTitleDraft(): Promise<void> {
+		const draft = titleDraft;
+		if (!draft) return Promise.resolve();
+		titleDraft = null;
+		const result = finishTitleDraft(draft.savedTitle, draft.value);
+		if (!result.commit) return Promise.resolve();
+		notes = notes.map((note) => note.id === draft.noteId ? { ...note, title: result.title } : note);
+		return queueTitleSave(draft.noteId, result.title);
+	}
+
+	async function saveOfflineEdit(note: Note, field: 'title' | 'body', value: string, tags: CachedNote['tags']) {
+		const db = await openOwnedCache();
+		if (!db) { reportOfflineWriteRefused(); return; }
+		try {
+			// Opening the owned cache is asynchronous too: reconnect may have
+			// taken a sync snapshot since saveField's first check. From this last
+			// check to starting the write transaction there must be no await.
+			if (syncInFlight) await syncInFlight;
+			note = { ...note, id: rekeyedNoteIds.get(note.id) ?? note.id };
+			await updateCachedNote(db, note.id, (existing) => ({
+				...(existing ?? {
+					id: note.id, title: note.title, body: note.body, ...noteFlags(note), tags,
+					server_updated_at: note.updated_at, is_new: note.id < 0,
+				}),
+				[field]: value,
+				local_updated_at: new Date().toISOString(),
+				is_dirty: true,
+			}));
+		} finally {
+			db.close();
+		}
+		notes = notes.map((n) => n.id === note.id ? preservePendingTitle({ ...n, [field]: value }) : n);
+		syncStatus = 'unsynced';
+	}
+
+	async function saveField(note: Note, field: 'title' | 'body', value: string) {
+		if (note.locked) return;
+		const tags = selectedId === note.id ? noteTags.map(({ id, name }) => ({ id, name })) : [];
+		// Sync owns its snapshot until rekeying/checkpointing completes. Keep the
+		// source snapshot even if a filter or navigation removes it from the list.
+		if (syncInFlight) await syncInFlight;
+		const id = rekeyedNoteIds.get(note.id) ?? note.id;
+		const isLatestRequest = saveRequests.begin(id, field);
+		note = { ...note, id };
+		saving = true;
+		try {
+			if (!navigator.onLine || id < 0) {
+				await saveOfflineEdit(note, field, value, tags);
+				return;
+			}
+			let updated: Note;
+			try {
+				updated = await api.notes.update(id, { [field]: value });
+			} catch {
+				await saveOfflineEdit(note, field, value, tags);
+				return;
+			}
+			notes = notes.map((n) => n.id === id ? preservePendingTitle({
+				...n,
+				...(isLatestRequest() ? { [field]: updated[field] } : {}),
+				updated_at: latestTimestamp(n.updated_at, updated.updated_at),
+			}) : n);
+			if (!await cacheSavedNote(openOwnedCache, field, updated, isLatestRequest, tags)) {
+				offlineWriteError = CACHE_SAVE_WARNING;
+				syncStatus = 'unknown';
+			}
+		} finally {
+			saving = false;
+		}
+	}
+
+	function scheduleAutoSave(field: 'body', value: string) {
+		if (!selectedNote || selectedNote.locked) return;
+		if (saveTimer) clearTimeout(saveTimer);
+		const note = selectedNote;
+		saveTimer = setTimeout(() => void saveField(note, field, value), 800);
 	}
 
 	/**
@@ -1248,7 +1334,9 @@
 		}
 		if (!updated) return;
 		invalidateList(); // invalidate in-flight list loads carrying the old state
-		notes = notes.map((n) => (n.id === updated.id ? updated : n));
+		notes = notes.map((n) => (n.id === updated.id
+			? preservePendingTitle({ ...updated, title: n.title })
+			: n));
 	}
 
 	async function togglePin(id: number) {
@@ -1264,12 +1352,31 @@
 		// via nextPinOrder when not — so re-sorting on the shared comparator
 		// puts it at the top and leaves the rest as they were.
 		notes = sortNotes(
-			notes.map((n) => (n.id === updated.id ? updated : n)),
+			notes.map((n) => (n.id === updated.id
+				? preservePendingTitle({ ...updated, title: n.title })
+				: n)),
 			(n) => n.updated_at
 		);
 	}
 
+	/** Drain the target note's draft/queue before an action can make it read-only
+	 * or remove it. Resolve IDs again after awaits: sync may rekey the source.
+	 */
+	async function finishTitleForNote(id: number): Promise<number> {
+		for (;;) {
+			id = rekeyedNoteIds.get(id) ?? id;
+			if (titleDraft?.noteId === id) {
+				await commitTitleDraft();
+				continue;
+			}
+			const pending = titleSaveQueues.get(id);
+			if (!pending) return id;
+			await pending;
+		}
+	}
+
 	async function toggleLock(id: number) {
+		id = await finishTitleForNote(id);
 		let updated: Note | null;
 		try {
 			updated = await api.notes.toggleLock(id);
@@ -1278,7 +1385,9 @@
 		}
 		if (!updated) return;
 		invalidateList(); // invalidate in-flight list loads carrying the old state
-		notes = notes.map((n) => (n.id === updated.id ? updated : n));
+		notes = notes.map((n) => (n.id === updated.id
+			? preservePendingTitle({ ...updated, title: n.title })
+			: n));
 	}
 
 	/** Remove a note from the visible list after an archive/delete. */
@@ -1291,6 +1400,7 @@
 	}
 
 	async function archiveNote(id: number) {
+		id = await finishTitleForNote(id);
 		const note = notes.find((n) => n.id === id);
 		if (navigator.onLine) {
 			try {
@@ -1318,6 +1428,7 @@
 	}
 
 	async function deleteNote(id: number) {
+		id = await finishTitleForNote(id);
 		const note = notes.find((n) => n.id === id);
 		if (navigator.onLine) {
 			try {
@@ -1865,8 +1976,10 @@
 							bind:this={titleInput}
 							class="title-input"
 							type="text"
-						value={selectedNote.title}
-							oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
+						value={titleDraft?.noteId === selectedNote.id ? titleDraft.value : selectedNote.title}
+							onfocus={() => beginTitleDraft(selectedNote)}
+							oninput={(e) => updateTitleDraft((e.target as HTMLInputElement).value)}
+							onblur={commitTitleDraft}
 							placeholder="Note title"
 							readonly={selectedNote.locked}
 						/>
