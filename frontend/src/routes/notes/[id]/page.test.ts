@@ -174,6 +174,21 @@ describe('/notes/[id] page', () => {
 		expect(goto).toHaveBeenCalledWith('/');
 	});
 
+	it('keeps a cleared focused title as a draft past the body autosave delay', async () => {
+		vi.useFakeTimers();
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Untitled' }));
+
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: '' } });
+		await vi.advanceTimersByTimeAsync(DEBOUNCE_MS);
+
+		expect((title as HTMLInputElement).value).toBe('');
+		expect(api.notes.update).not.toHaveBeenCalled();
+		vi.useRealTimers();
+	});
+
 	it('title input change schedules auto-save', async () => {
 		vi.useFakeTimers();
 		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'New Title' }));

@@ -31,6 +31,7 @@
 	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
 	import { wrapSelectedInBulletListCommand } from '$lib/milkdown/listedit';
 	import { EMPTY_FORMATS, type ActiveFormats } from '$lib/milkdown/formatState';
+	import { finishTitleDraft } from '$lib/titleDraft';
 
 	const noteId = $derived(Number($page.params.id));
 
@@ -39,6 +40,7 @@
 	let allTags = $state<Tag[]>([]);
 	let saving = $state(false);
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
+	let titleDraft = $state<{ savedTitle: string; value: string } | null>(null);
 	let editorRef = $state<EditorRef | null>(null);
 	let titleInput = $state<HTMLInputElement | null>(null);
 	let showTagPopover = $state(false);
@@ -357,11 +359,28 @@
 		if (note) note = { ...note, [field]: value };
 	}
 
-	function scheduleAutoSave(field: 'title' | 'body', value: string) {
+	function beginTitleDraft() {
+		if (!note || note.locked) return;
+		titleDraft = { savedTitle: note.title, value: note.title };
+	}
+
+	function updateTitleDraft(value: string) {
+		if (titleDraft) titleDraft = { ...titleDraft, value };
+	}
+
+	function commitTitleDraft() {
+		const draft = titleDraft;
+		if (!draft || !note) return;
+		titleDraft = null;
+		const result = finishTitleDraft(draft.savedTitle, draft.value);
+		if (!result.commit) return;
+		note = { ...note, title: result.title };
+		void saveField('title', result.title);
+	}
+
+	async function saveField(field: 'title' | 'body', value: string) {
 		if (note?.locked) return;
-		if (saveTimer) clearTimeout(saveTimer);
-		saveTimer = setTimeout(async () => {
-			saving = true;
+		saving = true;
 			try {
 				if (!navigator.onLine || noteId < 0) {
 					await saveOfflineEdit(field, value);
@@ -369,7 +388,11 @@
 				}
 				try {
 					const updated = await api.notes.update(noteId, { [field]: value });
-					note = updated;
+					note = note ? {
+						...updated,
+						title: field === 'title' ? updated.title : note.title,
+						body: field === 'body' ? updated.body : note.body,
+					} : updated;
 					// Keep cache in sync — a refresh of server state, so a
 					// foreign store is skipped rather than reported.
 					const db = await openOwnedCache();
@@ -379,8 +402,7 @@
 						if (existing && !existing.is_dirty) {
 							await upsertNote(db, {
 								...existing,
-								title: updated.title,
-								body: updated.body,
+								[field]: updated[field],
 								server_updated_at: updated.updated_at,
 								local_updated_at: updated.updated_at,
 							});
@@ -394,10 +416,15 @@
 					// flush it once the server is reachable again.
 					await saveOfflineEdit(field, value);
 				}
-			} finally {
-				saving = false;
-			}
-		}, 800);
+		} finally {
+			saving = false;
+		}
+	}
+
+	function scheduleAutoSave(field: 'title' | 'body', value: string) {
+		if (note?.locked) return;
+		if (saveTimer) clearTimeout(saveTimer);
+		saveTimer = setTimeout(() => void saveField(field, value), 800);
 	}
 
 	function cmd(key: string | CmdKey<unknown>, payload?: unknown) {
@@ -543,8 +570,10 @@
 			bind:this={titleInput}
 			class="title-input"
 			type="text"
-			value={note.title}
-			oninput={(e) => scheduleAutoSave('title', (e.target as HTMLInputElement).value)}
+			value={titleDraft?.value ?? note.title}
+			onfocus={beginTitleDraft}
+			oninput={(e) => updateTitleDraft((e.target as HTMLInputElement).value)}
+			onblur={commitTitleDraft}
 			placeholder="Note title"
 			readonly={note.locked}
 		/>
