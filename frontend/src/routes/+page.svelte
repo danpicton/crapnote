@@ -1961,7 +1961,7 @@
 	{#if !isMobileLayout}
 		<!-- Svelte does not recognise the ARIA separator's value attributes as
 		     the keyboard-operable separator pattern defined by ARIA. -->
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
 		<div
 			class="sidebar-resizer"
 			class:sidebar-resizing={sidebarResizePointer !== null}

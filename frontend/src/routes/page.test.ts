@@ -235,6 +235,16 @@ describe('Notes page', () => {
 		expect(JSON.parse(localStorage.getItem('crapnote-sidebar')!)).toEqual({ hidden: false, width: 310 });
 	});
 
+	it('clamps a restored width when the desktop window is narrower', async () => {
+		vi.stubGlobal('innerWidth', 700);
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: false, width: 480 }));
+		const { container } = render(Page);
+
+		await screen.findByRole('button', { name: 'Hide sidebar' });
+		expect(container.querySelector('aside')).toHaveStyle({ width: '380px' });
+		vi.unstubAllGlobals();
+	});
+
 	it('renders preview links underlined and unbracketed', async () => {
 		vi.mocked(api.notes.list).mockResolvedValue([
 			mockNote({
