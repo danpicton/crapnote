@@ -147,8 +147,23 @@ func (r *Repo) AddToNote(ctx context.Context, noteID, tagID, userID int64) error
 		return ErrNotFound
 	}
 
-	// Verify the tag belongs to the user.
-	if _, err := r.FindByID(ctx, tagID, userID); err != nil {
+	// Verify the tag belongs to the user and does not disclose a private-only
+	// association to MCP callers that guessed its ID.
+	if requestctx.IsMCP(ctx) {
+		var visible int
+		err := r.db.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM tags t
+			WHERE t.id=? AND t.user_id=?
+			  AND (NOT EXISTS (SELECT 1 FROM note_tags a WHERE a.tag_id=t.id)
+			       OR EXISTS (SELECT 1 FROM note_tags a JOIN notes n ON n.id=a.note_id
+			                  WHERE a.tag_id=t.id AND n.private=0))`, tagID, userID).Scan(&visible)
+		if err != nil {
+			return err
+		}
+		if visible == 0 {
+			return ErrNotFound
+		}
+	} else if _, err := r.FindByID(ctx, tagID, userID); err != nil {
 		return err
 	}
 

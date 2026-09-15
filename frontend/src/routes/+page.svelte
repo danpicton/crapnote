@@ -55,7 +55,7 @@
 		List, ListOrdered, ListTodo, Minus, Undo2, Redo2, Image, Link,
 		Plus, Star, Pin, GripVertical, Archive, Trash2, Settings, LogOut,
 		ChevronRight, Search,
-		CloudUpload, CheckCircle2, Lock, LockOpen, ImageOff, MoreHorizontal,
+		CloudUpload, CheckCircle2, Lock, LockOpen, EyeOff, ImageOff, MoreHorizontal,
 		RefreshCw, WifiOff, X,
 	} from 'lucide-svelte';
 	import MobileTabBar from '$lib/components/MobileTabBar.svelte';
@@ -1390,6 +1390,17 @@
 			: n));
 	}
 
+	async function togglePrivacy(id: number) {
+		id = await finishTitleForNote(id);
+		const current = notes.find((n) => n.id === id);
+		if (!current || current.locked) return;
+		const updated = await api.notes.update(id, { private: !current.private });
+		invalidateList();
+		notes = notes.map((n) => n.id === id
+			? preservePendingTitle({ ...updated, title: n.title })
+			: n);
+	}
+
 	/** Remove a note from the visible list after an archive/delete. */
 	function removeNoteFromList(id: number) {
 		invalidateList(); // invalidate any in-flight list load fetched pre-removal
@@ -1950,6 +1961,9 @@
 						<button class="tb-btn tb-star" class:tb-star-on={selectedNote.starred} onclick={() => toggleStar(selectedNote.id)} title={selectedNote.starred ? 'Unstar' : 'Star'}><Star size={13} /></button>
 						<button class="tb-btn tb-lock" class:tb-lock-on={selectedNote.locked} onclick={() => toggleLock(selectedNote.id)} title={selectedNote.locked ? 'Unlock note' : 'Lock note'} aria-pressed={selectedNote.locked}>
 							{#if selectedNote.locked}<Lock size={13} />{:else}<LockOpen size={13} />{/if}
+						</button>
+						<button class="tb-btn tb-private" class:tb-private-on={selectedNote.private} onclick={() => togglePrivacy(selectedNote.id)} title={selectedNote.private ? 'Private: hidden from MCP' : 'Visible to MCP'} aria-label={selectedNote.private ? 'Make note visible to MCP' : 'Make note private'} aria-pressed={!!selectedNote.private} disabled={selectedNote.locked}>
+							<EyeOff size={13} />
 						</button>
 						<div class="note-menu-wrap">
 							<button class="tb-btn" onclick={() => (showNoteMenu = !showNoteMenu)} title="More actions" aria-label="More actions"><MoreHorizontal size={13} /></button>
@@ -2581,6 +2595,7 @@
 	.tb-btn:hover { background: var(--bg-hover); color: var(--text-2); }
 	.tb-star-on { color: var(--accent) !important; }
 	.tb-lock-on { color: var(--accent) !important; }
+	.tb-private-on { color: var(--accent) !important; background: var(--accent-lt); }
 
 	.tb-sep {
 		width: 1px;

@@ -102,6 +102,15 @@ func TestNotesHandler_CreateAndUpdatePrivacy(t *testing.T) {
 
 func TestNotesHandler_InvalidPrivacyDoesNotChangeNote(t *testing.T) {
 	h, user := newHandlerFixture(t)
+
+	nullCreate := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(`{"title":"Null","private":null}`))
+	nullCreate = withUser(nullCreate, user)
+	nullCreateRec := httptest.NewRecorder()
+	h.Create(nullCreateRec, nullCreate)
+	if nullCreateRec.Code != http.StatusBadRequest {
+		t.Fatalf("create private:null status=%d", nullCreateRec.Code)
+	}
+
 	create := httptest.NewRequest(http.MethodPost, "/api/notes", bytes.NewBufferString(`{"title":"Keep","private":true}`))
 	create = withUser(create, user)
 	createdRec := httptest.NewRecorder()
@@ -110,7 +119,7 @@ func TestNotesHandler_InvalidPrivacyDoesNotChangeNote(t *testing.T) {
 	_ = json.NewDecoder(createdRec.Body).Decode(&created)
 	id := int64(created["id"].(float64))
 
-	update := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/notes/%d", id), bytes.NewBufferString(`{"private":"false"}`))
+	update := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/notes/%d", id), bytes.NewBufferString(`{"title":"Changed","private":null}`))
 	update.SetPathValue("id", strconv.FormatInt(id, 10))
 	update = withUser(update, user)
 	updatedRec := httptest.NewRecorder()

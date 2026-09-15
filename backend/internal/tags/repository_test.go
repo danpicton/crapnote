@@ -108,6 +108,9 @@ func TestTagRepo_MCPDoesNotDiscloseOrMutatePrivateAssociations(t *testing.T) {
 	if err := repo.AddToNote(mcpCtx, privateID, publicTag.ID, userID); err != tags.ErrNotFound {
 		t.Fatalf("MCP add tag to private note = %v", err)
 	}
+	if err := repo.AddToNote(mcpCtx, publicID, secretTag.ID, userID); err != tags.ErrNotFound {
+		t.Fatalf("MCP add private-only tag to public note = %v", err)
+	}
 	if err := repo.RemoveFromNote(mcpCtx, privateID, secretTag.ID, userID); err != tags.ErrNotFound {
 		t.Fatalf("MCP remove tag from private note = %v", err)
 	}

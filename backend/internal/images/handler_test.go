@@ -2,6 +2,7 @@ package images_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"mime/multipart"
@@ -14,6 +15,7 @@ import (
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/db"
 	"github.com/danpicton/crapnote/internal/images"
+	"github.com/danpicton/crapnote/internal/requestctx"
 )
 
 func newFixture(t *testing.T) (*images.Handler, *auth.User) {
@@ -65,6 +67,31 @@ func multipartUpload(t *testing.T, content []byte, partContentType string) *http
 	req := httptest.NewRequest(http.MethodPost, "/api/images", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
 	return req
+}
+
+func TestFetchByIDs_MCPDoesNotFetchImagesReferencedByPrivateNotes(t *testing.T) {
+	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close() })
+	user, err := auth.NewUserRepo(database).Create(context.Background(), "fetcher", "hash", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const imageID = "private-image"
+	_, _ = database.Exec(`INSERT INTO images(id,user_id,mime_type,data) VALUES(?,?,?,?)`, imageID, user.ID, "image/png", []byte("secret bytes"))
+	_, _ = database.Exec(`INSERT INTO notes(user_id,title,body,private) VALUES(?,?,?,1)`, user.ID, "private", "/api/images/"+imageID)
+	// A guessed ID inserted into a public note must not make the private image exportable.
+	_, _ = database.Exec(`INSERT INTO notes(user_id,title,body) VALUES(?,?,?)`, user.ID, "public", "/api/images/"+imageID)
+
+	got, err := images.FetchByIDs(requestctx.WithMCP(context.Background()), database, user.ID, []string{imageID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got[imageID]; ok {
+		t.Fatal("MCP fetched image referenced by a private note")
+	}
 }
 
 func TestUpload_Success(t *testing.T) {

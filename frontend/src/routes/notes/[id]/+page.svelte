@@ -301,7 +301,7 @@
 				note = {
 					id: cached.id, title: cached.title, body: cached.body,
 					starred: cached.starred, pinned: cached.pinned, archived: false,
-					locked: cached.locked ?? false,
+					locked: cached.locked ?? false, private: cached.private ?? false,
 					created_at: cached.server_updated_at, updated_at: cached.local_updated_at,
 				};
 				noteTags = (cached.tags ?? []) as Tag[];
@@ -344,7 +344,7 @@
 				note = {
 					id: cached.id, title: cached.title, body: cached.body,
 					starred: cached.starred, pinned: cached.pinned, archived: false,
-					locked: cached.locked ?? false,
+					locked: cached.locked ?? false, private: cached.private ?? false,
 					created_at: cached.server_updated_at, updated_at: cached.local_updated_at,
 				};
 				noteTags = (cached.tags ?? []) as Tag[];

@@ -1667,6 +1667,18 @@ describe('Note locking', () => {
 		await waitFor(() => expect(screen.getByTitle('Unlock note')).toBeTruthy());
 	});
 
+	it('shows and persists privacy for the selected desktop note', async () => {
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ private: true }));
+		await openNote();
+
+		const toggle = screen.getByRole('button', { name: 'Make note private' });
+		expect(toggle).toHaveAttribute('aria-pressed', 'false');
+		await fireEvent.click(toggle);
+
+		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(1, { private: true }));
+		expect(screen.getByRole('button', { name: 'Make note visible to MCP' })).toHaveAttribute('aria-pressed', 'true');
+	});
+
 	it('makes the title read-only while the note is locked', async () => {
 		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ locked: true })]);
 

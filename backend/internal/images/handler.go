@@ -66,9 +66,8 @@ func FetchByIDs(ctx context.Context, db *sql.DB, userID int64, ids []string) (ma
 		var uid int64
 		var mime string
 		var data []byte
-		err := db.QueryRowContext(ctx,
-			`SELECT user_id, mime_type, data FROM images WHERE id = ?`, id,
-		).Scan(&uid, &mime, &data)
+		query := `SELECT user_id, mime_type, data FROM images WHERE id = ?` + mcpImageClause(ctx)
+		err := db.QueryRowContext(ctx, query, id).Scan(&uid, &mime, &data)
 		if err == sql.ErrNoRows || uid != userID {
 			continue
 		}
@@ -78,6 +77,21 @@ func FetchByIDs(ctx context.Context, db *sql.DB, userID int64, ids []string) (ma
 		out[id] = Data{MimeType: mime, Bytes: data}
 	}
 	return out, nil
+}
+
+func mcpImageClause(ctx context.Context) string {
+	if !requestctx.IsMCP(ctx) {
+		return ""
+	}
+	return ` AND EXISTS (
+		SELECT 1 FROM notes n
+		WHERE n.user_id=images.user_id AND n.private=0
+		  AND n.body LIKE '%/api/images/' || images.id || '%'
+	) AND NOT EXISTS (
+		SELECT 1 FROM notes n
+		WHERE n.user_id=images.user_id AND n.private=1
+		  AND n.body LIKE '%/api/images/' || images.id || '%'
+	)`
 }
 
 // Handler holds HTTP handlers for image upload and serving.
@@ -208,18 +222,7 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 	var mimeType string
 	var data []byte
 
-	query := `SELECT user_id, mime_type, data FROM images WHERE id = ?`
-	if requestctx.IsMCP(r.Context()) {
-		query += ` AND EXISTS (
-			SELECT 1 FROM notes n
-			WHERE n.user_id=images.user_id AND n.private=0
-			  AND n.body LIKE '%/api/images/' || images.id || '%'
-		) AND NOT EXISTS (
-			SELECT 1 FROM notes n
-			WHERE n.user_id=images.user_id AND n.private=1
-			  AND n.body LIKE '%/api/images/' || images.id || '%'
-		)`
-	}
+	query := `SELECT user_id, mime_type, data FROM images WHERE id = ?` + mcpImageClause(r.Context())
 	err := h.db.QueryRowContext(r.Context(), query, id).Scan(&userID, &mimeType, &data)
 
 	if err == sql.ErrNoRows {

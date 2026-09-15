@@ -222,6 +222,35 @@ describe('syncOfflineChanges — conflict', () => {
 		expect(api.notes.create).toHaveBeenCalledWith('[sync conflict] Server Older', 'Server body');
 	});
 
+	it('preserves local privacy when the server wins a conflict', async () => {
+		const note = fakeCachedNote({
+			id: 7, title: 'Private local', body: 'sensitive local', private: true,
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-02T00:00:00Z',
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({ id: 7, updated_at: '2024-01-05T00:00:00Z', private: false }));
+		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 999, private: true }));
+
+		await syncOfflineChanges('heartbeat', 1);
+
+		expect(api.notes.create).toHaveBeenCalledWith('[sync conflict] Private local', 'sensitive local', true);
+	});
+
+	it('preserves server privacy when the local version wins a conflict', async () => {
+		const note = fakeCachedNote({
+			id: 7, title: 'Local newer', body: 'local', private: false,
+			server_updated_at: '2024-01-01T00:00:00Z', local_updated_at: '2024-01-06T00:00:00Z',
+		});
+		vi.mocked(offlineDB.getDirtyNotes).mockResolvedValue([note]);
+		vi.mocked(api.notes.get).mockResolvedValue(fakeServerNote({ id: 7, title: 'Private server', body: 'sensitive server', updated_at: '2024-01-05T00:00:00Z', private: true }));
+		vi.mocked(api.notes.update).mockResolvedValue(fakeServerNote({ id: 7, private: true, updated_at: '2024-01-06T00:00:00Z' }));
+		vi.mocked(api.notes.create).mockResolvedValue(fakeServerNote({ id: 999, private: true }));
+
+		await syncOfflineChanges('heartbeat', 1);
+
+		expect(api.notes.create).toHaveBeenCalledWith('[sync conflict] Private server', 'sensitive server', true);
+	});
+
 	it('server wins when server updated_at is newer than local — local version becomes the conflict note', async () => {
 		const note = fakeCachedNote({
 			id: 7,

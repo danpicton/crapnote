@@ -441,9 +441,17 @@ async function pushContentCheckpoint(
 		throw err;
 	}
 
+	const createConflict = async (title: string, body: string, privateNote: boolean | undefined) => {
+		if (privateNote) {
+			await api.notes.create(title, body, true);
+		} else {
+			await api.notes.create(title, body);
+		}
+	};
+
 	/** Accept the server's version, preserving the local edit as a conflict note. */
 	const preserveLocalAsConflict = async (): Promise<CachedNote> => {
-		await api.notes.create(`[sync conflict] ${note.title}`, note.body);
+		await createConflict(`[sync conflict] ${note.title}`, note.body, note.private);
 		const entry: CachedNote = {
 			...note,
 			title: serverNote.title,
@@ -490,7 +498,7 @@ async function pushContentCheckpoint(
 
 	if (localWins) {
 		// Preserve the server's version as the conflict note, then push local.
-		await api.notes.create(`[sync conflict] ${serverNote.title}`, serverNote.body);
+		await createConflict(`[sync conflict] ${serverNote.title}`, serverNote.body, serverNote.private);
 		let updated;
 		try {
 			updated = await api.notes.update(note.id, { title: note.title, body: note.body });

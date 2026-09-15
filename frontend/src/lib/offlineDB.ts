@@ -5,6 +5,7 @@ export interface CachedNote {
 	starred: boolean;
 	pinned: boolean;
 	locked?: boolean;           // absent on records cached before locking shipped
+	private?: boolean;          // absent on records cached before privacy shipped
 	pin_order?: number;         // drag position among pinned notes; absent means 0
 	tags: Array<{ id: number; name: string }>;  // cached for offline tag-filtering
 	server_updated_at: string;  // server's updated_at when we last fetched — used for conflict detection
@@ -35,6 +36,7 @@ export interface NoteFlags {
 	starred: boolean;
 	pinned: boolean;
 	locked: boolean;
+	private: boolean;
 	pin_order: number;
 }
 
@@ -63,6 +65,7 @@ export function noteFlags(
 		starred: from.starred ?? or.starred ?? false,
 		pinned: from.pinned ?? or.pinned ?? false,
 		locked: from.locked ?? or.locked ?? false,
+		private: from.private ?? or.private ?? false,
 		pin_order: from.pin_order ?? or.pin_order ?? 0,
 	};
 }
