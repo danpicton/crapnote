@@ -8,7 +8,7 @@ async function login(page: Page) {
   await expect(page).toHaveURL('/');
 }
 
-/** Create a note, set the title, and wait for autosave to persist it. */
+/** Create a note, set the title, and blur it so the title is persisted. */
 async function createNote(page: Page, title: string) {
   // Register the response listener BEFORE clicking so a fast create can't
   // arrive before the listener is attached (race condition).
@@ -22,8 +22,7 @@ async function createNote(page: Page, title: string) {
   // Wait for the editor to re-bind to the NEW note before typing. A fresh
   // note's title defaults to a timestamp ("2026-07-04 …"); until that value
   // appears, the visible title input still belongs to the previously
-  // selected note and fill() would rename that one instead (autosave
-  // captures the selected note id at input time).
+  // selected note and fill() would start a title draft for that one instead.
   await expect(titleInput).toHaveValue(/^\d{4}-\d{2}-\d{2}/);
 
   // fill() replaces any existing text atomically and fires Svelte's input
@@ -32,6 +31,7 @@ async function createNote(page: Page, title: string) {
     (r) => r.url().includes('/api/notes') && r.request().method() === 'PUT',
   );
   await titleInput.fill(title);
+  await titleInput.press('Tab');
   await saved;
 }
 
@@ -106,6 +106,27 @@ test.describe('Notes', () => {
     await expect(page.getByPlaceholder(/note title/i)).toBeVisible();
   });
 
+  test('keeps a blank title draft until blur, then saves the replacement', async ({ page }) => {
+    await createNote(page, 'Original title');
+    const titleInput = page.getByPlaceholder(/note title/i);
+
+    await titleInput.fill('');
+    await page.waitForTimeout(1000);
+    await expect(titleInput).toHaveValue('');
+    await expect(page.locator('.note-item.selected .note-title')).toHaveText('Original title');
+
+    await titleInput.fill('Replacement title');
+    await expect(page.locator('.note-item.selected .note-title')).toHaveText('Original title');
+    const saved = page.waitForResponse(
+      (r) => r.url().includes('/api/notes') && r.request().method() === 'PUT',
+    );
+    await titleInput.press('Tab');
+    await saved;
+
+    await page.reload();
+    await expect(page.locator('.note-item').filter({ hasText: 'Replacement title' })).toBeVisible();
+  });
+
   test('title change does not erase body', async ({ page }) => {
     await createNote(page, 'My Note');
 
@@ -125,6 +146,7 @@ test.describe('Notes', () => {
       (r) => r.url().includes('/api/notes') && r.request().method() === 'PUT',
     );
     await titleInput.fill('Renamed Note');
+    await titleInput.press('Tab');
     await titleSaved;
 
     // Reload to confirm both title and body persisted
