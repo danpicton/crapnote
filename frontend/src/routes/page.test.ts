@@ -1115,6 +1115,32 @@ describe('Title drafts', () => {
 		expect(api.notes.update).toHaveBeenCalledWith(7, { title: 'Draft after sync' });
 	});
 
+	it('serializes repeated title commits so the newest title wins', async () => {
+		let resolveFirst!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockImplementation((_id, update) => {
+			if (update.title === 'First edit') {
+				return new Promise((resolve) => { resolveFirst = resolve; });
+			}
+			return Promise.resolve(mockNote({ title: update.title }));
+		});
+		render(Page);
+		const title = await waitFor(() => screen.getByDisplayValue('Test Note'));
+
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'First edit' } });
+		await fireEvent.blur(title);
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Second edit' } });
+		await fireEvent.blur(title);
+
+		expect(api.notes.update).toHaveBeenCalledTimes(1);
+		expect((title as HTMLInputElement).value).toBe('Second edit');
+
+		resolveFirst(mockNote({ title: 'First edit' }));
+		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(1, { title: 'Second edit' }));
+		expect((title as HTMLInputElement).value).toBe('Second edit');
+	});
+
 	it('commits the source draft before selecting a duplicate', async () => {
 		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Edited source' }));
 		vi.mocked(api.notes.create).mockResolvedValue(mockNote({ id: 2, title: 'Edited source (copy)' }));

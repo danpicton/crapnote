@@ -41,6 +41,7 @@
 	let saving = $state(false);
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
 	let titleDraft = $state<{ savedTitle: string; value: string } | null>(null);
+	let titleSaveQueue: Promise<void> | null = null;
 	let editorRef = $state<EditorRef | null>(null);
 	let titleInput = $state<HTMLInputElement | null>(null);
 	let showTagPopover = $state(false);
@@ -356,7 +357,12 @@
 		} finally {
 			db.close();
 		}
-		if (note) note = { ...note, [field]: value };
+		if (note) {
+			note = {
+				...note,
+				[field]: field === 'title' && note.title !== value ? note.title : value,
+			};
+		}
 	}
 
 	function beginTitleDraft() {
@@ -372,14 +378,27 @@
 		}
 	}
 
-	function commitTitleDraft() {
+	function queueTitleSave(title: string): Promise<void> {
+		const previous = titleSaveQueue;
+		const queued = previous
+			? previous.catch(() => {}).then(() => saveField('title', title))
+			: saveField('title', title);
+		titleSaveQueue = queued;
+		void queued.then(
+			() => { if (titleSaveQueue === queued) titleSaveQueue = null; },
+			() => { if (titleSaveQueue === queued) titleSaveQueue = null; },
+		);
+		return queued;
+	}
+
+	function commitTitleDraft(): Promise<void> {
 		const draft = titleDraft;
-		if (!draft || !note) return;
+		if (!draft || !note) return Promise.resolve();
 		titleDraft = null;
 		const result = finishTitleDraft(draft.savedTitle, draft.value);
-		if (!result.commit) return;
+		if (!result.commit) return Promise.resolve();
 		note = { ...note, title: result.title };
-		void saveField('title', result.title);
+		return queueTitleSave(result.title);
 	}
 
 	async function saveField(field: 'title' | 'body', value: string) {
@@ -394,7 +413,7 @@
 					const updated = await api.notes.update(noteId, { [field]: value });
 					note = note ? {
 						...updated,
-						title: field === 'title' ? updated.title : note.title,
+						title: field === 'title' && note.title === value ? updated.title : note.title,
 						body: field === 'body' ? updated.body : note.body,
 					} : updated;
 					// Keep cache in sync — a refresh of server state, so a

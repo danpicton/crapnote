@@ -80,6 +80,7 @@
 	let saving = $state(false);
 	let saveTimer: ReturnType<typeof setTimeout> | null = null;
 	let titleDraft = $state<{ noteId: number; savedTitle: string; value: string } | null>(null);
+	const titleSaveQueues = new Map<number, Promise<void>>();
 	// Helpers for detecting mobile viewport
 	function isMobile() { return window.matchMedia('(max-width: 640px)').matches; }
 
@@ -1144,14 +1145,27 @@
 		}
 	}
 
-	function commitTitleDraft() {
+	function queueTitleSave(noteId: number, title: string): Promise<void> {
+		const previous = titleSaveQueues.get(noteId);
+		const queued = previous
+			? previous.catch(() => {}).then(() => saveField(noteId, 'title', title))
+			: saveField(noteId, 'title', title);
+		titleSaveQueues.set(noteId, queued);
+		void queued.then(
+			() => { if (titleSaveQueues.get(noteId) === queued) titleSaveQueues.delete(noteId); },
+			() => { if (titleSaveQueues.get(noteId) === queued) titleSaveQueues.delete(noteId); },
+		);
+		return queued;
+	}
+
+	function commitTitleDraft(): Promise<void> {
 		const draft = titleDraft;
-		if (!draft) return;
+		if (!draft) return Promise.resolve();
 		titleDraft = null;
 		const result = finishTitleDraft(draft.savedTitle, draft.value);
-		if (!result.commit) return;
+		if (!result.commit) return Promise.resolve();
 		notes = notes.map((note) => note.id === draft.noteId ? { ...note, title: result.title } : note);
-		void saveField(draft.noteId, 'title', result.title);
+		return queueTitleSave(draft.noteId, result.title);
 	}
 
 	async function saveField(idAtSchedule: number, field: 'title' | 'body', value: string) {
@@ -1191,14 +1205,16 @@
 						}
 					}
 					db.close();
-					notes = notes.map(n => n.id === idAtSchedule ? { ...n, [field]: value } : n);
+					notes = notes.map((n) => n.id === idAtSchedule
+						? { ...n, [field]: field === 'title' && n.title !== value ? n.title : value }
+						: n);
 					syncStatus = 'unsynced';
 				} else {
 					try {
 						const updated = await api.notes.update(idAtSchedule, { [field]: value });
 						notes = notes.map((n) => n.id === updated.id ? {
 							...updated,
-							title: field === 'title' ? updated.title : n.title,
+							title: field === 'title' && n.title === value ? updated.title : n.title,
 							body: field === 'body' ? updated.body : n.body,
 						} : n);
 						// Keep cache in sync — a refresh of server state, so a
@@ -1236,7 +1252,9 @@
 							});
 						}
 						db.close();
-						notes = notes.map(n => n.id === idAtSchedule ? { ...n, [field]: value } : n);
+						notes = notes.map((n) => n.id === idAtSchedule
+							? { ...n, [field]: field === 'title' && n.title !== value ? n.title : value }
+							: n);
 					}
 				}
 		} finally {

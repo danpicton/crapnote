@@ -214,6 +214,32 @@ describe('/notes/[id] page', () => {
 		expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'New Title' });
 	});
 
+	it('serializes repeated title commits so the newest title wins', async () => {
+		let resolveFirst!: (note: ReturnType<typeof mockNote>) => void;
+		vi.mocked(api.notes.update).mockImplementation((_id, update) => {
+			if (update.title === 'First edit') {
+				return new Promise((resolve) => { resolveFirst = resolve; });
+			}
+			return Promise.resolve(mockNote({ title: update.title }));
+		});
+		render(NotePage);
+		const title = await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'First edit' } });
+		await fireEvent.blur(title);
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Second edit' } });
+		await fireEvent.blur(title);
+
+		expect(api.notes.update).toHaveBeenCalledTimes(1);
+		expect((title as HTMLInputElement).value).toBe('Second edit');
+
+		resolveFirst(mockNote({ title: 'First edit' }));
+		await waitFor(() => expect(api.notes.update).toHaveBeenCalledWith(42, { title: 'Second edit' }));
+		expect((title as HTMLInputElement).value).toBe('Second edit');
+	});
+
 	it('keeps a committed title when an older body save responds later', async () => {
 		let resolveBody!: (note: ReturnType<typeof mockNote>) => void;
 		vi.mocked(api.notes.update).mockImplementation((_id, update) => {
