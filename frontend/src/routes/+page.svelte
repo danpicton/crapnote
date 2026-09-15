@@ -1132,17 +1132,16 @@
 		if (!draft) return;
 		titleDraft = null;
 		const result = finishTitleDraft(draft.savedTitle, draft.value);
-		if (result.commit) scheduleAutoSave('title', result.title);
+		if (!result.commit) return;
+		notes = notes.map((note) => note.id === draft.noteId ? { ...note, title: result.title } : note);
+		void saveField(draft.noteId, 'title', result.title);
 	}
 
-	function scheduleAutoSave(field: 'title' | 'body', value: string) {
-		if (!selectedId) return;
-		if (selectedNote?.locked) return;
-		if (saveTimer) clearTimeout(saveTimer);
-		const idAtSchedule = selectedId;
-		saveTimer = setTimeout(async () => {
-			if (!selectedId) return;
-			saving = true;
+	async function saveField(idAtSchedule: number, field: 'title' | 'body', value: string) {
+		const noteAtSave = notes.find((note) => note.id === idAtSchedule);
+		if (!noteAtSave || noteAtSave.locked) return;
+		const tagsAtSave = noteTags.map((tag) => ({ id: tag.id, name: tag.name }));
+		saving = true;
 			try {
 				if (!navigator.onLine) {
 					// Save to IndexedDB and mark dirty
@@ -1166,7 +1165,7 @@
 								body: field === 'body' ? value : currentNote.body,
 								starred: currentNote.starred,
 								pinned: currentNote.pinned,
-								tags: noteTags.map(t => ({ id: t.id, name: t.name })),
+								tags: tagsAtSave,
 								server_updated_at: currentNote.updated_at,
 								local_updated_at: new Date().toISOString(),
 								is_dirty: true,
@@ -1180,7 +1179,11 @@
 				} else {
 					try {
 						const updated = await api.notes.update(idAtSchedule, { [field]: value });
-						notes = notes.map((n) => (n.id === updated.id ? updated : n));
+						notes = notes.map((n) => n.id === updated.id ? {
+							...updated,
+							title: field === 'title' ? updated.title : n.title,
+							body: field === 'body' ? updated.body : n.body,
+						} : n);
 						// Keep cache in sync — a refresh of server state, so a
 						// foreign store is simply skipped rather than reported.
 						const db = await openOwnedCache();
@@ -1189,8 +1192,7 @@
 						if (existing && !existing.is_dirty) {
 							await upsertNote(db, {
 								...existing,
-								title: updated.title,
-								body: updated.body,
+								[field]: updated[field],
 								server_updated_at: updated.updated_at,
 								local_updated_at: updated.updated_at,
 							});
@@ -1209,7 +1211,7 @@
 								body: field === 'body' ? value : currentNote.body,
 								starred: currentNote.starred,
 								pinned: currentNote.pinned,
-								tags: existing?.tags ?? noteTags.map(t => ({ id: t.id, name: t.name })),
+								tags: existing?.tags ?? tagsAtSave,
 								server_updated_at: currentNote.updated_at,
 								local_updated_at: new Date().toISOString(),
 								is_dirty: true,
@@ -1220,10 +1222,16 @@
 						notes = notes.map(n => n.id === idAtSchedule ? { ...n, [field]: value } : n);
 					}
 				}
-			} finally {
-				saving = false;
-			}
-		}, 800);
+		} finally {
+			saving = false;
+		}
+	}
+
+	function scheduleAutoSave(field: 'title' | 'body', value: string) {
+		if (!selectedId || selectedNote?.locked) return;
+		if (saveTimer) clearTimeout(saveTimer);
+		const idAtSchedule = selectedId;
+		saveTimer = setTimeout(() => void saveField(idAtSchedule, field, value), 800);
 	}
 
 	/**

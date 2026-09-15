@@ -1055,6 +1055,23 @@ describe('Title drafts', () => {
 		expect(api.notes.update).not.toHaveBeenCalled();
 		vi.useRealTimers();
 	});
+
+	it('commits only the final nonblank title when the input blurs', async () => {
+		vi.mocked(api.notes.update).mockResolvedValue(mockNote({ title: 'Final title' }));
+		render(Page);
+		const title = await waitFor(() => screen.getByPlaceholderText(/note title/i));
+
+		vi.useFakeTimers();
+		await fireEvent.focus(title);
+		await fireEvent.input(title, { target: { value: 'Intermediate' } });
+		await vi.advanceTimersByTimeAsync(1000);
+		expect(api.notes.update).not.toHaveBeenCalled();
+
+		await fireEvent.input(title, { target: { value: 'Final title' } });
+		await fireEvent.blur(title);
+		expect(api.notes.update).toHaveBeenCalledWith(1, { title: 'Final title' });
+		vi.useRealTimers();
+	});
 });
 
 describe('Note locking', () => {
