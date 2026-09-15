@@ -343,10 +343,51 @@
 	let showShortcutHelp = $state(false);
 	let sidebarHidden = $state(false);
 	let sidebarWidth = $state(300);
+	let sidebarPreferredWidth = 300;
+	let sidebarResizePointer = $state<number | null>(null);
+	let sidebarResizeStartX = 0;
+	let sidebarResizeStartWidth = 0;
 
 	function setSidebarHidden(hidden: boolean) {
 		sidebarHidden = hidden;
-		saveSidebarPreferences({ hidden, width: sidebarWidth });
+		if (!hidden) sidebarWidth = clampSidebarWidth(sidebarPreferredWidth, window.innerWidth);
+		saveSidebarPreferences({ hidden, width: sidebarPreferredWidth });
+	}
+
+	function setSidebarWidth(width: number) {
+		sidebarWidth = clampSidebarWidth(width, window.innerWidth);
+		sidebarPreferredWidth = sidebarWidth;
+		saveSidebarPreferences({ hidden: sidebarHidden, width: sidebarPreferredWidth });
+	}
+
+	function onSidebarResizeKeydown(e: KeyboardEvent) {
+		let width: number | null = null;
+		if (e.key === 'ArrowLeft') width = sidebarWidth - 10;
+		if (e.key === 'ArrowRight') width = sidebarWidth + 10;
+		if (e.key === 'Home') width = 220;
+		if (e.key === 'End') width = Number.POSITIVE_INFINITY;
+		if (width === null) return;
+		e.preventDefault();
+		setSidebarWidth(width);
+	}
+
+	function onSidebarResizeStart(e: PointerEvent) {
+		if (e.button !== 0) return;
+		e.preventDefault();
+		sidebarResizePointer = e.pointerId;
+		sidebarResizeStartX = e.clientX;
+		sidebarResizeStartWidth = sidebarWidth;
+		(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+	}
+
+	function onSidebarResizeMove(e: PointerEvent) {
+		if (sidebarResizePointer !== e.pointerId) return;
+		setSidebarWidth(sidebarResizeStartWidth + e.clientX - sidebarResizeStartX);
+	}
+
+	function onSidebarResizeEnd(e: PointerEvent) {
+		if (sidebarResizePointer !== e.pointerId) return;
+		sidebarResizePointer = null;
 	}
 
 	// Tags
@@ -843,7 +884,11 @@
 		isOnline = navigator.onLine;
 		const sidebarPreferences = loadSidebarPreferences();
 		sidebarHidden = sidebarPreferences.hidden;
-		sidebarWidth = clampSidebarWidth(sidebarPreferences.width, window.innerWidth);
+		sidebarPreferredWidth = sidebarPreferences.width;
+		sidebarWidth = clampSidebarWidth(sidebarPreferredWidth, window.innerWidth);
+		const handleWindowResize = () => {
+			sidebarWidth = clampSidebarWidth(sidebarPreferredWidth, window.innerWidth);
+		};
 
 		// Load per-user keyboard shortcut overrides from localStorage. This
 		// callback runs before the root layout has resolved /api/auth/me, so
@@ -922,6 +967,7 @@
 		window.addEventListener('online', handleOnline);
 		window.addEventListener('offline', handleOffline);
 		window.addEventListener('keydown', handleKeydown);
+		window.addEventListener('resize', handleWindowResize);
 
 		// Periodic bidirectional sync while the page is open.
 		const heartbeatTimer = setInterval(() => { void heartbeatSync('heartbeat'); }, SYNC_INTERVAL_MS);
@@ -952,6 +998,7 @@
 			window.removeEventListener('online', handleOnline);
 			window.removeEventListener('offline', handleOffline);
 			window.removeEventListener('keydown', handleKeydown);
+			window.removeEventListener('resize', handleWindowResize);
 			clearInterval(heartbeatTimer);
 		};
 	});
@@ -1911,6 +1958,28 @@
 			</div>
 		</div>
 	</aside>
+	{#if !isMobileLayout}
+		<!-- Svelte does not recognise the ARIA separator's value attributes as
+		     the keyboard-operable separator pattern defined by ARIA. -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+		<div
+			class="sidebar-resizer"
+			class:sidebar-resizing={sidebarResizePointer !== null}
+			style:left={`${sidebarWidth - 4}px`}
+			role="separator"
+			aria-label="Resize sidebar"
+			aria-orientation="vertical"
+			aria-valuemin="220"
+			aria-valuemax={clampSidebarWidth(Number.POSITIVE_INFINITY, typeof window === 'undefined' ? 1024 : window.innerWidth)}
+			aria-valuenow={sidebarWidth}
+			tabindex="0"
+			onkeydown={onSidebarResizeKeydown}
+			onpointerdown={onSidebarResizeStart}
+			onpointermove={onSidebarResizeMove}
+			onpointerup={onSidebarResizeEnd}
+			onpointercancel={onSidebarResizeEnd}
+		></div>
+	{/if}
 	{/if}
 
 	{#if !isMobileLayout && sidebarHidden}
@@ -2082,6 +2151,7 @@
 <style>
 	/* ─── Layout ─────────────────────────────────────────── */
 	.app {
+		position: relative;
 		display: flex;
 		height: 100dvh;
 		overflow: hidden;
@@ -2099,6 +2169,23 @@
 		flex-shrink: 0;
 		overflow: hidden;
 	}
+
+	.sidebar-resizer {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		z-index: 20;
+		width: 8px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: col-resize;
+		touch-action: none;
+		outline: none;
+	}
+	.sidebar-resizer:hover,
+	.sidebar-resizer:focus-visible,
+	.sidebar-resizing { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 
 	.sidebar-header {
 		display: flex;

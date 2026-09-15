@@ -214,6 +214,27 @@ describe('Notes page', () => {
 		expect(container.querySelector('aside')).toBeInTheDocument();
 	});
 
+	it('restores the hidden state and last expanded width', async () => {
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: true, width: 420 }));
+		const { container } = render(Page);
+
+		const show = await screen.findByRole('button', { name: 'Show sidebar' });
+		expect(container.querySelector('aside')).not.toBeInTheDocument();
+
+		await fireEvent.click(show);
+		expect(container.querySelector('aside')).toHaveStyle({ width: '420px' });
+	});
+
+	it('resizes the sidebar from the keyboard and saves the width', async () => {
+		const { container } = render(Page);
+		const resize = await screen.findByRole('separator', { name: 'Resize sidebar' });
+
+		await fireEvent.keyDown(resize, { key: 'ArrowRight' });
+
+		expect(container.querySelector('aside')).toHaveStyle({ width: '310px' });
+		expect(JSON.parse(localStorage.getItem('crapnote-sidebar')!)).toEqual({ hidden: false, width: 310 });
+	});
+
 	it('renders preview links underlined and unbracketed', async () => {
 		vi.mocked(api.notes.list).mockResolvedValue([
 			mockNote({
