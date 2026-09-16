@@ -504,6 +504,23 @@ describe('Formatting active state', () => {
 		onformatchange!({ ...EMPTY_FORMATS });
 		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'false'));
 	});
+
+	it('clears stale formats as soon as another note is selected', async () => {
+		const { EMPTY_FORMATS } = await import('$lib/milkdown/formatState');
+		vi.mocked(api.notes.list).mockResolvedValue([
+			mockNote({ id: 1, title: 'First note' }),
+			mockNote({ id: 2, title: 'Second note' }),
+		]);
+		render(Page);
+		await waitFor(() => screen.getByTitle('Bold'));
+		const onformatchange = editorProps.current!.onformatchange as (formats: typeof EMPTY_FORMATS) => void;
+		onformatchange({ ...EMPTY_FORMATS, strong: true });
+		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'true'));
+
+		await fireEvent.click(screen.getByText('Second note').closest('.note-btn')!);
+
+		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'false'));
+	});
 });
 
 describe('Link toolbar', () => {
