@@ -466,6 +466,25 @@ describe('Mobile navigation', () => {
 	});
 });
 
+describe('Formatting active state', () => {
+	it('reflects editor format changes on the desktop Bold toggle', async () => {
+		const { EMPTY_FORMATS } = await import('$lib/milkdown/formatState');
+		render(Page);
+		await waitFor(() => screen.getByTitle('Bold'));
+
+		const onformatchange = editorProps.current?.onformatchange as
+			| ((formats: typeof EMPTY_FORMATS) => void)
+			| undefined;
+		expect(onformatchange).toBeTypeOf('function');
+
+		onformatchange!({ ...EMPTY_FORMATS, strong: true });
+		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'true'));
+
+		onformatchange!({ ...EMPTY_FORMATS });
+		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'false'));
+	});
+});
+
 describe('Link toolbar', () => {
 	it('shows the Insert link button in the toolbar', async () => {
 		render(Page);
