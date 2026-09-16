@@ -21,6 +21,7 @@ const schema = new Schema({
 		emphasis: {},
 		underline: {},
 		inlineCode: {},
+		link: { attrs: { href: {} } },
 	},
 });
 
@@ -46,6 +47,16 @@ describe('computeActiveFormats', () => {
 		expect(formats.emphasis).toBe(false);
 		expect(formats.underline).toBe(false);
 		expect(formats.inlineCode).toBe(false);
+	});
+
+	it('reports link active when the cursor sits inside linked text', () => {
+		const doc = schema.node('doc', null, [
+			schema.node('paragraph', null, [
+				schema.text('linked', [schema.marks.link.create({ href: 'https://example.com' })]),
+			]),
+		]);
+
+		expect(computeActiveFormats(stateAt(doc, 3)).link).toBe(true);
 	});
 
 	it('honours stored marks when bold is toggled at a collapsed cursor', () => {
