@@ -466,6 +466,63 @@ describe('Mobile navigation', () => {
 	});
 });
 
+describe('Formatting active state', () => {
+	it('reflects editor format changes on the desktop Bold toggle', async () => {
+		const { EMPTY_FORMATS } = await import('$lib/milkdown/formatState');
+		render(Page);
+		await waitFor(() => screen.getByTitle('Bold'));
+
+		const onformatchange = editorProps.current?.onformatchange as
+			| ((formats: typeof EMPTY_FORMATS) => void)
+			| undefined;
+		expect(onformatchange).toBeTypeOf('function');
+
+		onformatchange!({
+			...EMPTY_FORMATS,
+			strong: true,
+			emphasis: true,
+			underline: true,
+			inlineCode: true,
+			link: true,
+			heading: 2,
+			blockquote: true,
+			bulletList: true,
+			orderedList: true,
+			taskList: true,
+		});
+		for (const title of [
+			'Bold', 'Italic', 'Underline', 'Insert link (Ctrl+K)', 'Quote',
+			'Inline code', 'Bullet list', 'Numbered list', 'Task list', 'Headings',
+		]) {
+			await waitFor(() => expect(screen.getByTitle(title)).toHaveAttribute('aria-pressed', 'true'));
+			expect(screen.getByTitle(title)).toHaveClass('tb-btn-active');
+		}
+		for (const title of ['Code block', 'Horizontal rule', 'Undo', 'Redo', 'Insert image']) {
+			expect(screen.getByTitle(title)).not.toHaveAttribute('aria-pressed');
+		}
+
+		onformatchange!({ ...EMPTY_FORMATS });
+		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'false'));
+	});
+
+	it('clears stale formats as soon as another note is selected', async () => {
+		const { EMPTY_FORMATS } = await import('$lib/milkdown/formatState');
+		vi.mocked(api.notes.list).mockResolvedValue([
+			mockNote({ id: 1, title: 'First note' }),
+			mockNote({ id: 2, title: 'Second note' }),
+		]);
+		render(Page);
+		await waitFor(() => screen.getByTitle('Bold'));
+		const onformatchange = editorProps.current!.onformatchange as (formats: typeof EMPTY_FORMATS) => void;
+		onformatchange({ ...EMPTY_FORMATS, strong: true });
+		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'true'));
+
+		await fireEvent.click(screen.getByText('Second note').closest('.note-btn')!);
+
+		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'false'));
+	});
+});
+
 describe('Link toolbar', () => {
 	it('shows the Insert link button in the toolbar', async () => {
 		render(Page);

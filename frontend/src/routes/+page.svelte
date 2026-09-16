@@ -17,6 +17,7 @@
 	import { insertImageCommand } from '$lib/milkdown/image';
 	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
 	import { wrapSelectedInBulletListCommand } from '$lib/milkdown/listedit';
+	import { EMPTY_FORMATS, type ActiveFormats } from '$lib/milkdown/formatState';
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, OfflineError, type Note, type Tag } from '$lib/api';
 	import { notePreviewSegments } from '$lib/notePreview';
@@ -440,7 +441,15 @@
 	// Editor focus state (used for Enter/Escape shortcuts)
 	let editorFocused = $state(false);
 	let showHeadingsMenu = $state(false);
+	let activeFormats = $state<ActiveFormats>({ ...EMPTY_FORMATS });
 	let noteListEl = $state<HTMLUListElement | null>(null);
+
+	// A keyed editor reports its initial state after mounting. Clear the old
+	// note's formats immediately while that replacement is being created.
+	$effect(() => {
+		void selectedId;
+		activeFormats = { ...EMPTY_FORMATS };
+	});
 
 	const PALETTE = [
 		// Reds / Pinks / Rose
@@ -2046,22 +2055,22 @@
 				>
 						<!-- Headings expanding group -->
 						<div class="tb-heading-wrap">
-							<button class="tb-btn tb-h-toggle" onclick={() => (showHeadingsMenu = !showHeadingsMenu)} title="Headings" aria-label="Headings" aria-expanded={showHeadingsMenu}>H</button>
+							<button class="tb-btn tb-h-toggle" class:tb-btn-active={activeFormats.heading !== null} onclick={() => (showHeadingsMenu = !showHeadingsMenu)} title="Headings" aria-label="Headings" aria-expanded={showHeadingsMenu} aria-pressed={activeFormats.heading !== null}>H{activeFormats.heading ?? ''}</button>
 							{#if showHeadingsMenu}
 								<div class="heading-menu-backdrop" onclick={() => (showHeadingsMenu = false)} role="presentation"></div>
 								<div class="heading-menu">
-									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 1); showHeadingsMenu = false; }} title="Heading 1">H1</button>
-									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 2); showHeadingsMenu = false; }} title="Heading 2">H2</button>
-									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 3); showHeadingsMenu = false; }} title="Heading 3">H3</button>
+									<button class="tb-btn tb-h-btn" class:tb-btn-active={activeFormats.heading === 1} onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 1); showHeadingsMenu = false; }} title="Heading 1" aria-pressed={activeFormats.heading === 1}>H1</button>
+									<button class="tb-btn tb-h-btn" class:tb-btn-active={activeFormats.heading === 2} onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 2); showHeadingsMenu = false; }} title="Heading 2" aria-pressed={activeFormats.heading === 2}>H2</button>
+									<button class="tb-btn tb-h-btn" class:tb-btn-active={activeFormats.heading === 3} onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 3); showHeadingsMenu = false; }} title="Heading 3" aria-pressed={activeFormats.heading === 3}>H3</button>
 								</div>
 							{/if}
 						</div>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold"><Bold size={16} /></button>
-						<button class="tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic"><Italic size={16} /></button>
-						<button class="tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline"><Underline size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.strong} onclick={() => cmd(toggleStrongCommand.key)} title="Bold" aria-pressed={activeFormats.strong}><Bold size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.emphasis} onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic" aria-pressed={activeFormats.emphasis}><Italic size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.underline} onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline" aria-pressed={activeFormats.underline}><Underline size={16} /></button>
 						<div class="link-btn-wrap">
-							<button class="tb-btn" onclick={openLinkDialog} title="Insert link (Ctrl+K)"><Link size={16} /></button>
+							<button class="tb-btn" class:tb-btn-active={activeFormats.link} onclick={openLinkDialog} title="Insert link (Ctrl+K)" aria-pressed={activeFormats.link}><Link size={16} /></button>
 							{#if showLinkDialog}
 								<div class="link-dialog-backdrop" onclick={() => (showLinkDialog = false)} role="presentation"></div>
 								<div class="link-dialog" role="dialog" aria-label="Insert link">
@@ -2071,13 +2080,13 @@
 							{/if}
 						</div>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote"><Quote size={16} /></button>
-						<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code"><Code size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.blockquote} onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote" aria-pressed={activeFormats.blockquote}><Quote size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.inlineCode} onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code" aria-pressed={activeFormats.inlineCode}><Code size={16} /></button>
 						<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={16} /></button>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(wrapSelectedInBulletListCommand.key)} title="Bullet list"><List size={16} /></button>
-						<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list"><ListOrdered size={16} /></button>
-						<button class="tb-btn" onclick={() => cmd(wrapInTaskListCommand.key)} title="Task list"><ListTodo size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.bulletList} onclick={() => cmd(wrapSelectedInBulletListCommand.key)} title="Bullet list" aria-pressed={activeFormats.bulletList}><List size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.orderedList} onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list" aria-pressed={activeFormats.orderedList}><ListOrdered size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.taskList} onclick={() => cmd(wrapInTaskListCommand.key)} title="Task list" aria-pressed={activeFormats.taskList}><ListTodo size={16} /></button>
 						<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={16} /></button>
 						<span class="tb-sep"></span>
 						<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={16} /></button>
@@ -2128,7 +2137,7 @@
 				</div>
 
 				{#key selectedId}
-				<Editor value={selectedNote.body} onchange={(md) => scheduleAutoSave('body', md)} bind:ref={editorRef} oninsertlink={openLinkDialog} readonly={selectedNote.locked} />
+				<Editor value={selectedNote.body} onchange={(md) => scheduleAutoSave('body', md)} bind:ref={editorRef} oninsertlink={openLinkDialog} onformatchange={(formats) => (activeFormats = formats)} readonly={selectedNote.locked} />
 				{/key}
 			</div>
 			{#if !isOnline && noteHasImages(selectedNote.body)}
@@ -2768,6 +2777,13 @@
 		justify-content: center;
 	}
 	.tb-btn:hover { background: var(--bg-hover); color: var(--text-2); }
+	.tb-btn-active,
+	.tb-btn-active:hover {
+		color: var(--accent-tx);
+		background: var(--accent-lt);
+		border-color: var(--accent);
+		box-shadow: inset 0 0 0 0.5px var(--accent);
+	}
 	.tb-star-on { color: var(--accent) !important; }
 	.tb-lock-on { color: var(--accent) !important; }
 

@@ -771,15 +771,38 @@ describe('Mobile format bar active state', () => {
 			| undefined;
 		expect(onformatchange).toBeTypeOf('function');
 
-		onformatchange!({ ...EMPTY_FORMATS, strong: true });
+		onformatchange!({
+			...EMPTY_FORMATS,
+			strong: true,
+			emphasis: true,
+			underline: true,
+			inlineCode: true,
+			link: true,
+			heading: 2,
+			blockquote: true,
+			bulletList: true,
+			orderedList: true,
+			taskList: true,
+		});
 
 		const boldBtn = () =>
 			document.querySelector('.mob-format-bar [aria-label="Bold"]')!;
-		await waitFor(() => expect(boldBtn()).toHaveClass('mob-tb-btn-active'));
+		for (const label of [
+			'Headings', 'Bold', 'Italic', 'Underline', 'Insert link', 'Quote',
+			'Inline code', 'Bullet list', 'Ordered list', 'Checklist',
+		]) {
+			const button = document.querySelector(`.mob-format-bar [aria-label="${label}"]`)!;
+			await waitFor(() => expect(button).toHaveClass('mob-tb-btn-active'));
+			expect(button).toHaveAttribute('aria-pressed', 'true');
+		}
+		for (const label of ['Horizontal rule', 'Undo', 'Redo']) {
+			expect(document.querySelector(`.mob-format-bar [aria-label="${label}"]`)).not.toHaveAttribute('aria-pressed');
+		}
 
 		// And it clears again when the cursor moves out of bold text
 		onformatchange!({ ...EMPTY_FORMATS });
 		await waitFor(() => expect(boldBtn()).not.toHaveClass('mob-tb-btn-active'));
+		expect(boldBtn()).toHaveAttribute('aria-pressed', 'false');
 	});
 });
 
