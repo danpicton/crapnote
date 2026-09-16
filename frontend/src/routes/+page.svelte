@@ -1957,23 +1957,23 @@
 		>
 			<span class="mob-sync-dot" aria-hidden="true"></span>
 			{#if mobileSyncState === 'synced'}
-				<CheckCircle2 size={13} aria-hidden="true" />
+				<CheckCircle2 size={18} aria-hidden="true" />
 				<span>SYNCED</span>
 				<span class="mob-sync-spacer"></span>
 				{#if lastSyncAt}<span class="mob-sync-time">just now</span>{/if}
 			{:else if mobileSyncState === 'syncing'}
-				<RefreshCw size={13} class="mob-spin" aria-hidden="true" />
+				<RefreshCw size={18} class="mob-spin" aria-hidden="true" />
 				<span>SYNCING…</span>
 			{:else if mobileSyncState === 'pending'}
-				<CloudUpload size={13} aria-hidden="true" />
+				<CloudUpload size={18} aria-hidden="true" />
 				<span>NOT SYNCED</span>
 				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
 			{:else if mobileSyncState === 'offline-pending'}
-				<WifiOff size={13} aria-hidden="true" />
+				<WifiOff size={18} aria-hidden="true" />
 				<span>OFFLINE · UNSYNCED</span>
 				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
 			{:else}
-				<WifiOff size={13} aria-hidden="true" />
+				<WifiOff size={18} aria-hidden="true" />
 				<span>OFFLINE</span>
 				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
 			{/if}
@@ -2057,11 +2057,11 @@
 							{/if}
 						</div>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold"><Bold size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic"><Italic size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline"><Underline size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold"><Bold size={16} /></button>
+						<button class="tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic"><Italic size={16} /></button>
+						<button class="tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline"><Underline size={16} /></button>
 						<div class="link-btn-wrap">
-							<button class="tb-btn" onclick={openLinkDialog} title="Insert link (Ctrl+K)"><Link size={13} /></button>
+							<button class="tb-btn" onclick={openLinkDialog} title="Insert link (Ctrl+K)"><Link size={16} /></button>
 							{#if showLinkDialog}
 								<div class="link-dialog-backdrop" onclick={() => (showLinkDialog = false)} role="presentation"></div>
 								<div class="link-dialog" role="dialog" aria-label="Insert link">
@@ -2071,27 +2071,27 @@
 							{/if}
 						</div>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote"><Quote size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code"><Code size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote"><Quote size={16} /></button>
+						<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code"><Code size={16} /></button>
+						<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={16} /></button>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(wrapSelectedInBulletListCommand.key)} title="Bullet list"><List size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list"><ListOrdered size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(wrapInTaskListCommand.key)} title="Task list"><ListTodo size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(wrapSelectedInBulletListCommand.key)} title="Bullet list"><List size={16} /></button>
+						<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list"><ListOrdered size={16} /></button>
+						<button class="tb-btn" onclick={() => cmd(wrapInTaskListCommand.key)} title="Task list"><ListTodo size={16} /></button>
+						<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={16} /></button>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo"><Redo2 size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={16} /></button>
+						<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo"><Redo2 size={16} /></button>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(insertImageCommand.key)} title="Insert image"><Image size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(insertImageCommand.key)} title="Insert image"><Image size={16} /></button>
 						<span class="tb-spacer"></span>
 						<NoteBodyTextSizeSelect />
-						<button class="tb-btn tb-star" class:tb-star-on={selectedNote.starred} onclick={() => toggleStar(selectedNote.id)} title={selectedNote.starred ? 'Unstar' : 'Star'}><Star size={13} /></button>
+						<button class="tb-btn tb-star" class:tb-star-on={selectedNote.starred} onclick={() => toggleStar(selectedNote.id)} title={selectedNote.starred ? 'Unstar' : 'Star'}><Star size={16} /></button>
 						<button class="tb-btn tb-lock" class:tb-lock-on={selectedNote.locked} onclick={() => toggleLock(selectedNote.id)} title={selectedNote.locked ? 'Unlock note' : 'Lock note'} aria-pressed={selectedNote.locked}>
-							{#if selectedNote.locked}<Lock size={13} />{:else}<LockOpen size={13} />{/if}
+							{#if selectedNote.locked}<Lock size={16} />{:else}<LockOpen size={16} />{/if}
 						</button>
 						<div class="note-menu-wrap">
-							<button class="tb-btn" onclick={() => (showNoteMenu = !showNoteMenu)} title="More actions" aria-label="More actions"><MoreHorizontal size={13} /></button>
+							<button class="tb-btn" onclick={() => (showNoteMenu = !showNoteMenu)} title="More actions" aria-label="More actions"><MoreHorizontal size={16} /></button>
 							{#if showNoteMenu}
 								<div class="note-menu-backdrop" onclick={() => (showNoteMenu = false)} role="presentation"></div>
 								<div class="note-menu" role="menu">
@@ -2173,7 +2173,7 @@
 								{/each}
 								<div class="popover-new">
 									<input class="popover-new-input" type="text" placeholder="New tag…" bind:value={newTagName} onkeydown={(e) => e.key === 'Enter' && createAndAddTag()} />
-									<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={12} /></button>
+									<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={16} /></button>
 								</div>
 							</div>
 						{/if}
@@ -2745,7 +2745,7 @@
 	.toolbar {
 		display: flex;
 		align-items: center;
-		gap: 1px;
+		gap: 2px;
 		padding: 0.3rem 1rem;
 		border-bottom: 1px solid var(--border);
 		background: var(--bg-toolbar);
@@ -2754,13 +2754,16 @@
 	}
 
 	.tb-btn {
-		padding: 0.3rem 0.35rem;
+		width: 32px;
+		height: 32px;
+		padding: 0;
 		background: none;
 		border: 1px solid transparent;
 		border-radius: 2px;
 		cursor: pointer;
 		color: var(--text-3);
 		display: flex;
+		flex-shrink: 0;
 		align-items: center;
 		justify-content: center;
 	}
@@ -2783,7 +2786,7 @@
 	.tb-h-toggle {
 		font-family: var(--serif);
 		font-weight: 700;
-		font-size: 0.8rem;
+		font-size: 0.9rem;
 		letter-spacing: -0.02em;
 		min-width: 1.6rem;
 	}
@@ -2915,10 +2918,11 @@
 	/* ─── Bottom status bar ──────────────────────────────── */
 	.editor-statusbar {
 		border-top: 1px solid var(--border);
-		padding: 0.5rem 1.25rem;
+		padding: 0.25rem 1.25rem;
 		display: flex;
 		align-items: center;
-		gap: 1rem;
+		gap: 0.25rem 1rem;
+		flex-wrap: wrap;
 		font-family: var(--sans);
 		font-size: 0.6875rem;
 		color: var(--text-4);
@@ -2939,9 +2943,13 @@
 		margin-left: auto;
 		display: flex;
 		align-items: center;
-		gap: 0.625rem;
+		justify-content: flex-end;
+		gap: 0.25rem 0.625rem;
+		min-width: 0;
+		flex-wrap: wrap;
 	}
 	.status-tags-label {
+		flex-shrink: 0;
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
 		font-size: 0.6875rem;
@@ -2952,9 +2960,12 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.375rem;
+		min-width: 32px;
+		min-height: 32px;
+		flex-shrink: 0;
 		background: none;
 		border: none;
-		padding: 0;
+		padding: 0 0.25rem;
 		cursor: pointer;
 	}
 	.note-tag-chip:hover .status-tag-word { color: var(--text-2); }
@@ -2971,6 +2982,7 @@
 		color: var(--text);
 	}
 	.status-shortcut {
+		flex-shrink: 0;
 		font-size: 0.625rem;
 		color: var(--text-4);
 		background: var(--bg-hover);
@@ -2982,6 +2994,10 @@
 	}
 
 	.status-add-tag {
+		min-width: 32px;
+		min-height: 32px;
+		flex-shrink: 0;
+		white-space: nowrap;
 		background: none;
 		border: none;
 		cursor: pointer;
@@ -2997,6 +3013,7 @@
 	/* ─── Tag popover ────────────────────────────────────── */
 	.tag-popover-backdrop { position: fixed; inset: 0; z-index: 29; }
 	.tag-popover-wrap { position: relative; }
+	.status-tags .tag-popover-wrap { flex-shrink: 0; }
 
 	.tag-popover {
 		position: absolute;
@@ -3057,12 +3074,16 @@
 	}
 	.popover-new-input:focus { border-color: var(--accent); }
 	.popover-add-btn {
+		width: 32px;
+		height: 32px;
 		background: none;
 		border: none;
 		cursor: pointer;
 		color: var(--accent);
-		padding: 0.1rem;
+		padding: 0;
 		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.offline-image-notice {
@@ -3414,8 +3435,8 @@
 		.mob-sync-row {
 			display: flex;
 			align-items: center;
-			gap: 5px;
-			height: 28px;
+			gap: 7px;
+			min-height: 44px;
 			padding: 0 18px;
 			border-top: 1px solid var(--border);
 			font-family: var(--sans);
