@@ -477,8 +477,29 @@ describe('Formatting active state', () => {
 			| undefined;
 		expect(onformatchange).toBeTypeOf('function');
 
-		onformatchange!({ ...EMPTY_FORMATS, strong: true });
-		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'true'));
+		onformatchange!({
+			...EMPTY_FORMATS,
+			strong: true,
+			emphasis: true,
+			underline: true,
+			inlineCode: true,
+			link: true,
+			heading: 2,
+			blockquote: true,
+			bulletList: true,
+			orderedList: true,
+			taskList: true,
+		});
+		for (const title of [
+			'Bold', 'Italic', 'Underline', 'Insert link (Ctrl+K)', 'Quote',
+			'Inline code', 'Bullet list', 'Numbered list', 'Task list', 'Headings',
+		]) {
+			await waitFor(() => expect(screen.getByTitle(title)).toHaveAttribute('aria-pressed', 'true'));
+			expect(screen.getByTitle(title)).toHaveClass('tb-btn-active');
+		}
+		for (const title of ['Code block', 'Horizontal rule', 'Undo', 'Redo', 'Insert image']) {
+			expect(screen.getByTitle(title)).not.toHaveAttribute('aria-pressed');
+		}
 
 		onformatchange!({ ...EMPTY_FORMATS });
 		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'false'));
