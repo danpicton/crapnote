@@ -244,10 +244,21 @@
 		position: absolute;
 		inset: -6px -7px;
 	}
-	/* Task items are pulled 1.25em left so their text lines up with plain
-	   items; shift the handle back by the same amount to keep the gutter
-	   column straight. */
-	.editor-container :global(.ProseMirror li[data-item-type='task'] .list-drag-handle) {
+	/* Checklist controls use three distinct columns. Move only their handle
+	   farther into the gutter and align it with the first text line. */
+	.editor-container :global(.ProseMirror li[data-item-type='task'] > .list-drag-handle) {
+		left: -1.35em;
+		top: 0.15em;
+	}
+	/* Keep the expanded drag target inside the handle column so it cannot
+	   steal a checkbox tap. Plain-list targets retain the shared sizing. */
+	.editor-container :global(.ProseMirror li[data-item-type='task'] > .list-drag-handle::after) {
+		inset: -6px -3px;
+	}
+	/* Before checklist handles gained their own column, every descendant handle
+	   inherited this offset. Preserve it for nested plain lists so this
+	   checklist-only fix does not move their bullet or numbered-list grips. */
+	.editor-container :global(.ProseMirror li[data-item-type='task'] li:not([data-item-type='task']) > .list-drag-handle) {
 		left: -0.65em;
 	}
 	/* Touch devices never hover, so a hover-only grip would be undraggable. */
@@ -292,28 +303,29 @@
 		bottom: -1px;
 	}
 
-	/* Task list items — text aligned with regular list item text, checkbox in margin */
+	/* Task list items — handle, checkbox and text occupy stable columns. */
 	.editor-container :global(.ProseMirror li[data-item-type="task"]) {
 		list-style: none;
 		display: flex;
-		align-items: center;
-		gap: 0.375em;
-		margin-left: -1.25em; /* pull into ul padding so text aligns with regular <li> text */
+		align-items: flex-start;
+		gap: 0.5em;
+		margin-left: -2em; /* pull into ul padding so text aligns with regular <li> text */
 	}
-	/* The tap target, not the box. Padding grows the hit area and the equal
-	   negative margin pulls the layout back, so the checkbox sits exactly
-	   where it did before. */
+	/* Give the checkbox its own target column and centre it against the first
+	   1.5em text line, clear of the neighbouring handle and text columns. */
 	.editor-container :global(.ProseMirror li[data-item-type="task"] .task-check-hit) {
-		flex-shrink: 0;
+		position: relative;
+		flex: 0 0 1.5em;
+		height: 1.5em;
+		margin-top: 0.15em;
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		padding: 0.45em 0.4em;
-		margin: -0.45em -0.4em;
 		cursor: pointer;
 		-webkit-tap-highlight-color: transparent;
 	}
 	.editor-container :global(.ProseMirror li[data-item-type="task"] .task-checkbox) {
+		box-sizing: border-box;
 		flex-shrink: 0;
 		width: 1.05em;
 		height: 1.05em;
@@ -329,18 +341,29 @@
 		pointer-events: none;
 		cursor: default;
 	}
-	/* Phones: the box grows and the hit area goes to ~40px square. Vertical
-	   padding stops short of a full 44px on purpose — any taller and
-	   neighbouring rows' targets would overlap enough to swallow each
-	   other's taps. */
+	/* Phones: a taller, wider checkbox column provides a touch target without
+	   overlapping either adjacent control. The box itself stays centred on the
+	   first text line rather than the full target. */
 	@media (max-width: 640px) {
+		.editor-container :global(.ProseMirror li[data-item-type="task"]) {
+			min-height: 40px;
+			margin-left: -1.75em;
+		}
+		.editor-container :global(.ProseMirror li[data-item-type="task"] > .list-drag-handle) {
+			left: -1.2em;
+		}
 		.editor-container :global(.ProseMirror li[data-item-type="task"] .task-check-hit) {
-			padding: 10px 9px;
-			margin: -10px -9px;
+			flex-basis: 28px;
+			height: 40px;
+			margin-top: 0;
+			align-items: flex-start;
 		}
 		.editor-container :global(.ProseMirror li[data-item-type="task"] .task-checkbox) {
+			position: absolute;
+			top: 5px;
 			width: 20px;
 			height: 20px;
+			margin: 0;
 		}
 	}
 
