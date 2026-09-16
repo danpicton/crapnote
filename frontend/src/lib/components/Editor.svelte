@@ -255,6 +255,12 @@
 	.editor-container :global(.ProseMirror li[data-item-type='task'] > .list-drag-handle::after) {
 		inset: -6px -3px;
 	}
+	/* Before checklist handles gained their own column, every descendant handle
+	   inherited this offset. Preserve it for nested plain lists so this
+	   checklist-only fix does not move their bullet or numbered-list grips. */
+	.editor-container :global(.ProseMirror li[data-item-type='task'] li:not([data-item-type='task']) > .list-drag-handle) {
+		left: -0.65em;
+	}
 	/* Touch devices never hover, so a hover-only grip would be undraggable. */
 	@media (hover: none) {
 		.editor-container :global(.ProseMirror .list-drag-handle) {

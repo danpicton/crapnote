@@ -168,9 +168,10 @@ test.describe('List reordering', () => {
       );
       const styles = (item: Element) => {
         const handle = item.querySelector(':scope > .list-drag-handle')!;
+        const style = getComputedStyle(handle);
         return {
-          left: getComputedStyle(handle).left,
-          top: getComputedStyle(handle).top,
+          leftEm: parseFloat(style.left) / parseFloat(style.fontSize),
+          top: style.top,
           afterInsetRight: getComputedStyle(handle, '::after').right,
         };
       };
@@ -178,8 +179,14 @@ test.describe('List reordering', () => {
     });
 
     expect(geometry).toHaveLength(3);
-    expect(geometry[1]).toEqual(geometry[0]);
-    expect(geometry[2]).toEqual(geometry[0]);
+    expect(geometry[0].leftEm).toBeCloseTo(-1.9, 2);
+    for (const nested of geometry.slice(1)) {
+      // Preserve main's nested-plain-list position while task handles move to
+      // their new column. These handles otherwise jump about 20px left.
+      expect(nested.leftEm).toBeCloseTo(-0.65, 2);
+      expect(nested.top).toBe('0px');
+      expect(nested.afterInsetRight).toBe('-7px');
+    }
   });
 
   // The grip used to be a text glyph, which landed in the item's text content
@@ -213,6 +220,27 @@ test.describe('List reordering on touch', () => {
       getComputedStyle(document.querySelector('.ProseMirror .list-drag-handle')!).opacity,
     );
     expect(Number(opacity)).toBeGreaterThan(0);
+  });
+
+  test('nested plain-list handles keep their existing mobile offset', async ({ page }) => {
+    await login(page);
+    await openListNote(
+      page,
+      'Touch mixed nested lists',
+      '- [ ] Parent task\n  - Nested bullet item\n- [ ] Another parent task\n  1. Nested numbered item\n',
+    );
+
+    const leftOffsets = await page
+      .locator('.ProseMirror li:not([data-item-type="task"]) > .list-drag-handle')
+      .evaluateAll((handles) =>
+        handles.map((handle) => {
+          const style = getComputedStyle(handle);
+          return parseFloat(style.left) / parseFloat(style.fontSize);
+        }),
+      );
+
+    expect(leftOffsets).toHaveLength(2);
+    for (const offset of leftOffsets) expect(offset).toBeCloseTo(-0.65, 2);
   });
 
   test('task controls stay separated and taps toggle only their row', async ({ page }) => {
