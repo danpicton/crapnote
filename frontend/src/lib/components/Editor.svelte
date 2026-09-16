@@ -246,13 +246,13 @@
 	}
 	/* Checklist controls use three distinct columns. Move only their handle
 	   farther into the gutter and align it with the first text line. */
-	.editor-container :global(.ProseMirror li[data-item-type='task'] .list-drag-handle) {
+	.editor-container :global(.ProseMirror li[data-item-type='task'] > .list-drag-handle) {
 		left: -1.35em;
 		top: 0.15em;
 	}
 	/* Keep the expanded drag target inside the handle column so it cannot
 	   steal a checkbox tap. Plain-list targets retain the shared sizing. */
-	.editor-container :global(.ProseMirror li[data-item-type='task'] .list-drag-handle::after) {
+	.editor-container :global(.ProseMirror li[data-item-type='task'] > .list-drag-handle::after) {
 		inset: -6px -3px;
 	}
 	/* Touch devices never hover, so a hover-only grip would be undraggable. */
@@ -343,7 +343,7 @@
 			min-height: 40px;
 			margin-left: -1.75em;
 		}
-		.editor-container :global(.ProseMirror li[data-item-type="task"] .list-drag-handle) {
+		.editor-container :global(.ProseMirror li[data-item-type="task"] > .list-drag-handle) {
 			left: -1.2em;
 		}
 		.editor-container :global(.ProseMirror li[data-item-type="task"] .task-check-hit) {

@@ -155,6 +155,33 @@ test.describe('List reordering', () => {
     expect(geometry[0].textX).toBeCloseTo(geometry[1].textX, 0);
   });
 
+  test('plain lists nested under tasks keep the plain handle geometry', async ({ page }) => {
+    await openListNote(
+      page,
+      'Mixed nested lists',
+      '- Top-level plain item\n- [ ] Parent task\n  - Nested bullet item\n- [ ] Another parent task\n  1. Nested numbered item\n',
+    );
+
+    const geometry = await page.evaluate(() => {
+      const plainItems = Array.from(
+        document.querySelectorAll('.ProseMirror li:not([data-item-type="task"])'),
+      );
+      const styles = (item: Element) => {
+        const handle = item.querySelector(':scope > .list-drag-handle')!;
+        return {
+          left: getComputedStyle(handle).left,
+          top: getComputedStyle(handle).top,
+          afterInsetRight: getComputedStyle(handle, '::after').right,
+        };
+      };
+      return plainItems.map(styles);
+    });
+
+    expect(geometry).toHaveLength(3);
+    expect(geometry[1]).toEqual(geometry[0]);
+    expect(geometry[2]).toEqual(geometry[0]);
+  });
+
   // The grip used to be a text glyph, which landed in the item's text content
   // and depended on the theme font having U+283F.
   test('the handle contributes no text to the list item', async ({ page }) => {
