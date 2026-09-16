@@ -8,17 +8,21 @@ async function login(page: Page) {
   await expect(page).toHaveURL('/');
 }
 
-/** Create a note with a bullet list straight through the API and open it. */
-async function openListNote(page: Page, title: string) {
-  const id = await page.evaluate(async (t) => {
+/** Create a note with a list straight through the API and open it. */
+async function openListNote(
+  page: Page,
+  title: string,
+  body = '- Alpha\n- Bravo\n- Charlie\n- Delta\n',
+) {
+  const id = await page.evaluate(async ({ title: t, body: b }) => {
     const res = await fetch('/api/notes', {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: t, body: '- Alpha\n- Bravo\n- Charlie\n- Delta\n' }),
+      body: JSON.stringify({ title: t, body: b }),
     });
     return (await res.json()).id as number;
-  }, title);
+  }, { title, body });
   await page.goto(`/notes/${id}`);
   await page.waitForSelector('.ProseMirror li');
   return id;
@@ -113,6 +117,44 @@ test.describe('List reordering', () => {
     expect(offset).toBeLessThanOrEqual(1);
   });
 
+  test('task controls form aligned columns centred on the first text line', async ({ page }) => {
+    await openListNote(
+      page,
+      'Aligned tasks',
+      '- [ ] A deliberately long checklist item that wraps onto another line so the controls must remain beside its first line rather than the whole row, even in the wide desktop editor where there is substantially more room for the sentence before it wraps onto its continuation\n- [x] Short item\n',
+    );
+
+    const geometry = await page.locator('.ProseMirror li[data-item-type="task"]').evaluateAll((items) =>
+      items.map((item) => {
+        const handle = item.querySelector('.list-drag-handle')!.getBoundingClientRect();
+        const grip = item.querySelector('.list-drag-handle svg')!.getBoundingClientRect();
+        const checkbox = item.querySelector('.task-checkbox')!.getBoundingClientRect();
+        const text = item.querySelector('.task-content p')!.getBoundingClientRect();
+        const lineHeight = parseFloat(getComputedStyle(item).lineHeight);
+        const firstLineCentre = text.top + lineHeight / 2;
+        return {
+          handleX: handle.left,
+          checkboxX: checkbox.left,
+          textX: text.left,
+          gripGap: checkbox.left - grip.right,
+          handleYOffset: Math.abs(handle.top + handle.height / 2 - firstLineCentre),
+          checkboxYOffset: Math.abs(checkbox.top + checkbox.height / 2 - firstLineCentre),
+          textHeight: text.height,
+          lineHeight,
+        };
+      }),
+    );
+
+    expect(geometry).toHaveLength(2);
+    expect(geometry[0].textHeight).toBeGreaterThan(geometry[0].lineHeight);
+    expect(geometry[0].gripGap).toBeGreaterThanOrEqual(6);
+    expect(geometry[0].handleYOffset).toBeLessThanOrEqual(1);
+    expect(geometry[0].checkboxYOffset).toBeLessThanOrEqual(1);
+    expect(geometry[0].handleX).toBeCloseTo(geometry[1].handleX, 0);
+    expect(geometry[0].checkboxX).toBeCloseTo(geometry[1].checkboxX, 0);
+    expect(geometry[0].textX).toBeCloseTo(geometry[1].textX, 0);
+  });
+
   // The grip used to be a text glyph, which landed in the item's text content
   // and depended on the theme font having U+283F.
   test('the handle contributes no text to the list item', async ({ page }) => {
@@ -144,5 +186,45 @@ test.describe('List reordering on touch', () => {
       getComputedStyle(document.querySelector('.ProseMirror .list-drag-handle')!).opacity,
     );
     expect(Number(opacity)).toBeGreaterThan(0);
+  });
+
+  test('task controls stay separated and taps toggle only their row', async ({ page }) => {
+    await login(page);
+    await openListNote(page, 'Touch tasks', '- [ ] First task\n- [ ] Second task\n');
+
+    const first = page.locator('.ProseMirror li[data-item-type="task"]').first();
+    const geometry = await first.evaluate((item) => {
+      const editor = item.closest('.editor-container')!.getBoundingClientRect();
+      const handle = item.querySelector('.list-drag-handle')!.getBoundingClientRect();
+      const grip = item.querySelector('.list-drag-handle svg')!.getBoundingClientRect();
+      const hit = item.querySelector('.task-check-hit')!.getBoundingClientRect();
+      const checkbox = item.querySelector('.task-checkbox')!.getBoundingClientRect();
+      const text = item.querySelector('.task-content p')!.getBoundingClientRect();
+      const lineHeight = parseFloat(getComputedStyle(item).lineHeight);
+      const firstLineCentre = text.top + lineHeight / 2;
+      return {
+        handleVisible: Number(getComputedStyle(item.querySelector('.list-drag-handle')!).opacity),
+        handleInsideEditor: handle.left >= editor.left,
+        gripGap: checkbox.left - grip.right,
+        targetGap: hit.left - handle.right,
+        targetWidth: hit.width,
+        targetHeight: hit.height,
+        handleYOffset: Math.abs(handle.top + handle.height / 2 - firstLineCentre),
+        checkboxYOffset: Math.abs(checkbox.top + checkbox.height / 2 - firstLineCentre),
+      };
+    });
+
+    expect(geometry.handleVisible).toBeGreaterThan(0);
+    expect(geometry.handleInsideEditor, JSON.stringify(geometry)).toBe(true);
+    expect(geometry.gripGap).toBeGreaterThanOrEqual(6);
+    expect(geometry.targetGap).toBeGreaterThanOrEqual(5);
+    expect(geometry.targetWidth).toBeGreaterThanOrEqual(28);
+    expect(geometry.targetHeight).toBeGreaterThanOrEqual(40);
+    expect(geometry.handleYOffset).toBeLessThanOrEqual(1);
+    expect(geometry.checkboxYOffset).toBeLessThanOrEqual(1);
+
+    await page.locator('.task-check-hit').nth(1).click();
+    await expect(page.locator('.ProseMirror li[data-checked="false"]')).toHaveCount(1);
+    await expect(page.locator('.ProseMirror li[data-checked="true"]')).toHaveCount(1);
   });
 });
