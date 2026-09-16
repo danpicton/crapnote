@@ -70,7 +70,7 @@
 	// Route params can change without recreating this page component. Do not
 	// show the previous note's formats while the keyed editor remounts.
 	$effect(() => {
-		noteId;
+		void noteId;
 		activeFormats = { ...EMPTY_FORMATS };
 	});
 

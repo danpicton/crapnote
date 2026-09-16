@@ -447,7 +447,7 @@
 	// A keyed editor reports its initial state after mounting. Clear the old
 	// note's formats immediately while that replacement is being created.
 	$effect(() => {
-		selectedId;
+		void selectedId;
 		activeFormats = { ...EMPTY_FORMATS };
 	});
 
