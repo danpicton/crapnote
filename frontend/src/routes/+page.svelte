@@ -2921,7 +2921,8 @@
 		padding: 0.25rem 1.25rem;
 		display: flex;
 		align-items: center;
-		gap: 1rem;
+		gap: 0.25rem 1rem;
+		flex-wrap: wrap;
 		font-family: var(--sans);
 		font-size: 0.6875rem;
 		color: var(--text-4);
@@ -2942,9 +2943,13 @@
 		margin-left: auto;
 		display: flex;
 		align-items: center;
-		gap: 0.625rem;
+		justify-content: flex-end;
+		gap: 0.25rem 0.625rem;
+		min-width: 0;
+		flex-wrap: wrap;
 	}
 	.status-tags-label {
+		flex-shrink: 0;
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
 		font-size: 0.6875rem;
@@ -2955,7 +2960,9 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.375rem;
+		min-width: 32px;
 		min-height: 32px;
+		flex-shrink: 0;
 		background: none;
 		border: none;
 		padding: 0 0.25rem;
@@ -2975,6 +2982,7 @@
 		color: var(--text);
 	}
 	.status-shortcut {
+		flex-shrink: 0;
 		font-size: 0.625rem;
 		color: var(--text-4);
 		background: var(--bg-hover);
@@ -2986,7 +2994,10 @@
 	}
 
 	.status-add-tag {
+		min-width: 32px;
 		min-height: 32px;
+		flex-shrink: 0;
+		white-space: nowrap;
 		background: none;
 		border: none;
 		cursor: pointer;
@@ -3002,6 +3013,7 @@
 	/* ─── Tag popover ────────────────────────────────────── */
 	.tag-popover-backdrop { position: fixed; inset: 0; z-index: 29; }
 	.tag-popover-wrap { position: relative; }
+	.status-tags .tag-popover-wrap { flex-shrink: 0; }
 
 	.tag-popover {
 		position: absolute;

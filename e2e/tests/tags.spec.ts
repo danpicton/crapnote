@@ -53,6 +53,37 @@ test.describe('Tags', () => {
     await expect(checkbox).toBeChecked();
   });
 
+  test('desktop status-bar actions keep 32px targets and remain reachable in narrow panes', async ({ page }) => {
+    await createNote(page, 'Status control sizing');
+    await openTagPopover(page);
+    await createTagInPopover(page, 'i');
+
+    const chip = page.locator('.note-tag-chip', { hasText: 'i' });
+    const addTag = page.locator('.status-add-tag');
+    const statusTags = page.locator('.status-tags');
+
+    for (const width of [800, 641]) {
+      await page.setViewportSize({ width, height: 900 });
+
+      for (const control of [chip, addTag]) {
+        const box = await control.boundingBox();
+        expect(box).not.toBeNull();
+        expect(box!.width).toBeGreaterThanOrEqual(32);
+        expect(box!.height).toBeGreaterThanOrEqual(32);
+      }
+
+      const containerBox = await statusTags.boundingBox();
+      expect(containerBox).not.toBeNull();
+      for (const control of [chip, addTag]) {
+        const box = (await control.boundingBox())!;
+        expect(box.x).toBeGreaterThanOrEqual(containerBox!.x);
+        expect(box.x + box.width).toBeLessThanOrEqual(containerBox!.x + containerBox!.width);
+        expect(box.y).toBeGreaterThanOrEqual(containerBox!.y);
+        expect(box.y + box.height).toBeLessThanOrEqual(containerBox!.y + containerBox!.height);
+      }
+    }
+  });
+
   test('tag appears in tag panel after being applied', async ({ page }) => {
     await createNote(page, 'Sidebar filter note');
     await openTagPopover(page);
