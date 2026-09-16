@@ -776,10 +776,12 @@ describe('Mobile format bar active state', () => {
 		const boldBtn = () =>
 			document.querySelector('.mob-format-bar [aria-label="Bold"]')!;
 		await waitFor(() => expect(boldBtn()).toHaveClass('mob-tb-btn-active'));
+		expect(boldBtn()).toHaveAttribute('aria-pressed', 'true');
 
 		// And it clears again when the cursor moves out of bold text
 		onformatchange!({ ...EMPTY_FORMATS });
 		await waitFor(() => expect(boldBtn()).not.toHaveClass('mob-tb-btn-active'));
+		expect(boldBtn()).toHaveAttribute('aria-pressed', 'false');
 	});
 });
 
