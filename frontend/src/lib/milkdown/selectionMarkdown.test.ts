@@ -38,4 +38,12 @@ describe('selectionToMarkdown', () => {
 			expect(markdown).toMatch(/^\* First item\n\n\* Second item\n$/);
 		});
 	});
+
+	it('retains the starting number of an ordered list', async () => {
+		await withDocument('3. Third\n4. Fourth', (doc, serialize) => {
+			const markdown = selectionToMarkdown(new AllSelection(doc), serialize);
+
+			expect(markdown).toBe('3. Third\n4. Fourth\n');
+		});
+	});
 });
