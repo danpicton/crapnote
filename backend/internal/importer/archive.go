@@ -158,7 +158,7 @@ func parseNote(name string, content []byte) (Note, error) {
 		return Note{}, fmt.Errorf("note entry %q is missing the Crapnote title heading", name)
 	}
 	separator := strings.Index(text, "\n\n")
-	if separator < 2 || strings.Contains(text[2:separator], "\n") {
+	if separator < 2 {
 		return Note{}, fmt.Errorf("note entry %q has an invalid Crapnote title heading", name)
 	}
 	body := text[separator+2:]

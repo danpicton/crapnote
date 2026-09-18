@@ -15,6 +15,7 @@ func TestParse_RoundTripsExportedNoteContent(t *testing.T) {
 	original := []*notes.Note{
 		{Title: "Duplicate — 日本語", Body: "First body\n\n# Original heading"},
 		{Title: "Duplicate — 日本語", Body: ""},
+		{Title: "Title on\ntwo lines", Body: "body ending in a newline\n"},
 	}
 	var archive bytes.Buffer
 	if err := export.Build(&archive, original, nil, ""); err != nil {
