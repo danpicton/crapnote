@@ -68,13 +68,15 @@ const mockTheme = vi.hoisted(() => ({
 vi.mock('$lib/stores/theme.svelte', () => ({ theme: mockTheme }));
 
 describe('Settings page', () => {
-	it('gives the archive password distinct non-account field semantics', () => {
+	it('does not expose the archive secret as a browser credential field', () => {
 		render(SettingsPage);
 
 		const field = screen.getByLabelText('Archive password (optional)');
-		expect(field).toHaveAttribute('id', 'export-archive-password');
-		expect(field).toHaveAttribute('name', 'export-archive-password');
+		expect(field).toHaveAttribute('id', 'export-archive-secret');
+		expect(field).toHaveAttribute('name', 'export-archive-secret');
+		expect(field).toHaveAttribute('type', 'text');
 		expect(field).toHaveAttribute('autocomplete', 'off');
+		expect(field).toHaveClass('archive-secret-input');
 	});
 
 	it('separates archive export from account-password submission', () => {
