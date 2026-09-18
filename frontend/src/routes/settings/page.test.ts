@@ -5,6 +5,7 @@ import SettingsPage from './+page.svelte';
 
 const mockApi = vi.hoisted(() => ({
 	auth: { changePassword: vi.fn() },
+	import: vi.fn(),
 	tokens: { list: vi.fn().mockResolvedValue([]) },
 	version: { get: vi.fn().mockResolvedValue({ version: 'v2.1.0', update_available: false }) },
 }));
@@ -80,6 +81,65 @@ describe('Settings page', () => {
 	it('shows back link to notes', () => {
 		render(SettingsPage);
 		expect(screen.getAllByRole('link', { name: /back to notes/i }).length).toBeGreaterThan(0);
+	});
+});
+
+describe('Settings — Import', () => {
+	beforeEach(() => {
+		mockApi.import.mockReset();
+	});
+
+	it('submits the selected archive and password and reports the imported count', async () => {
+		mockApi.import.mockResolvedValueOnce({ imported_notes: 2 });
+		render(SettingsPage);
+		const archive = new File(['zip'], 'backup.zip', { type: 'application/zip' });
+		await fireEvent.change(screen.getByLabelText(/crapnote export zip/i), {
+			target: { files: [archive] },
+		});
+		await fireEvent.input(screen.getByLabelText(/export password/i), {
+			target: { value: 'secret' },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /import notes/i }));
+
+		await waitFor(() => expect(mockApi.import).toHaveBeenCalledWith(archive, 'secret'));
+		expect(await screen.findByRole('status')).toHaveTextContent('Imported 2 notes.');
+	});
+
+	it('shows progress and disables the controls while importing', async () => {
+		let finish: (value: { imported_notes: number }) => void = () => {};
+		mockApi.import.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+		render(SettingsPage);
+		await fireEvent.change(screen.getByLabelText(/crapnote export zip/i), {
+			target: { files: [new File(['zip'], 'backup.zip') ] },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /import notes/i }));
+
+		expect(await screen.findByRole('progressbar')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: /importing/i })).toBeDisabled();
+		finish({ imported_notes: 1 });
+		await waitFor(() => expect(screen.queryByRole('progressbar')).toBeNull());
+	});
+
+	it('shows an actionable server failure without a success result', async () => {
+		mockApi.import.mockRejectedValueOnce(new Error('wrong password; try again'));
+		render(SettingsPage);
+		await fireEvent.change(screen.getByLabelText(/crapnote export zip/i), {
+			target: { files: [new File(['zip'], 'backup.zip')] },
+		});
+		await fireEvent.click(screen.getByRole('button', { name: /import notes/i }));
+
+		expect(await screen.findByRole('alert')).toHaveTextContent('wrong password; try again');
+		expect(screen.queryByText(/imported \d+ notes/i)).toBeNull();
+	});
+
+	it('documents metadata and archive limits that cannot be restored', () => {
+		render(SettingsPage);
+		expect(screen.getByText(/active, unpinned and unlocked/i)).toBeInTheDocument();
+		expect(screen.getByText(/fresh IDs and timestamps/i)).toBeInTheDocument();
+		expect(screen.getByText(/tags are not restored/i)).toBeInTheDocument();
+		expect(screen.getByText(/100 MB compressed/i)).toBeInTheDocument();
+		expect(screen.getByText(/2,000 entries/i)).toBeInTheDocument();
+		expect(screen.getByText(/200 MB decompressed/i)).toBeInTheDocument();
 	});
 });
 

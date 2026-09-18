@@ -23,6 +23,12 @@
 	let exportError = $state('');
 	let exportSubmitting = $state(false);
 
+	let importArchive = $state<File | null>(null);
+	let importPassword = $state('');
+	let importError = $state('');
+	let importSuccess = $state('');
+	let importSubmitting = $state(false);
+
 	let newPassword = $state('');
 	let newPasswordConfirm = $state('');
 	let pwError = $state('');
@@ -88,6 +94,32 @@
 				: 'Export failed.';
 		} finally {
 			exportSubmitting = false;
+		}
+	}
+
+	function selectImportArchive(event: Event) {
+		importArchive = (event.currentTarget as HTMLInputElement).files?.[0] ?? null;
+		importError = '';
+		importSuccess = '';
+	}
+
+	async function doImport(event: SubmitEvent) {
+		event.preventDefault();
+		importError = '';
+		importSuccess = '';
+		if (!importArchive) {
+			importError = 'Choose a Crapnote export ZIP to import.';
+			return;
+		}
+		importSubmitting = true;
+		try {
+			const result = await api.import(importArchive, importPassword || undefined);
+			importSuccess = `Imported ${result.imported_notes} ${result.imported_notes === 1 ? 'note' : 'notes'}.`;
+			importPassword = '';
+		} catch (err) {
+			importError = err instanceof Error && err.message ? err.message : 'Import failed.';
+		} finally {
+			importSubmitting = false;
 		}
 	}
 
@@ -171,6 +203,46 @@
 					</button>
 				</div>
 				<p class="hint">A ZIP of individual <code>.md</code> files. Password-protected if supplied.</p>
+			</div>
+		</section>
+
+		<!-- Import -->
+		<section class="section">
+			<div class="section-label">
+				<h2>Import</h2>
+				<p>Restore a Crapnote export as new notes.</p>
+			</div>
+			<div class="section-body">
+				{#if importError}<p role="alert" class="msg-error">{importError}</p>{/if}
+				{#if importSuccess}<p role="status" class="msg-success">{importSuccess}</p>{/if}
+				<form class="import-form" onsubmit={doImport}>
+					<label for="import-archive" class="field-label">Crapnote export ZIP</label>
+					<input
+						id="import-archive"
+						type="file"
+						accept=".zip,application/zip"
+						class="field-input import-file"
+						disabled={importSubmitting}
+						onchange={selectImportArchive}
+					/>
+					<label for="import-password" class="field-label">Export password (if encrypted)</label>
+					<input
+						id="import-password"
+						type="password"
+						autocomplete="off"
+						class="field-input"
+						bind:value={importPassword}
+						disabled={importSubmitting}
+					/>
+					<button type="submit" class="btn-primary" disabled={importSubmitting || !importArchive}>
+						{importSubmitting ? 'Importing…' : 'Import notes'}
+					</button>
+					{#if importSubmitting}
+						<progress aria-label="Import progress" class="import-progress"></progress>
+					{/if}
+				</form>
+				<p class="hint import-hint">Imported notes start active, unpinned and unlocked, with fresh IDs and timestamps. Tags are not restored.</p>
+				<p class="hint">Limits: 100 MB compressed, 2,000 entries and 200 MB decompressed.</p>
 			</div>
 		</section>
 
@@ -490,6 +562,11 @@
 	:global(.admin-link-chevron) { color: var(--text-3); }
 
 	.export-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+	.import-form { display: grid; grid-template-columns: minmax(0, 260px) auto; gap: 0.5rem; align-items: end; max-width: 520px; }
+	.import-form .field-label { grid-column: 1 / -1; margin: 0; }
+	.import-file { width: 100%; box-sizing: border-box; }
+	.import-progress { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+	.import-hint { margin-top: 0.75rem; }
 
 	/* Theme selector */
 	.theme-select-row {
@@ -665,6 +742,11 @@
 			outline: none;
 		}
 		.export-row .btn-primary { margin: 12px 16px 0; width: calc(100% - 32px); box-sizing: border-box; }
+		.import-form { display: flex; flex-direction: column; gap: 0; }
+		.import-form .field-label { padding: 12px 16px 4px; }
+		.import-form .field-input { width: 100%; }
+		.import-form .btn-primary { margin: 12px 16px; width: calc(100% - 32px); }
+		.import-progress { margin: 0 16px 12px; width: calc(100% - 32px); }
 		.hint { padding: 8px 16px 14px; }
 
 		/* Buttons full-width on mobile */

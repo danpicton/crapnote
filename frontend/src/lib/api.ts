@@ -65,6 +65,10 @@ export interface TrashEntry {
 	permanent_delete_at: string;
 }
 
+export interface ImportResult {
+	imported_notes: number;
+}
+
 export class ApiError extends Error {
 	constructor(
 		public readonly status: number,
@@ -284,6 +288,28 @@ export const api = {
 		restore: (id: number) => request<void>('POST', `/api/trash/${id}/restore`),
 		deleteOne: (id: number) => request<void>('DELETE', `/api/trash/${id}`),
 		empty: () => request<void>('DELETE', '/api/trash'),
+	},
+
+	import: async (archive: File, password?: string): Promise<ImportResult> => {
+		const body = new FormData();
+		body.append('archive', archive);
+		if (password) body.append('password', password);
+		const res = await fetch('/api/import', {
+			method: 'POST',
+			body,
+			credentials: 'include',
+		});
+		if (!res.ok) {
+			const text = await res.text();
+			let message = text;
+			try {
+				message = (JSON.parse(text) as { error?: string }).error || text;
+			} catch {
+				// Keep a non-JSON server response as the actionable error text.
+			}
+			throw new ApiError(res.status, message);
+		}
+		return res.json() as Promise<ImportResult>;
 	},
 
 	export: async (password?: string) => {

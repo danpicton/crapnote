@@ -183,6 +183,33 @@ describe('api.trash', () => {
 	});
 });
 
+describe('api.import', () => {
+	it('uploads the selected ZIP and optional password as multipart data', async () => {
+		mockFetch.mockResolvedValueOnce(ok({ imported_notes: 2 }, 201));
+		const archive = new File(['zip bytes'], 'backup.zip', { type: 'application/zip' });
+
+		await expect(api.import(archive, 'secret')).resolves.toEqual({ imported_notes: 2 });
+
+		const [path, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+		expect(path).toBe('/api/import');
+		expect(init).toMatchObject({ method: 'POST', credentials: 'include' });
+		expect(init.headers).toBeUndefined();
+		const body = init.body as FormData;
+		expect(body.get('archive')).toBe(archive);
+		expect(body.get('password')).toBe('secret');
+	});
+
+	it('surfaces the server error message', async () => {
+		mockFetch.mockResolvedValueOnce(fail(400, '{"error":"check the export password"}'));
+		const archive = new File(['bad'], 'backup.zip');
+
+		await expect(api.import(archive)).rejects.toMatchObject({
+			status: 400,
+			message: 'check the export password',
+		});
+	});
+});
+
 describe('ApiError', () => {
 	it('has status and message', () => {
 		const err = new ApiError(404, 'not found');
