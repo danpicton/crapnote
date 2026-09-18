@@ -142,6 +142,9 @@ describe('Settings — Import', () => {
 		expect(screen.getByText(/200 MB decompressed/i)).toBeInTheDocument();
 		expect(screen.getByText(/ambiguous title\/body boundaries/i)).toBeInTheDocument();
 		expect(screen.getByText(/one import at a time/i)).toBeInTheDocument();
+		expect(screen.getByText(/uploads must finish within 2 minutes/i)).toBeInTheDocument();
+		expect(screen.getByText(/relative image links not bundled in the ZIP are preserved/i)).toBeInTheDocument();
+		expect(screen.getByText(/legacy exports cannot identify removed image bundles/i)).toBeInTheDocument();
 	});
 });
 

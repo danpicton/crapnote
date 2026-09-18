@@ -185,9 +185,12 @@ Settings can import ZIP archives produced by Crapnote's exporter, including
 AES-256 password-protected exports. Import always creates new active notes for
 the signed-in user; importing the same archive again creates another set rather
 than overwriting or merging notes. Bundled images receive new IDs and stay
-private to that user. Pre-existing relative links such as `images/logo.png`
-are preserved unchanged; missing-bundle detection is limited to the
-`images/<UUID>.<extension>` naming scheme used for Crapnote's generated image IDs.
+private to that user. Relative image links whose paths are absent from the ZIP
+are preserved unchanged, including UUID-shaped filenames. The legacy format
+cannot distinguish an ordinary relative link from a bundle removed by repacking
+the ZIP; reliable missing-bundle detection needs an export manifest, tracked in
+[#202](https://github.com/danpicton/crapnote/issues/202). No path-name heuristic
+is used to reject those otherwise valid exports.
 
 The export format does not contain restoration metadata. Imported notes are
 therefore unpinned, unlocked and unstarred, with fresh IDs and timestamps; tags
@@ -197,12 +200,21 @@ Import accepts at most **100 MB compressed**, **2,000 ZIP entries**, and **200
 MB decompressed** in total. The normal 10 MB per-image limit, 500-byte title /
 500,000-byte body limits, and configured per-user image quota also apply.
 Passwords are limited to 64 KB. Invalid paths, unsupported entries, corrupt
-archives, missing bundled images, and archives with no note entries are
-rejected before anything is committed.
+archives (including malformed AES metadata or missing data for listed ZIP
+entries), and archives with no note entries are rejected before anything is
+committed. Entirely removed/repacked bundle entries have the legacy limitation
+above.
 
 Only **one HTTP import per server process** is admitted at a time; other requests
-receive a retryable 503 before their uploads are read. Compressed uploads are
-streamed to private temporary files and removed on success or failure. Import
+receive a retryable 503 before their uploads are read. Each multipart upload has
+an absolute **2-minute read deadline**, including boundary, file and password
+reads; trickling bytes does not extend it. Expiry returns an actionable 408,
+removes temporary files and releases admission for another import. The HTTP
+connection/stream read deadline is cleared after a complete upload, before
+archive processing. Response-writer wrappers must support read deadlines (or
+`Unwrap`); import fails closed if deadline support is unavailable.
+Compressed uploads are streamed to private temporary files and removed on
+success or failure. Import
 retains only ZIP metadata and one entry at a time, bounding both decompressed
 entry buffers and the ZIP library's compressed AES authentication buffers.
 Directory metadata is limited to 2 MB and checked before ZIP-reader allocation;

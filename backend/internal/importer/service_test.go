@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -105,6 +106,9 @@ func TestServiceImport_PreservesOrdinaryRelativeImagePaths(t *testing.T) {
 	const oldID = "12345678-1234-4234-8234-123456789abc"
 	const relativeBody = "![logo](images/logo.png)\n" +
 		"![hex name](images/deadbeef.png)\n" +
+		"![UUID name](images/fedcba98-7654-4321-8234-abcdef012345.png)\n" +
+		"![UUID reference][uuid]\n[uuid]: images/fedcba98-7654-4321-8234-abcdef012345.png\n" +
+		"<img src=\"images/fedcba98-7654-4321-8234-abcdef012345.png\">\n" +
 		"![reference][logo]\n[logo]: images/logo.png\n" +
 		"<img alt=\"a > b\" src=\"images/logo.png\">\n" +
 		"`images/logo.png`"
@@ -279,25 +283,13 @@ func TestServiceImport_EncryptedArchiveRequiresCorrectPasswordWithoutPartialWrit
 	}
 }
 
-func TestServiceImport_MissingImageAndQuotaFailuresStoreNothing(t *testing.T) {
+func TestServiceImport_QuotaFailuresStoreNothing(t *testing.T) {
 	tests := []struct {
 		name    string
 		entries map[string][]byte
 		quota   int64
 		wantErr error
 	}{
-		{
-			name:    "missing referenced image",
-			entries: map[string][]byte{"note.md": []byte("# Note\n\n![missing](images/abcdef01-1234-4234-8234-123456789abc.png)\n")},
-			quota:   100 << 20,
-			wantErr: importer.ErrMissingImage,
-		},
-		{
-			name:    "missing reference-style image",
-			entries: map[string][]byte{"note.md": []byte("# Note\n\n![ref][escaped\\]]\n[escaped\\]]: images/abcdef01-1234-4234-8234-123456789abc.png\n")},
-			quota:   100 << 20,
-			wantErr: importer.ErrMissingImage,
-		},
 		{
 			name: "image quota",
 			entries: map[string][]byte{
@@ -335,7 +327,7 @@ func TestServiceImport_MissingImageAndQuotaFailuresStoreNothing(t *testing.T) {
 	}
 }
 
-func TestServiceImport_MissingExportedBundleRollsBack(t *testing.T) {
+func TestServiceImport_UnlistedImagePathsAreNotProofOfMissingBundles(t *testing.T) {
 	const keptID = "12345678-1234-4234-8234-123456789abc"
 	const missingID = "abcdef01-1234-4234-8234-123456789abc"
 	for _, password := range []string{"", "secret"} {
@@ -394,18 +386,37 @@ func TestServiceImport_MissingExportedBundleRollsBack(t *testing.T) {
 			if err := zw.Close(); err != nil {
 				t.Fatal(err)
 			}
-			_, err = importer.NewService(database, importer.DefaultConfig()).Import(t.Context(), user.ID, damaged.Bytes(), password)
-			if !errors.Is(err, importer.ErrMissingImage) {
-				t.Fatalf("error = %v, want missing bundled image", err)
+			// An ordinary relative link produces exactly the same entry names
+			// and contents. The legacy format has no manifest to distinguish it.
+			body := "![logo](images/logo.png)\n![missing][asset]\n[asset]: images/" + missingID + ".png"
+			var ordinary bytes.Buffer
+			if err := export.Build(&ordinary, []*notes.Note{
+				{Title: "A", Body: "![owned](/api/images/" + keptID + ")"},
+				{Title: "Z", Body: body},
+			}, map[string]images.Data{keptID: {MimeType: "image/png", Bytes: testPNG()}}, password); err != nil {
+				t.Fatal(err)
 			}
-			for _, table := range []string{"notes", "images"} {
-				var count int
-				if err := database.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
-					t.Fatal(err)
-				}
-				if count != 0 {
-					t.Fatalf("missing bundle left %d rows in %s", count, table)
-				}
+			first, err := importer.Parse(damaged.Bytes(), password, importer.DefaultLimits())
+			if err != nil {
+				t.Fatal(err)
+			}
+			second, err := importer.Parse(ordinary.Bytes(), password, importer.DefaultLimits())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(first, second) {
+				t.Fatal("fixture contents should be indistinguishable")
+			}
+			result, err := importer.NewService(database, importer.DefaultConfig()).Import(t.Context(), user.ID, damaged.Bytes(), password)
+			if err != nil || result.ImportedNotes != 2 {
+				t.Fatalf("import = %+v, %v", result, err)
+			}
+			var got string
+			if err := database.QueryRow(`SELECT body FROM notes WHERE title = 'Z'`).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			if got != body {
+				t.Fatalf("unlisted path changed: %q", got)
 			}
 		})
 	}
@@ -445,15 +456,12 @@ func TestServiceImport_RollsBackImagesWhenNoteInsertFails(t *testing.T) {
 
 func TestServiceImport_LateArchiveFailuresRollBackNotesAndImages(t *testing.T) {
 	const oldID = "12345678-1234-4234-8234-123456789abc"
-	for _, failure := range []string{"AES authentication", "false decompressed size", "ambiguous title", "missing image", "invalid image"} {
+	for _, failure := range []string{"AES authentication", "false decompressed size", "ambiguous title", "invalid image"} {
 		t.Run(failure, func(t *testing.T) {
 			_, user, database := importHandlerFixture(t)
 			last := &notes.Note{Title: "Z", Body: "last"}
 			if failure == "ambiguous title" {
 				last.Title = "Z\n"
-			}
-			if failure == "missing image" {
-				last.Body = "![missing][x]\n[x]: images/abcdef01-1234-4234-8234-123456789abc.png"
 			}
 			imageBytes := testPNG()
 			if failure == "invalid image" {

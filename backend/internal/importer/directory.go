@@ -70,9 +70,18 @@ func checkDirectory(source io.ReaderAt, size int64, maxEntries int) error {
 			if le.Uint32(header[:]) != 0x02014b50 {
 				return errors.New("invalid ZIP central directory entry")
 			}
-			position += int64(len(header)) + int64(le.Uint16(header[28:])) + int64(le.Uint16(header[30:])) + int64(le.Uint16(header[32:]))
+			extraOffset := position + int64(len(header)) + int64(le.Uint16(header[28:]))
+			extraLength := int(le.Uint16(header[30:]))
+			position = extraOffset + int64(extraLength) + int64(le.Uint16(header[32:]))
 			if position > endOffset || position == endOffset && n+1 != count {
 				return errors.New("invalid ZIP central directory size or count")
+			}
+			extra := make([]byte, extraLength) // uint16 length; total directory capped above
+			if _, err := source.ReadAt(extra, extraOffset); err != nil {
+				return err
+			}
+			if err := checkExtraFields(extra); err != nil {
+				return err
 			}
 		}
 		if length == 0 && count != 0 {
@@ -81,4 +90,28 @@ func checkDirectory(source io.ReaderAt, size int64, maxEntries int) error {
 		return nil
 	}
 	return errors.New("missing ZIP central directory")
+}
+
+// yeka/zip reads seven AES metadata bytes without checking the field's length.
+// Validate the TLV structure before NewReader can reach that unsafe decoder.
+func checkExtraFields(extra []byte) error {
+	for len(extra) >= 4 {
+		tag := binary.LittleEndian.Uint16(extra)
+		length := int(binary.LittleEndian.Uint16(extra[2:]))
+		extra = extra[4:]
+		if tag == 0x9901 && length != 7 {
+			return errors.New("invalid AES extra field length")
+		}
+		if length > len(extra) {
+			return errors.New("truncated ZIP extra field")
+		}
+		extra = extra[length:]
+	}
+	// Match the library's tolerance for up to three trailing padding zeros.
+	for _, value := range extra {
+		if value != 0 {
+			return errors.New("truncated ZIP extra field header")
+		}
+	}
+	return nil
 }

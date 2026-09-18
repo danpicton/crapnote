@@ -9,6 +9,7 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/danpicton/crapnote/internal/auth"
 )
@@ -24,7 +25,7 @@ func TestHandler_ProcessWideAdmissionBeforeReadingBody(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		NewHandler(nil).Import(httptest.NewRecorder(), req)
+		NewHandler(nil).Import(newImportRecorder(), req)
 	}()
 	<-started
 	defer func() { close(release); <-done }()
@@ -40,6 +41,9 @@ func TestHandler_ProcessWideAdmissionBeforeReadingBody(t *testing.T) {
 	}
 	if secondBody.read {
 		t.Error("busy importer read the second upload")
+	}
+	if response.Header().Get("Connection") != "close" {
+		t.Error("busy response must not let net/http drain a stalled rejected upload")
 	}
 }
 
@@ -77,7 +81,7 @@ func TestHandler_EnforcesCompressedArchiveLimit(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/import", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req = req.WithContext(auth.WithUser(req.Context(), &auth.User{ID: 1}))
-	response := httptest.NewRecorder()
+	response := newImportRecorder()
 	(&Handler{maxUploadBytes: 1}).Import(response, req)
 
 	if response.Code != http.StatusRequestEntityTooLarge {
@@ -97,7 +101,7 @@ func TestHandler_SpoolsUploadToDiskAndCleansUpOnFailure(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/import", observed)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req = req.WithContext(auth.WithUser(req.Context(), &auth.User{ID: 1}))
-	response := httptest.NewRecorder()
+	response := newImportRecorder()
 	NewHandler(NewService(nil, DefaultConfig())).Import(response, req)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d", response.Code)
@@ -108,6 +112,24 @@ func TestHandler_SpoolsUploadToDiskAndCleansUpOnFailure(t *testing.T) {
 	entries, err := os.ReadDir(directory)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("temporary files after failed import: %v, %v", entries, err)
+	}
+}
+
+// Direct unit tests have no socket; the external handler suite checks deadlines
+// against a real httptest server through the production middleware wrappers.
+type importRecorder struct{ *httptest.ResponseRecorder }
+
+func newImportRecorder() *importRecorder                { return &importRecorder{httptest.NewRecorder()} }
+func (*importRecorder) SetReadDeadline(time.Time) error { return nil }
+
+func TestHandler_RejectsUploadsWhenDeadlinesAreUnsupported(t *testing.T) {
+	body := &observedBody{Reader: bytes.NewReader(nil)}
+	req := httptest.NewRequest(http.MethodPost, "/api/import", body)
+	req = req.WithContext(auth.WithUser(req.Context(), &auth.User{ID: 1}))
+	response := httptest.NewRecorder() // intentionally has no SetReadDeadline
+	NewHandler(nil).Import(response, req)
+	if response.Code != http.StatusInternalServerError || body.read {
+		t.Fatalf("unsupported deadline: status = %d, body read = %v", response.Code, body.read)
 	}
 }
 
