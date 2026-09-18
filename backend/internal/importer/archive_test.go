@@ -2,6 +2,7 @@ package importer_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"strings"
 	"testing"
@@ -16,7 +17,12 @@ func TestParse_RoundTripsExportedNoteContent(t *testing.T) {
 		{Title: "Duplicate — 日本語", Body: "First body\n\n# Original heading"},
 		{Title: "Duplicate — 日本語", Body: ""},
 		{Title: "Title on\ntwo lines", Body: "body ending in a newline\n"},
+		{Title: "Title with\n\na blank line", Body: "# Original heading\n\nbody"},
 		{Title: strings.Repeat("界", 30), Body: "long Unicode filename boundary"},
+		{Title: "Title with\n\na blank line", Body: "duplicate title"},
+		{Title: "Note 2", Body: "claims a suffix"},
+		{Title: "Note", Body: "first"},
+		{Title: "Note", Body: "second"},
 	}
 	var archive bytes.Buffer
 	if err := export.Build(&archive, original, nil, ""); err != nil {
@@ -36,6 +42,62 @@ func TestParse_RoundTripsExportedNoteContent(t *testing.T) {
 		}
 		if parsed.Notes[i].Body != original[i].Body {
 			t.Errorf("note %d body = %q, want %q", i, parsed.Notes[i].Body, original[i].Body)
+		}
+	}
+}
+
+func TestParse_BoundsEachEntryBeforeDecompression(t *testing.T) {
+	for name, data := range map[string][]byte{
+		"note.md":          []byte("# Note\n\n" + strings.Repeat("x", notes.MaxBodyLen+1000) + "\n"),
+		"images/image.png": bytes.Repeat([]byte("x"), (10<<20)+1),
+	} {
+		_, err := importer.Parse(makeZIP(t, map[string][]byte{name: data}), "", importer.DefaultLimits())
+		if err == nil || !strings.Contains(err.Error(), "entry exceeds") {
+			t.Errorf("%s: expected per-entry limit error, got %v", name, err)
+		}
+	}
+}
+
+func TestParse_RejectsTruncatedDeflateAfterCompleteContent(t *testing.T) {
+	data := makeZIP(t, map[string][]byte{"note.md": []byte("# Note\n\nbody\n")})
+	central := bytes.LastIndex(data, []byte{'P', 'K', 1, 2})
+	// Trim just the deflate end marker, leaving the full uncompressed text.
+	// EOF from a successful bounded read must not mask io.ErrUnexpectedEOF.
+	size := binary.LittleEndian.Uint32(data[central+20:])
+	for trim := uint32(1); trim <= 5; trim++ {
+		binary.LittleEndian.PutUint32(data[central+20:], size-trim)
+		_, err := importer.Parse(data, "", importer.DefaultLimits())
+		if err == nil {
+			t.Errorf("accepted deflate data truncated by %d bytes", trim)
+		}
+	}
+}
+
+func TestParse_RejectsForgedCentralDirectoryCount(t *testing.T) {
+	data := makeZIP(t, map[string][]byte{"note.md": []byte("# Note\n\nbody\n")})
+	end := bytes.LastIndex(data, []byte{'P', 'K', 5, 6})
+	binary.LittleEndian.PutUint16(data[end+8:], 0)
+	binary.LittleEndian.PutUint16(data[end+10:], 0)
+	_, err := importer.Parse(data, "", importer.DefaultLimits())
+	if err == nil {
+		t.Fatal("accepted a forged central directory count")
+	}
+}
+
+func TestParse_RejectsAmbiguousTitleBoundaries(t *testing.T) {
+	for _, note := range []*notes.Note{
+		{Title: "Note\n", Body: "body"},
+		{Title: "Note", Body: "\nbody"},
+		{Title: "Note\n\n", Body: "body"},
+		{Title: strings.Repeat("a", 80) + "\n\nrest", Body: "body"},
+	} {
+		var archive bytes.Buffer
+		if err := export.Build(&archive, []*notes.Note{note}, nil, ""); err != nil {
+			t.Fatal(err)
+		}
+		_, err := importer.Parse(archive.Bytes(), "", importer.DefaultLimits())
+		if err == nil || !strings.Contains(err.Error(), "ambiguous title/body boundary") {
+			t.Fatalf("title %q, body %q: expected actionable ambiguity error, got %v", note.Title, note.Body, err)
 		}
 	}
 }

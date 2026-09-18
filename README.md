@@ -192,10 +192,28 @@ therefore unpinned, unlocked and unstarred, with fresh IDs and timestamps; tags
 and archived state are not reconstructed.
 
 Import accepts at most **100 MB compressed**, **2,000 ZIP entries**, and **200
-MB decompressed** in total. The normal 10 MB per-image limit and configured
-per-user image quota also apply. Invalid paths, unsupported entries, corrupt
+MB decompressed** in total. The normal 10 MB per-image limit, 500-byte title /
+500,000-byte body limits, and configured per-user image quota also apply.
+Passwords are limited to 64 KB. Invalid paths, unsupported entries, corrupt
 archives, missing bundled images, and archives with no note entries are
 rejected before anything is committed.
+
+Only **one HTTP import per server process** is admitted at a time; other requests
+receive a retryable 503 before their uploads are read. Compressed uploads are
+streamed to private temporary files and removed on success or failure. Import
+retains only ZIP metadata and one entry at a time, bounding both decompressed
+entry buffers and the ZIP library's compressed AES authentication buffers.
+Directory metadata is limited to 2 MB and checked before ZIP-reader allocation;
+ZIP64 and multi-disk archives are unsupported (not needed within these limits).
+The temporary directory needs room for one 100 MB upload.
+
+The legacy exporter does not escape newlines in titles. Import uses the exported
+filename to recover the title/body boundary when uniquely identifiable, but
+rejects ambiguous boundaries rather than silently altering content. For example,
+a trailing title newline and a leading body newline can produce identical ZIP
+entries. Remove boundary blank lines or shorten the source title and re-export
+if this error occurs. A lossless versioned format is tracked in
+[#201](https://github.com/danpicton/crapnote/issues/201).
 
 ---
 

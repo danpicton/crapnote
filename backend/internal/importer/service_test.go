@@ -3,6 +3,7 @@ package importer_test
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"regexp"
@@ -32,7 +33,13 @@ func TestServiceImport_RestoresNotesAndSharedImageReferences(t *testing.T) {
 	}
 
 	const oldID = "12345678-1234-4234-8234-123456789abc"
-	body := "![markdown](/api/images/" + oldID + ")\n<img src=\"/api/images/" + oldID + "\">"
+	body := "![markdown](/api/images/" + oldID + ")\n<img src=\"/api/images/" + oldID + "\">" +
+		"\n![escaped \\] label](/api/images/" + oldID + ")" +
+		"\n<img alt=\"a > b\" src=\"/api/images/" + oldID + "\">" +
+		"\n![reference][escaped\\]]\n[escaped\\]]: /api/images/" + oldID +
+		"\n`/api/images/" + oldID + "`" +
+		"\n![external](https://example.org/images/external.png)" +
+		"\n<img src=\"/images/static.png\">"
 	var exported bytes.Buffer
 	if err := export.Build(&exported, []*notes.Note{
 		{Title: "Same title", Body: body},
@@ -217,6 +224,12 @@ func TestServiceImport_MissingImageAndQuotaFailuresStoreNothing(t *testing.T) {
 			wantErr: importer.ErrMissingImage,
 		},
 		{
+			name:    "missing reference-style image",
+			entries: map[string][]byte{"note.md": []byte("# Note\n\n![ref][escaped\\]]\n[escaped\\]]: images/missing.png\n")},
+			quota:   100 << 20,
+			wantErr: importer.ErrMissingImage,
+		},
+		{
 			name: "image quota",
 			entries: map[string][]byte{
 				"note.md":          []byte("# Note\n\n![image](images/image.png)\n"),
@@ -282,6 +295,62 @@ func TestServiceImport_RollsBackImagesWhenNoteInsertFails(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("transaction left %d imported images behind", count)
+	}
+}
+
+func TestServiceImport_LateArchiveFailuresRollBackNotesAndImages(t *testing.T) {
+	const oldID = "12345678-1234-4234-8234-123456789abc"
+	for _, failure := range []string{"AES authentication", "false decompressed size", "ambiguous title", "missing image", "invalid image"} {
+		t.Run(failure, func(t *testing.T) {
+			_, user, database := importHandlerFixture(t)
+			last := &notes.Note{Title: "Z", Body: "last"}
+			if failure == "ambiguous title" {
+				last.Title = "Z\n"
+			}
+			if failure == "missing image" {
+				last.Body = "![missing][x]\n[x]: images/missing.png"
+			}
+			imageBytes := testPNG()
+			if failure == "invalid image" {
+				imageBytes = []byte("not an image")
+			}
+			var exported bytes.Buffer
+			if err := export.Build(&exported, []*notes.Note{
+				{Title: "A", Body: "![image](/api/images/" + oldID + ")"}, last,
+			}, map[string]images.Data{oldID: {MimeType: "image/png", Bytes: imageBytes}}, "secret"); err != nil {
+				t.Fatal(err)
+			}
+			data := exported.Bytes()
+			if failure == "AES authentication" {
+				zr, err := yzip.NewReader(bytes.NewReader(data), int64(len(data)))
+				if err != nil {
+					t.Fatal(err)
+				}
+				file := zr.File[len(zr.File)-1]
+				offset, err := file.DataOffset()
+				if err != nil {
+					t.Fatal(err)
+				}
+				data[offset+int64(file.CompressedSize64)-1] ^= 1 // corrupt final authentication tag
+			}
+			if failure == "false decompressed size" {
+				central := bytes.LastIndex(data, []byte{'P', 'K', 1, 2})
+				binary.LittleEndian.PutUint32(data[central+24:], 1)
+			}
+			_, err := importer.NewService(database, importer.DefaultConfig()).Import(t.Context(), user.ID, data, "secret")
+			if !errors.Is(err, importer.ErrInvalidArchive) {
+				t.Fatalf("error = %v", err)
+			}
+			for _, table := range []string{"notes", "images"} {
+				var count int
+				if err := database.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				if count != 0 {
+					t.Fatalf("failure left %d rows in %s", count, table)
+				}
+			}
+		})
 	}
 }
 

@@ -1,12 +1,15 @@
 package importer
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/danpicton/crapnote/internal/images"
@@ -14,19 +17,15 @@ import (
 )
 
 var (
-	// ErrInvalidArchive identifies errors caused by archive content rather than storage.
 	ErrInvalidArchive = errors.New("invalid import archive")
-	// ErrQuota indicates that imported images would exceed the user's quota.
-	ErrQuota = errors.New("imported images would exceed your image storage quota")
-	// ErrMissingImage indicates that a note refers to a bundle entry that is absent.
-	ErrMissingImage = errors.New("a note references a bundled image that is missing")
+	ErrQuota          = errors.New("imported images would exceed your image storage quota")
+	ErrMissingImage   = errors.New("a note references a bundled image that is missing")
 )
 
-var imageReferencePatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(!\[[^\]\r\n]*\]\(\s*<?)(images/[A-Za-z0-9._+-]+)`),
-	regexp.MustCompile(`(?m)(^[ \t]{0,3}\[[^\]\r\n]+\]:[ \t]*(?:\r?\n[ \t]+)?<?)(images/[A-Za-z0-9._+-]+)`),
-	regexp.MustCompile(`(?i)(<img\b[^>]*\bsrc\s*=\s*["']?)(images/[A-Za-z0-9._+-]+)`),
-}
+// Like the exporter, work on paths, not selected Markdown/HTML syntaxes.
+// A missing bundle reference must be relative, not an untouched external or
+// root-relative URL whose path happens to contain an images/ directory.
+var bundledImagePath = regexp.MustCompile("(?:^|[\\s(<\"'`=:])images/[A-Za-z0-9_-]+\\.[A-Za-z0-9]+")
 
 // Config controls archive and per-user image storage limits.
 type Config struct {
@@ -34,7 +33,6 @@ type Config struct {
 	ImageQuotaBytes int64
 }
 
-// DefaultConfig returns production import limits.
 func DefaultConfig() Config {
 	return Config{Limits: DefaultLimits(), ImageQuotaBytes: images.DefaultConfig().QuotaBytes}
 }
@@ -50,7 +48,6 @@ type Service struct {
 	config Config
 }
 
-// NewService creates an import service.
 func NewService(database *sql.DB, config Config) *Service {
 	defaults := DefaultConfig()
 	if config.Limits.MaxEntries <= 0 {
@@ -65,41 +62,20 @@ func NewService(database *sql.DB, config Config) *Service {
 	return &Service{db: database, config: config}
 }
 
-// Import parses the archive and commits every image and note in one transaction.
+// Import is a convenience for callers that already hold an archive in memory.
+// The HTTP handler uses ImportReader directly on its temporary upload file.
 func (s *Service) Import(ctx context.Context, userID int64, data []byte, password string) (Result, error) {
-	archive, err := Parse(data, password, s.config.Limits)
+	return s.ImportReader(ctx, userID, bytes.NewReader(data), int64(len(data)), password)
+}
+
+// ImportReader retains only metadata and a single bounded entry at a time.
+// Each entry is authenticated/validated before insertion; the transaction is
+// committed only after ALL entries pass, including late password/CRC failures.
+func (s *Service) ImportReader(ctx context.Context, userID int64, source io.ReaderAt, size int64, password string) (Result, error) {
+	archive, err := openArchive(source, size, password, s.config.Limits)
 	if err != nil {
 		return Result{}, fmt.Errorf("%w: %w", ErrInvalidArchive, err)
 	}
-
-	paths := make([]string, 0, len(archive.Images))
-	mimeTypes := make(map[string]string, len(archive.Images))
-	newIDs := make(map[string]string, len(archive.Images))
-	var importedImageBytes int64
-	for archivePath, image := range archive.Images {
-		mimeType, err := images.ValidateData(image.Data)
-		if err != nil {
-			return Result{}, fmt.Errorf("%w: invalid bundled image %q: %v", ErrInvalidArchive, archivePath, err)
-		}
-		paths = append(paths, archivePath)
-		mimeTypes[archivePath] = mimeType
-		newIDs[archivePath] = images.NewID()
-		importedImageBytes += int64(len(image.Data))
-	}
-	sort.Strings(paths)
-
-	rewritten := make([]Note, len(archive.Notes))
-	for i, note := range archive.Notes {
-		body, err := rewriteImageReferences(note.Body, newIDs)
-		if err != nil {
-			return Result{}, fmt.Errorf("%w: %w", ErrInvalidArchive, err)
-		}
-		if err := notes.ValidateContent(note.Title, body); err != nil {
-			return Result{}, fmt.Errorf("%w: invalid note %q: %v", ErrInvalidArchive, note.Title, err)
-		}
-		rewritten[i] = Note{Title: note.Title, Body: body}
-	}
-
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Result{}, fmt.Errorf("begin import: %w", err)
@@ -112,25 +88,54 @@ func (s *Service) Import(ctx context.Context, userID int64, data []byte, passwor
 	).Scan(&used); err != nil {
 		return Result{}, fmt.Errorf("check image quota: %w", err)
 	}
-	if used+importedImageBytes > s.config.ImageQuotaBytes {
+	if used+archive.imageBytes > s.config.ImageQuotaBytes {
 		return Result{}, ErrQuota
 	}
 
-	for _, archivePath := range paths {
-		image := archive.Images[archivePath]
+	newIDs := make(map[string]string, len(archive.images))
+	for _, file := range archive.images {
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
+		}
+		data, err := readEntry(file)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: %w", ErrInvalidArchive, err)
+		}
+		mimeType, err := images.ValidateData(data)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: invalid bundled image %q: %v", ErrInvalidArchive, file.Name, err)
+		}
+		id := images.NewID()
+		newIDs[file.Name] = id
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO images (id, user_id, mime_type, data) VALUES (?, ?, ?, ?)`,
-			newIDs[archivePath], userID, mimeTypes[archivePath], image.Data,
+			id, userID, mimeType, data,
 		); err != nil {
 			return Result{}, fmt.Errorf("store imported image: %w", err)
 		}
 	}
 
+	rewriter := imageRewriter(newIDs)
+	assigned := make(map[string]bool)
 	now := time.Now().UTC()
-	for _, note := range rewritten {
+	for _, file := range archive.notes {
+		if err := ctx.Err(); err != nil {
+			return Result{}, err
+		}
+		note, err := readNote(file, assigned)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: %w", ErrInvalidArchive, err)
+		}
+		body := rewriter.Replace(note.Body)
+		if missing := bundledImagePath.FindString(body); missing != "" {
+			return Result{}, fmt.Errorf("%w: %w: %s", ErrInvalidArchive, ErrMissingImage, missing)
+		}
+		if err := notes.ValidateContent(note.Title, body); err != nil {
+			return Result{}, fmt.Errorf("%w: invalid note %q: %v", ErrInvalidArchive, note.Title, err)
+		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO notes (user_id, title, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-			userID, note.Title, note.Body, now, now,
+			userID, note.Title, body, now, now,
 		); err != nil {
 			return Result{}, fmt.Errorf("store imported note: %w", err)
 		}
@@ -138,27 +143,19 @@ func (s *Service) Import(ctx context.Context, userID int64, data []byte, passwor
 	if err := tx.Commit(); err != nil {
 		return Result{}, fmt.Errorf("commit import: %w", err)
 	}
-	return Result{ImportedNotes: len(rewritten)}, nil
+	return Result{ImportedNotes: len(archive.notes)}, nil
 }
 
-func rewriteImageReferences(body string, newIDs map[string]string) (string, error) {
-	var rewriteErr error
-	for _, pattern := range imageReferencePatterns {
-		body = pattern.ReplaceAllStringFunc(body, func(match string) string {
-			parts := pattern.FindStringSubmatch(match)
-			if len(parts) != 3 {
-				return match
-			}
-			id, ok := newIDs[parts[2]]
-			if !ok {
-				rewriteErr = fmt.Errorf("%w: %s", ErrMissingImage, parts[2])
-				return match
-			}
-			return parts[1] + "/api/images/" + id
-		})
-		if rewriteErr != nil {
-			return "", rewriteErr
-		}
+func imageRewriter(newIDs map[string]string) *strings.Replacer {
+	// Longest first avoids a shorter entry consuming another entry's prefix.
+	paths := make([]string, 0, len(newIDs))
+	for path := range newIDs {
+		paths = append(paths, path)
 	}
-	return body, nil
+	sort.Slice(paths, func(i, j int) bool { return len(paths[i]) > len(paths[j]) })
+	pairs := make([]string, 0, 2*len(paths))
+	for _, path := range paths {
+		pairs = append(pairs, path, "/api/images/"+newIDs[path])
+	}
+	return strings.NewReplacer(pairs...)
 }

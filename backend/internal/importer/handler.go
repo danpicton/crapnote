@@ -5,10 +5,15 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/danpicton/crapnote/internal/auth"
 )
+
+// Bound aggregate upload/parsing memory and temporary disk use across accounts
+// and handler instances. Admission happens before reading any request bytes.
+var importSlot = make(chan struct{}, 1)
 
 // Handler serves the authenticated archive import endpoint.
 type Handler struct {
@@ -29,6 +34,15 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	select {
+	case importSlot <- struct{}{}:
+		defer func() { <-importSlot }()
+	default:
+		w.Header().Set("Retry-After", "5")
+		writeImportError(w, http.StatusServiceUnavailable, "another import is in progress; try again shortly")
+		return
+	}
+
 	// Allow a small multipart envelope in addition to the compressed archive,
 	// then enforce the archive's own size exactly while reading the file part.
 	maxUploadBytes := h.maxUploadBytes
@@ -36,31 +50,65 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 		maxUploadBytes = MaxUploadBytes
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes+(1<<20))
-	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
+	multipart, err := r.MultipartReader()
+	if err != nil {
 		writeImportError(w, http.StatusBadRequest, "import upload is too large or malformed")
 		return
 	}
-	if r.MultipartForm != nil {
-		defer r.MultipartForm.RemoveAll() //nolint:errcheck
-	}
-	file, _, err := r.FormFile("archive")
+	file, err := os.CreateTemp("", "crapnote-import-*.zip")
 	if err != nil {
+		writeImportError(w, http.StatusInternalServerError, "could not stage the import; try again later")
+		return
+	}
+	defer os.Remove(file.Name()) //nolint:errcheck
+	defer file.Close()           //nolint:errcheck
+
+	var size int64
+	var password string
+	seen := make(map[string]bool)
+	for {
+		part, err := multipart.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			writeImportError(w, http.StatusBadRequest, "import upload is too large or malformed")
+			return
+		}
+		name := part.FormName()
+		if seen[name] || name != "archive" && name != "password" {
+			writeImportError(w, http.StatusBadRequest, "send one archive and an optional password")
+			return
+		}
+		seen[name] = true
+		if name == "archive" {
+			// Stream compressed bytes straight to a private temporary file. ZIP
+			// needs ReaderAt, not a second in-memory copy of the upload.
+			size, err = io.Copy(file, io.LimitReader(part, maxUploadBytes+1))
+			if size > maxUploadBytes {
+				writeImportError(w, http.StatusRequestEntityTooLarge, "compressed archive exceeds the 100 MB limit")
+				return
+			}
+		} else {
+			var value []byte
+			value, err = io.ReadAll(io.LimitReader(part, (64<<10)+1))
+			if len(value) > 64<<10 {
+				writeImportError(w, http.StatusBadRequest, "export password exceeds the 64 KB limit")
+				return
+			}
+			password = string(value)
+		}
+		if err != nil {
+			writeImportError(w, http.StatusBadRequest, "could not read or stage the uploaded archive; try again")
+			return
+		}
+	}
+	if !seen["archive"] {
 		writeImportError(w, http.StatusBadRequest, "choose a Crapnote export ZIP to import")
 		return
 	}
-	defer file.Close() //nolint:errcheck
 
-	data, err := io.ReadAll(io.LimitReader(file, maxUploadBytes+1))
-	if err != nil {
-		writeImportError(w, http.StatusBadRequest, "could not read the uploaded archive")
-		return
-	}
-	if int64(len(data)) > maxUploadBytes {
-		writeImportError(w, http.StatusRequestEntityTooLarge, "compressed archive exceeds the 100 MB limit")
-		return
-	}
-
-	result, err := h.service.Import(r.Context(), user.ID, data, r.FormValue("password"))
+	result, err := h.service.ImportReader(r.Context(), user.ID, file, size, password)
 	switch {
 	case errors.Is(err, ErrQuota):
 		writeImportError(w, http.StatusInsufficientStorage, err.Error())

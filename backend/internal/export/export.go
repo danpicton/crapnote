@@ -48,6 +48,13 @@ func sanitiseFilename(title string) string {
 	return s + ".md"
 }
 
+// NoteFilename returns the legacy export filename before collision suffixing.
+// Import uses this same lossy mapping to disambiguate title/body boundaries
+// where possible. Keep byte truncation compatible with existing archives.
+func NoteFilename(title string) string {
+	return sanitiseFilename(title)
+}
+
 // mimeToExt returns a file extension (without dot) for common image MIME types.
 func mimeToExt(mimeType string) string {
 	switch strings.ToLower(strings.TrimSpace(mimeType)) {

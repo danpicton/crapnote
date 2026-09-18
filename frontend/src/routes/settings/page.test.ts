@@ -140,6 +140,8 @@ describe('Settings — Import', () => {
 		expect(screen.getByText(/100 MB compressed/i)).toBeInTheDocument();
 		expect(screen.getByText(/2,000 entries/i)).toBeInTheDocument();
 		expect(screen.getByText(/200 MB decompressed/i)).toBeInTheDocument();
+		expect(screen.getByText(/ambiguous title\/body boundaries/i)).toBeInTheDocument();
+		expect(screen.getByText(/one import at a time/i)).toBeInTheDocument();
 	});
 });
 

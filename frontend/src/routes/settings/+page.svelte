@@ -242,7 +242,8 @@
 					{/if}
 				</form>
 				<p class="hint import-hint">Imported notes start active, unpinned and unlocked, with fresh IDs and timestamps. Tags are not restored.</p>
-				<p class="hint">Limits: 100 MB compressed, 2,000 entries and 200 MB decompressed.</p>
+				<p class="hint">Limits: 100 MB compressed, 2,000 entries and 200 MB decompressed. The server accepts one import at a time.</p>
+				<p class="hint">Legacy exports with ambiguous title/body boundaries are rejected rather than changed. If this happens, remove boundary blank lines or shorten the source title, then export again.</p>
 			</div>
 		</section>
 
