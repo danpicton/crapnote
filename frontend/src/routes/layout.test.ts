@@ -36,6 +36,8 @@ const mockAuth = vi.hoisted(() => ({
 vi.mock('$lib/stores/auth.svelte', () => ({ auth: mockAuth }));
 
 vi.mock('$lib/stores/theme.svelte', () => ({ theme: { init: vi.fn(), current: 'light', toggle: vi.fn() } }));
+const mockNoteBodyTextSize = vi.hoisted(() => ({ init: vi.fn() }));
+vi.mock('$lib/stores/noteBodyTextSize.svelte', () => ({ noteBodyTextSize: mockNoteBodyTextSize }));
 vi.mock('$lib/sw-register', () => ({ registerSW: vi.fn() }));
 
 function setPath(pathname: string) {
@@ -60,6 +62,13 @@ beforeEach(() => {
 /** A children snippet that would render a marker if it were ever mounted. */
 const markerSnippet = (() => {}) as unknown as Snippet;
 
+
+describe('Layout preferences', () => {
+	it('initializes the local note body text size on mount', async () => {
+		render(Layout, { children: noopSnippet });
+		await vi.waitFor(() => expect(mockNoteBodyTextSize.init).toHaveBeenCalledOnce());
+	});
+});
 
 describe('Layout auth guard', () => {
 	it('redirects unauthenticated users from protected routes to login', async () => {

@@ -2,9 +2,40 @@ package client_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"strings"
 	"testing"
+
+	"github.com/danpicton/crapnote/cli/client"
 )
+
+func TestLockedArchiveAndDeleteSurfaceServerError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		op   func(context.Context, int64) error
+	}{
+		{name: "archive", op: func(ctx context.Context, id int64) error {
+			c, _ := newRecordingServer(t, http.StatusLocked, `{"error":"note is locked; unlock it first"}`)
+			return c.ArchiveNote(ctx, id)
+		}},
+		{name: "delete", op: func(ctx context.Context, id int64) error {
+			c, _ := newRecordingServer(t, http.StatusLocked, `{"error":"note is locked; unlock it first"}`)
+			return c.DeleteNote(ctx, id)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.op(context.Background(), 7)
+			var apiErr *client.APIError
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusLocked {
+				t.Fatalf("error = %v, want APIError status 423", err)
+			}
+			if !strings.Contains(err.Error(), "unlock it first") {
+				t.Fatalf("error = %q, want unlock guidance", err)
+			}
+		})
+	}
+}
 
 func TestToggleLockPatchesLockEndpoint(t *testing.T) {
 	c, rec := newRecordingServer(t, http.StatusOK, `{

@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import NotePage from './+page.svelte';
+import { noteBodyTextSize } from '$lib/stores/noteBodyTextSize.svelte';
 
 vi.mock('@milkdown/kit/preset/commonmark', () => ({
 	toggleStrongCommand: { key: 'ToggleStrong' },
@@ -116,7 +117,7 @@ vi.mock('$lib/localData', async (importOriginal) => ({
 	requireOwnedOfflineDB: vi.fn().mockResolvedValue({ close: vi.fn() }),
 }));
 
-import { api } from '$lib/api';
+import { api, ApiError } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
 import { openOwnedOfflineDB, requireOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 import { auth } from '$lib/stores/auth.svelte';
@@ -144,6 +145,7 @@ const SAVED_AT = new Date(Date.parse(FAKE_NOW) + DEBOUNCE_MS).toISOString();
 beforeEach(() => {
 	routeState.params.id = '42';
 	vi.clearAllMocks();
+	noteBodyTextSize.set('medium');
 	// clearAllMocks() clears calls but KEEPS implementations, and the Vitest
 	// config sets no mockReset. Without this an api.notes.update rejection
 	// configured by one test leaks into every later test in the file.
@@ -465,6 +467,19 @@ describe('/notes/[id] page', () => {
 		);
 	});
 
+	it('offers the four named body text sizes in the desktop toolbar without editing the note', async () => {
+		render(NotePage);
+		const select = await screen.findByRole('combobox', { name: 'Text size' }) as HTMLSelectElement;
+
+		expect(Array.from(select.options).map((option) => option.text)).toEqual([
+			'Small', 'Medium', 'Large', 'X-large',
+		]);
+		expect(select.value).toBe('medium');
+		await fireEvent.change(select, { target: { value: 'x-large' } });
+		expect(noteBodyTextSize.current).toBe('x-large');
+		expect(api.notes.update).not.toHaveBeenCalled();
+	});
+
 	it('shows existing tags as checkboxes in the popover when opened', async () => {
 		vi.mocked(api.tags.list).mockResolvedValue([
 			{ id: 1, name: 'Work', note_count: 2 },
@@ -780,15 +795,38 @@ describe('Mobile format bar active state', () => {
 			| undefined;
 		expect(onformatchange).toBeTypeOf('function');
 
-		onformatchange!({ ...EMPTY_FORMATS, strong: true });
+		onformatchange!({
+			...EMPTY_FORMATS,
+			strong: true,
+			emphasis: true,
+			underline: true,
+			inlineCode: true,
+			link: true,
+			heading: 2,
+			blockquote: true,
+			bulletList: true,
+			orderedList: true,
+			taskList: true,
+		});
 
 		const boldBtn = () =>
 			document.querySelector('.mob-format-bar [aria-label="Bold"]')!;
-		await waitFor(() => expect(boldBtn()).toHaveClass('mob-tb-btn-active'));
+		for (const label of [
+			'Headings', 'Bold', 'Italic', 'Underline', 'Insert link', 'Quote',
+			'Inline code', 'Bullet list', 'Ordered list', 'Checklist',
+		]) {
+			const button = document.querySelector(`.mob-format-bar [aria-label="${label}"]`)!;
+			await waitFor(() => expect(button).toHaveClass('mob-tb-btn-active'));
+			expect(button).toHaveAttribute('aria-pressed', 'true');
+		}
+		for (const label of ['Horizontal rule', 'Undo', 'Redo']) {
+			expect(document.querySelector(`.mob-format-bar [aria-label="${label}"]`)).not.toHaveAttribute('aria-pressed');
+		}
 
 		// And it clears again when the cursor moves out of bold text
 		onformatchange!({ ...EMPTY_FORMATS });
 		await waitFor(() => expect(boldBtn()).not.toHaveClass('mob-tb-btn-active'));
+		expect(boldBtn()).toHaveAttribute('aria-pressed', 'false');
 	});
 });
 
@@ -935,6 +973,29 @@ describe('Mobile lock control', () => {
 		await waitFor(() => screen.getByDisplayValue('My Note'));
 
 		expect(container.querySelector('.mob-topbar button[aria-label="Unlock note"]')).toBeTruthy();
+	});
+
+	it('hides archive and delete from the action sheet while locked', async () => {
+		vi.mocked(api.notes.get).mockResolvedValue(mockNote({ locked: true }));
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Note actions' }));
+
+		expect(screen.queryByRole('button', { name: 'Archive' })).not.toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Delete' })).not.toBeInTheDocument();
+	});
+
+	it('shows unlock guidance and stays put when a stale archive gets 423', async () => {
+		vi.mocked(api.notes.archive).mockRejectedValue(new ApiError(423, 'locked'));
+		render(NotePage);
+		await waitFor(() => screen.getByDisplayValue('My Note'));
+		await fireEvent.click(screen.getByRole('button', { name: 'Note actions' }));
+
+		await fireEvent.click(screen.getByRole('button', { name: 'Archive' }));
+
+		await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/unlock/i));
+		expect(goto).not.toHaveBeenCalledWith('/');
 	});
 });
 

@@ -17,13 +17,16 @@
 	import { insertImageCommand } from '$lib/milkdown/image';
 	import { wrapInTaskListCommand } from '$lib/milkdown/tasklist';
 	import { wrapSelectedInBulletListCommand } from '$lib/milkdown/listedit';
+	import { EMPTY_FORMATS, type ActiveFormats } from '$lib/milkdown/formatState';
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, OfflineError, type Note, type Tag } from '$lib/api';
 	import { notePreviewSegments } from '$lib/notePreview';
+	import { canArchiveOrDelete, isLockRejection, LOCKED_ACTION_MESSAGE } from '$lib/noteActions';
 	import { auth } from '$lib/stores/auth.svelte';
 	import { shortcuts, matchShortcut, type ShortcutId } from '$lib/stores/shortcuts.svelte';
 	import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
+	import NoteBodyTextSizeSelect from '$lib/components/NoteBodyTextSizeSelect.svelte';
 	import { getAllNotes, getNote, getDirtyNotes, upsertNote, updateCachedNote, deleteNote as deleteOfflineNote, noteFlags } from '$lib/offlineDB';
 	import { openOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 	import type { CachedNote } from '$lib/offlineDB';
@@ -33,6 +36,11 @@
 	import { finishTitleDraft } from '$lib/titleDraft';
 	import { mergeCachedNote } from '$lib/noteMerge';
 	import { TitleCommits } from '$lib/titleCommits';
+	import {
+		clampSidebarWidth,
+		loadSidebarPreferences,
+		saveSidebarPreferences,
+	} from '$lib/sidebarPreferences';
 	import { cacheSavedNote, cacheLearnedPrivacy, mergeSavedFlag, type ToggleFlag, CACHE_SAVE_WARNING, latestTimestamp, learnedPrivacy, SaveRequests } from '$lib/noteSave';
 	import {
 		dropIndexFromY,
@@ -77,6 +85,8 @@
 	 * silence here would be worse than the bug it replaces.
 	 */
 	let offlineWriteError = $state<string | null>(null);
+	let actionError = $state<string | null>(null);
+	let visibleError = $derived(actionError ?? offlineWriteError);
 
 	let selectedId = $state<number | null>(null);
 	let search = $state('');
@@ -337,6 +347,76 @@
 	let titleInput = $state<HTMLInputElement | null>(null);
 	let searchInput = $state<HTMLInputElement | null>(null);
 	let showShortcutHelp = $state(false);
+	let sidebarHidden = $state(false);
+	let sidebarWidth = $state(300);
+	let sidebarMaxWidth = $state(480);
+	let sidebarPreferredWidth = 300;
+	let sidebarResizePointer = $state<number | null>(null);
+	let sidebarResizeStartX = 0;
+	let sidebarResizeStartWidth = 0;
+
+	function setSidebarHidden(hidden: boolean) {
+		sidebarHidden = hidden;
+		if (!hidden) sidebarWidth = clampSidebarWidth(sidebarPreferredWidth, window.innerWidth);
+		saveSidebarPreferences({ hidden, width: sidebarPreferredWidth });
+	}
+
+	function setSidebarWidth(width: number) {
+		sidebarWidth = clampSidebarWidth(width, window.innerWidth);
+		sidebarPreferredWidth = sidebarWidth;
+		saveSidebarPreferences({ hidden: sidebarHidden, width: sidebarPreferredWidth });
+	}
+
+	function onSidebarResizeKeydown(e: KeyboardEvent) {
+		let width: number | null = null;
+		if (e.key === 'ArrowLeft') width = sidebarWidth - 10;
+		if (e.key === 'ArrowRight') width = sidebarWidth + 10;
+		if (e.key === 'Home') width = 220;
+		if (e.key === 'End') width = Number.POSITIVE_INFINITY;
+		if (width === null) return;
+		e.preventDefault();
+		setSidebarWidth(width);
+	}
+
+	function onSidebarResizeStart(e: PointerEvent) {
+		if (e.button !== 0) return;
+		e.preventDefault();
+		sidebarResizePointer = e.pointerId;
+		sidebarResizeStartX = e.clientX;
+		sidebarResizeStartWidth = sidebarWidth;
+		try {
+			(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+		} catch {
+			// Capture is best-effort; movement over the handle still resizes.
+		}
+	}
+
+	function onSidebarResizeMove(e: PointerEvent) {
+		if (sidebarResizePointer !== e.pointerId) return;
+		setSidebarWidth(sidebarResizeStartWidth + e.clientX - sidebarResizeStartX);
+	}
+
+	function onSidebarResizeEnd(e: PointerEvent) {
+		if (sidebarResizePointer !== e.pointerId) return;
+		sidebarResizePointer = null;
+	}
+
+	function sidebarResize(node: HTMLElement) {
+		node.addEventListener('keydown', onSidebarResizeKeydown);
+		node.addEventListener('pointerdown', onSidebarResizeStart);
+		node.addEventListener('pointermove', onSidebarResizeMove);
+		node.addEventListener('pointerup', onSidebarResizeEnd);
+		node.addEventListener('pointercancel', onSidebarResizeEnd);
+		return {
+			destroy() {
+				node.removeEventListener('keydown', onSidebarResizeKeydown);
+				node.removeEventListener('pointerdown', onSidebarResizeStart);
+				node.removeEventListener('pointermove', onSidebarResizeMove);
+				node.removeEventListener('pointerup', onSidebarResizeEnd);
+				node.removeEventListener('pointercancel', onSidebarResizeEnd);
+			},
+		};
+	}
 
 	// Tags
 	let allTags = $state<Tag[]>([]);
@@ -362,7 +442,15 @@
 	// Editor focus state (used for Enter/Escape shortcuts)
 	let editorFocused = $state(false);
 	let showHeadingsMenu = $state(false);
+	let activeFormats = $state<ActiveFormats>({ ...EMPTY_FORMATS });
 	let noteListEl = $state<HTMLUListElement | null>(null);
+
+	// A keyed editor reports its initial state after mounting. Clear the old
+	// note's formats immediately while that replacement is being created.
+	$effect(() => {
+		void selectedId;
+		activeFormats = { ...EMPTY_FORMATS };
+	});
 
 	const PALETTE = [
 		// Reds / Pinks / Rose
@@ -822,6 +910,15 @@
 
 	onMount(() => {
 		isOnline = navigator.onLine;
+		const sidebarPreferences = loadSidebarPreferences();
+		sidebarHidden = sidebarPreferences.hidden;
+		sidebarPreferredWidth = sidebarPreferences.width;
+		sidebarMaxWidth = clampSidebarWidth(Number.POSITIVE_INFINITY, window.innerWidth);
+		sidebarWidth = clampSidebarWidth(sidebarPreferredWidth, window.innerWidth);
+		const handleWindowResize = () => {
+			sidebarMaxWidth = clampSidebarWidth(Number.POSITIVE_INFINITY, window.innerWidth);
+			sidebarWidth = clampSidebarWidth(sidebarPreferredWidth, window.innerWidth);
+		};
 
 		// Load per-user keyboard shortcut overrides from localStorage. This
 		// callback runs before the root layout has resolved /api/auth/me, so
@@ -900,6 +997,7 @@
 		window.addEventListener('online', handleOnline);
 		window.addEventListener('offline', handleOffline);
 		window.addEventListener('keydown', handleKeydown);
+		window.addEventListener('resize', handleWindowResize);
 
 		// Periodic bidirectional sync while the page is open.
 		const heartbeatTimer = setInterval(() => { void heartbeatSync('heartbeat'); }, SYNC_INTERVAL_MS);
@@ -930,6 +1028,7 @@
 			window.removeEventListener('online', handleOnline);
 			window.removeEventListener('offline', handleOffline);
 			window.removeEventListener('keydown', handleKeydown);
+			window.removeEventListener('resize', handleWindowResize);
 			clearInterval(heartbeatTimer);
 		};
 	});
@@ -1409,6 +1508,11 @@
 				removeNoteFromList(id);
 				return;
 			} catch (err) {
+				if (isLockRejection(err)) {
+					actionError = LOCKED_ACTION_MESSAGE;
+					notes = notes.map((n) => n.id === id ? { ...n, locked: true } : n);
+					return;
+				}
 				// Only fall through to the offline queue on a connectivity
 				// failure — a genuine server rejection must not hide a note
 				// that still exists server-side.
@@ -1437,6 +1541,11 @@
 				removeNoteFromList(id);
 				return;
 			} catch (err) {
+				if (isLockRejection(err)) {
+					actionError = LOCKED_ACTION_MESSAGE;
+					notes = notes.map((n) => n.id === id ? { ...n, locked: true } : n);
+					return;
+				}
 				// See archiveNote — only queue on connectivity failure.
 				if (!(err instanceof OfflineError)) throw err;
 			}
@@ -1516,13 +1625,13 @@
 	<title>Crapnote</title>
 </svelte:head>
 
-{#if offlineWriteError}
+{#if visibleError}
 	<!-- Outside .app: that is a row flex container on desktop, where a banner
 	     child would render as a narrow full-height column beside the sidebar
 	     rather than a bar across the top. -->
 	<div class="offline-write-error" role="alert">
-		<span>{offlineWriteError}</span>
-		<button onclick={() => (offlineWriteError = null)} aria-label="Dismiss">
+		<span>{visibleError}</span>
+		<button onclick={() => { offlineWriteError = null; actionError = null; }} aria-label="Dismiss">
 			<X size={14} />
 		</button>
 	</div>
@@ -1530,12 +1639,15 @@
 
 <div class="app">
 	<!-- ── Sidebar ── -->
-	<aside class="sidebar">
+	{#if isMobileLayout || !sidebarHidden}
+	<aside class="sidebar" style:width={isMobileLayout ? undefined : `${sidebarWidth}px`}>
 		<!-- Desktop header -->
 		<header class="sidebar-header">
 			<a href="/" class="wordmark app-name" onclick={(e) => { e.preventDefault(); void goHome(); }}>Crapnote<span class="wordmark-dot" aria-hidden="true"></span></a>
 			{#if !isOnline}
-				<span class="offline-badge" title="You are offline — changes will sync when reconnected">Offline</span>
+				<div class="offline-row">
+					<span class="offline-badge" title="You are offline — changes will sync when reconnected">Offline</span>
+				</div>
 			{/if}
 			{#if selectedId}
 				<button class="hdr-btn mobile-show-editor" onclick={() => goto(`/notes/${selectedId}`)} title="View note" aria-label="View note">
@@ -1545,6 +1657,11 @@
 			<button class="hdr-btn new-btn" onclick={newNote} title="New note" aria-label="New note">
 				<Plus size={16} />
 			</button>
+			{#if !isMobileLayout}
+				<button class="hdr-btn sidebar-hide-btn" onclick={() => setSidebarHidden(true)} title="Hide sidebar" aria-label="Hide sidebar">
+					<span class="sidebar-hide-icon"><ChevronRight size={16} /></span>
+				</button>
+			{/if}
 		</header>
 
 		<!-- Mobile header (wordmark row + search + tabs) — only rendered on mobile -->
@@ -1744,24 +1861,26 @@
 							<span>{note.locked ? 'Unlock' : 'Lock'}</span>
 						</button>
 					</div>
-					<div class="mob-swipe-right" class:mob-swipe-visible={(swipeX[note.id] ?? 0) < -4}>
-						<button
-							class="mob-swipe-btn mob-swipe-archive"
-							onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void archiveNote(note.id); }}
-							aria-label="Archive note"
-						>
-							<Archive size={20} aria-hidden="true" />
-							<span>Archive</span>
-						</button>
-						<button
-							class="mob-swipe-btn mob-swipe-delete"
-							onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void deleteNote(note.id); }}
-							aria-label="Delete note"
-						>
-							<Trash2 size={20} aria-hidden="true" />
-							<span>Delete</span>
-						</button>
-					</div>
+					{#if canArchiveOrDelete(note)}
+						<div class="mob-swipe-right" class:mob-swipe-visible={(swipeX[note.id] ?? 0) < -4}>
+							<button
+								class="mob-swipe-btn mob-swipe-archive"
+								onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void archiveNote(note.id); }}
+								aria-label="Archive note"
+							>
+								<Archive size={20} aria-hidden="true" />
+								<span>Archive</span>
+							</button>
+							<button
+								class="mob-swipe-btn mob-swipe-delete"
+								onclick={(e) => { e.stopPropagation(); resetSwipe(note.id); void deleteNote(note.id); }}
+								aria-label="Delete note"
+							>
+								<Trash2 size={20} aria-hidden="true" />
+								<span>Delete</span>
+							</button>
+						</div>
+					{/if}
 
 					<!-- Row body (shared desktop + mobile, translates on mobile swipe) -->
 					<div
@@ -1814,8 +1933,10 @@
 							{#if !note.locked}
 								<button class="act-btn" onclick={() => void toggleLock(note.id)} title="Lock"><LockOpen size={12} /></button>
 							{/if}
-							<button class="act-btn" onclick={() => void archiveNote(note.id)} title="Move to archive" aria-label="Move to archive"><Archive size={12} /></button>
-							<button class="act-btn danger" onclick={() => void deleteNote(note.id)} title="Delete" disabled={note.locked} aria-label={note.locked ? 'Delete (unlock the note first)' : 'Delete'}><Trash2 size={12} /></button>
+							{#if canArchiveOrDelete(note)}
+								<button class="act-btn" onclick={() => void archiveNote(note.id)} title="Move to archive" aria-label="Move to archive"><Archive size={12} /></button>
+								<button class="act-btn danger" onclick={() => void deleteNote(note.id)} title="Delete" aria-label="Delete"><Trash2 size={12} /></button>
+							{/if}
 						</div>
 					</div>
 				</li>
@@ -1846,23 +1967,23 @@
 		>
 			<span class="mob-sync-dot" aria-hidden="true"></span>
 			{#if mobileSyncState === 'synced'}
-				<CheckCircle2 size={13} aria-hidden="true" />
+				<CheckCircle2 size={18} aria-hidden="true" />
 				<span>SYNCED</span>
 				<span class="mob-sync-spacer"></span>
 				{#if lastSyncAt}<span class="mob-sync-time">just now</span>{/if}
 			{:else if mobileSyncState === 'syncing'}
-				<RefreshCw size={13} class="mob-spin" aria-hidden="true" />
+				<RefreshCw size={18} class="mob-spin" aria-hidden="true" />
 				<span>SYNCING…</span>
 			{:else if mobileSyncState === 'pending'}
-				<CloudUpload size={13} aria-hidden="true" />
+				<CloudUpload size={18} aria-hidden="true" />
 				<span>NOT SYNCED</span>
 				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
 			{:else if mobileSyncState === 'offline-pending'}
-				<WifiOff size={13} aria-hidden="true" />
+				<WifiOff size={18} aria-hidden="true" />
 				<span>OFFLINE · UNSYNCED</span>
 				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
 			{:else}
-				<WifiOff size={13} aria-hidden="true" />
+				<WifiOff size={18} aria-hidden="true" />
 				<span>OFFLINE</span>
 				{#if lastSyncAt}<span class="mob-sync-spacer"></span><span class="mob-sync-time">last {formatSyncTime(lastSyncAt)}</span>{/if}
 			{/if}
@@ -1891,6 +2012,31 @@
 			</div>
 		</div>
 	</aside>
+	{#if !isMobileLayout}
+		<!-- Svelte does not recognise the ARIA separator's value attributes as
+		     the keyboard-operable separator pattern defined by ARIA. -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<div
+			class="sidebar-resizer"
+			class:sidebar-resizing={sidebarResizePointer !== null}
+			style:left={`${sidebarWidth - 4}px`}
+			role="separator"
+			aria-label="Resize sidebar"
+			aria-orientation="vertical"
+			aria-valuemin="220"
+			aria-valuemax={sidebarMaxWidth}
+			aria-valuenow={sidebarWidth}
+			tabindex="0"
+			use:sidebarResize
+		></div>
+	{/if}
+	{/if}
+
+	{#if !isMobileLayout && sidebarHidden}
+		<button class="sidebar-show-btn" onclick={() => setSidebarHidden(false)} title="Show sidebar" aria-label="Show sidebar">
+			<ChevronRight size={18} />
+		</button>
+	{/if}
 
 	<!-- Mobile tab bar -->
 	<MobileTabBar activeTab="notes" />
@@ -1905,26 +2051,27 @@
 				onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { editorFocused = false; showHeadingsMenu = false; } }}
 			>
 					<div class="toolbar" role="toolbar" aria-label="Formatting" tabindex="-1"
-					onmousedown={(e) => { if (!(e.target as Element).closest('input, textarea')) e.preventDefault(); }}
+					style:padding-left={!isMobileLayout && sidebarHidden ? '3rem' : undefined}
+					onmousedown={(e) => { if (!(e.target as Element).closest('input, textarea, select')) e.preventDefault(); }}
 				>
 						<!-- Headings expanding group -->
 						<div class="tb-heading-wrap">
-							<button class="tb-btn tb-h-toggle" onclick={() => (showHeadingsMenu = !showHeadingsMenu)} title="Headings" aria-label="Headings" aria-expanded={showHeadingsMenu}>H</button>
+							<button class="tb-btn tb-h-toggle" class:tb-btn-active={activeFormats.heading !== null} onclick={() => (showHeadingsMenu = !showHeadingsMenu)} title="Headings" aria-label="Headings" aria-expanded={showHeadingsMenu} aria-pressed={activeFormats.heading !== null}>H{activeFormats.heading ?? ''}</button>
 							{#if showHeadingsMenu}
 								<div class="heading-menu-backdrop" onclick={() => (showHeadingsMenu = false)} role="presentation"></div>
 								<div class="heading-menu">
-									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 1); showHeadingsMenu = false; }} title="Heading 1">H1</button>
-									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 2); showHeadingsMenu = false; }} title="Heading 2">H2</button>
-									<button class="tb-btn tb-h-btn" onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 3); showHeadingsMenu = false; }} title="Heading 3">H3</button>
+									<button class="tb-btn tb-h-btn" class:tb-btn-active={activeFormats.heading === 1} onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 1); showHeadingsMenu = false; }} title="Heading 1" aria-pressed={activeFormats.heading === 1}>H1</button>
+									<button class="tb-btn tb-h-btn" class:tb-btn-active={activeFormats.heading === 2} onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 2); showHeadingsMenu = false; }} title="Heading 2" aria-pressed={activeFormats.heading === 2}>H2</button>
+									<button class="tb-btn tb-h-btn" class:tb-btn-active={activeFormats.heading === 3} onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, 3); showHeadingsMenu = false; }} title="Heading 3" aria-pressed={activeFormats.heading === 3}>H3</button>
 								</div>
 							{/if}
 						</div>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold"><Bold size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic"><Italic size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline"><Underline size={13} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.strong} onclick={() => cmd(toggleStrongCommand.key)} title="Bold" aria-pressed={activeFormats.strong}><Bold size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.emphasis} onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic" aria-pressed={activeFormats.emphasis}><Italic size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.underline} onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline" aria-pressed={activeFormats.underline}><Underline size={16} /></button>
 						<div class="link-btn-wrap">
-							<button class="tb-btn" onclick={openLinkDialog} title="Insert link (Ctrl+K)"><Link size={13} /></button>
+							<button class="tb-btn" class:tb-btn-active={activeFormats.link} onclick={openLinkDialog} title="Insert link (Ctrl+K)" aria-pressed={activeFormats.link}><Link size={16} /></button>
 							{#if showLinkDialog}
 								<div class="link-dialog-backdrop" onclick={() => (showLinkDialog = false)} role="presentation"></div>
 								<div class="link-dialog" role="dialog" aria-label="Insert link">
@@ -1934,29 +2081,30 @@
 							{/if}
 						</div>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote"><Quote size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code"><Code size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={13} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.blockquote} onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote" aria-pressed={activeFormats.blockquote}><Quote size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.inlineCode} onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code" aria-pressed={activeFormats.inlineCode}><Code size={16} /></button>
+						<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={16} /></button>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(wrapSelectedInBulletListCommand.key)} title="Bullet list"><List size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list"><ListOrdered size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(wrapInTaskListCommand.key)} title="Task list"><ListTodo size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={13} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.bulletList} onclick={() => cmd(wrapSelectedInBulletListCommand.key)} title="Bullet list" aria-pressed={activeFormats.bulletList}><List size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.orderedList} onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list" aria-pressed={activeFormats.orderedList}><ListOrdered size={16} /></button>
+						<button class="tb-btn" class:tb-btn-active={activeFormats.taskList} onclick={() => cmd(wrapInTaskListCommand.key)} title="Task list" aria-pressed={activeFormats.taskList}><ListTodo size={16} /></button>
+						<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={16} /></button>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={13} /></button>
-						<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo"><Redo2 size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={16} /></button>
+						<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo"><Redo2 size={16} /></button>
 						<span class="tb-sep"></span>
-						<button class="tb-btn" onclick={() => cmd(insertImageCommand.key)} title="Insert image"><Image size={13} /></button>
+						<button class="tb-btn" onclick={() => cmd(insertImageCommand.key)} title="Insert image"><Image size={16} /></button>
 						<span class="tb-spacer"></span>
-						<button class="tb-btn tb-star" class:tb-star-on={selectedNote.starred} onclick={() => toggleStar(selectedNote.id)} title={selectedNote.starred ? 'Unstar' : 'Star'}><Star size={13} /></button>
+						<NoteBodyTextSizeSelect />
+						<button class="tb-btn tb-star" class:tb-star-on={selectedNote.starred} onclick={() => toggleStar(selectedNote.id)} title={selectedNote.starred ? 'Unstar' : 'Star'}><Star size={16} /></button>
 						<button class="tb-btn tb-lock" class:tb-lock-on={selectedNote.locked} onclick={() => toggleLock(selectedNote.id)} title={selectedNote.locked ? 'Unlock note' : 'Lock note'} aria-pressed={selectedNote.locked}>
-							{#if selectedNote.locked}<Lock size={13} />{:else}<LockOpen size={13} />{/if}
+							{#if selectedNote.locked}<Lock size={16} />{:else}<LockOpen size={16} />{/if}
 						</button>
 						<button class="tb-btn tb-private" class:tb-private-on={selectedNote.private} onclick={() => togglePrivacy(selectedNote.id)} title={selectedNote.private ? 'Private: hidden from MCP' : 'Visible to MCP'} aria-label={selectedNote.private ? 'Make note visible to MCP' : 'Make note private'} aria-pressed={!!selectedNote.private} disabled={selectedNote.locked}>
 							<EyeOff size={13} />
 						</button>
 						<div class="note-menu-wrap">
-							<button class="tb-btn" onclick={() => (showNoteMenu = !showNoteMenu)} title="More actions" aria-label="More actions"><MoreHorizontal size={13} /></button>
+							<button class="tb-btn" onclick={() => (showNoteMenu = !showNoteMenu)} title="More actions" aria-label="More actions"><MoreHorizontal size={16} /></button>
 							{#if showNoteMenu}
 								<div class="note-menu-backdrop" onclick={() => (showNoteMenu = false)} role="presentation"></div>
 								<div class="note-menu" role="menu">
@@ -1966,9 +2114,11 @@
 									<button class="note-menu-item" role="menuitem" onclick={() => duplicateNote(selectedNote.id)}>
 										<Plus size={13} />Duplicate note
 									</button>
-									<button class="note-menu-item danger" role="menuitem" disabled={selectedNote.locked} title={selectedNote.locked ? 'Unlock the note first' : undefined} onclick={() => { deleteNote(selectedNote.id); showNoteMenu = false; }}>
-										<Trash2 size={13} />Move to trash
-									</button>
+									{#if canArchiveOrDelete(selectedNote)}
+										<button class="note-menu-item danger" role="menuitem" onclick={() => { deleteNote(selectedNote.id); showNoteMenu = false; }}>
+											<Trash2 size={13} />Move to trash
+										</button>
+									{/if}
 								</div>
 							{/if}
 						</div>
@@ -1991,7 +2141,7 @@
 				</div>
 
 				{#key selectedId}
-				<Editor value={selectedNote.body} onchange={(md) => scheduleAutoSave('body', md)} bind:ref={editorRef} oninsertlink={openLinkDialog} readonly={selectedNote.locked} />
+				<Editor value={selectedNote.body} onchange={(md) => scheduleAutoSave('body', md)} bind:ref={editorRef} oninsertlink={openLinkDialog} onformatchange={(formats) => (activeFormats = formats)} readonly={selectedNote.locked} />
 				{/key}
 			</div>
 			{#if !isOnline && noteHasImages(selectedNote.body)}
@@ -2036,7 +2186,7 @@
 								{/each}
 								<div class="popover-new">
 									<input class="popover-new-input" type="text" placeholder="New tag…" bind:value={newTagName} onkeydown={(e) => e.key === 'Enter' && createAndAddTag()} />
-									<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={12} /></button>
+									<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={16} /></button>
 								</div>
 							</div>
 						{/if}
@@ -2058,6 +2208,7 @@
 <style>
 	/* ─── Layout ─────────────────────────────────────────── */
 	.app {
+		position: relative;
 		display: flex;
 		height: 100dvh;
 		overflow: hidden;
@@ -2076,8 +2227,26 @@
 		overflow: hidden;
 	}
 
+	.sidebar-resizer {
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		z-index: 20;
+		width: 8px;
+		padding: 0;
+		border: 0;
+		background: transparent;
+		cursor: col-resize;
+		touch-action: none;
+		outline: none;
+	}
+	.sidebar-resizer:hover,
+	.sidebar-resizer:focus-visible,
+	.sidebar-resizing { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+
 	.sidebar-header {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: center;
 		gap: 0.5rem;
 		padding: 1.25rem 1.25rem 0.75rem;
@@ -2105,6 +2274,11 @@
 		background: var(--accent);
 		margin-left: 3px;
 		margin-bottom: 1px;
+	}
+
+	.offline-row {
+		order: 2;
+		flex-basis: 100%;
 	}
 
 	.offline-badge {
@@ -2157,6 +2331,27 @@
 		align-items: center;
 	}
 	.hdr-btn:hover { color: var(--text); }
+	.sidebar-hide-btn { flex-shrink: 0; }
+	.sidebar-hide-icon { display: flex; transform: rotate(180deg); }
+
+	.sidebar-show-btn {
+		position: absolute;
+		top: 0.4rem;
+		left: 0.4rem;
+		z-index: 10;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 30px;
+		height: 30px;
+		padding: 0;
+		border: 1px solid var(--border);
+		border-radius: 3px;
+		background: var(--bg-toolbar);
+		color: var(--text-3);
+		cursor: pointer;
+	}
+	.sidebar-show-btn:hover { color: var(--text); background: var(--bg-hover); }
 
 	.new-btn {
 		width: 26px;
@@ -2563,7 +2758,7 @@
 	.toolbar {
 		display: flex;
 		align-items: center;
-		gap: 1px;
+		gap: 2px;
 		padding: 0.3rem 1rem;
 		border-bottom: 1px solid var(--border);
 		background: var(--bg-toolbar);
@@ -2572,17 +2767,27 @@
 	}
 
 	.tb-btn {
-		padding: 0.3rem 0.35rem;
+		width: 32px;
+		height: 32px;
+		padding: 0;
 		background: none;
 		border: 1px solid transparent;
 		border-radius: 2px;
 		cursor: pointer;
 		color: var(--text-3);
 		display: flex;
+		flex-shrink: 0;
 		align-items: center;
 		justify-content: center;
 	}
 	.tb-btn:hover { background: var(--bg-hover); color: var(--text-2); }
+	.tb-btn-active,
+	.tb-btn-active:hover {
+		color: var(--accent-tx);
+		background: var(--accent-lt);
+		border-color: var(--accent);
+		box-shadow: inset 0 0 0 0.5px var(--accent);
+	}
 	.tb-star-on { color: var(--accent) !important; }
 	.tb-lock-on { color: var(--accent) !important; }
 	.tb-private-on { color: var(--accent) !important; background: var(--accent-lt); }
@@ -2602,7 +2807,7 @@
 	.tb-h-toggle {
 		font-family: var(--serif);
 		font-weight: 700;
-		font-size: 0.8rem;
+		font-size: 0.9rem;
 		letter-spacing: -0.02em;
 		min-width: 1.6rem;
 	}
@@ -2717,7 +2922,7 @@
 		font-size: 2rem;
 		font-weight: 700;
 		letter-spacing: -0.03em;
-		line-height: 1.08;
+		line-height: 1.25;
 		border: none;
 		outline: none;
 		padding: 0;
@@ -2734,10 +2939,11 @@
 	/* ─── Bottom status bar ──────────────────────────────── */
 	.editor-statusbar {
 		border-top: 1px solid var(--border);
-		padding: 0.5rem 1.25rem;
+		padding: 0.25rem 1.25rem;
 		display: flex;
 		align-items: center;
-		gap: 1rem;
+		gap: 0.25rem 1rem;
+		flex-wrap: wrap;
 		font-family: var(--sans);
 		font-size: 0.6875rem;
 		color: var(--text-4);
@@ -2758,9 +2964,13 @@
 		margin-left: auto;
 		display: flex;
 		align-items: center;
-		gap: 0.625rem;
+		justify-content: flex-end;
+		gap: 0.25rem 0.625rem;
+		min-width: 0;
+		flex-wrap: wrap;
 	}
 	.status-tags-label {
+		flex-shrink: 0;
 		text-transform: uppercase;
 		letter-spacing: 0.08em;
 		font-size: 0.6875rem;
@@ -2771,9 +2981,12 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.375rem;
+		min-width: 32px;
+		min-height: 32px;
+		flex-shrink: 0;
 		background: none;
 		border: none;
-		padding: 0;
+		padding: 0 0.25rem;
 		cursor: pointer;
 	}
 	.note-tag-chip:hover .status-tag-word { color: var(--text-2); }
@@ -2790,6 +3003,7 @@
 		color: var(--text);
 	}
 	.status-shortcut {
+		flex-shrink: 0;
 		font-size: 0.625rem;
 		color: var(--text-4);
 		background: var(--bg-hover);
@@ -2801,6 +3015,10 @@
 	}
 
 	.status-add-tag {
+		min-width: 32px;
+		min-height: 32px;
+		flex-shrink: 0;
+		white-space: nowrap;
 		background: none;
 		border: none;
 		cursor: pointer;
@@ -2816,6 +3034,7 @@
 	/* ─── Tag popover ────────────────────────────────────── */
 	.tag-popover-backdrop { position: fixed; inset: 0; z-index: 29; }
 	.tag-popover-wrap { position: relative; }
+	.status-tags .tag-popover-wrap { flex-shrink: 0; }
 
 	.tag-popover {
 		position: absolute;
@@ -2876,12 +3095,16 @@
 	}
 	.popover-new-input:focus { border-color: var(--accent); }
 	.popover-add-btn {
+		width: 32px;
+		height: 32px;
 		background: none;
 		border: none;
 		cursor: pointer;
 		color: var(--accent);
-		padding: 0.1rem;
+		padding: 0;
 		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.offline-image-notice {
@@ -3233,8 +3456,8 @@
 		.mob-sync-row {
 			display: flex;
 			align-items: center;
-			gap: 5px;
-			height: 28px;
+			gap: 7px;
+			min-height: 44px;
 			padding: 0 18px;
 			border-top: 1px solid var(--border);
 			font-family: var(--sans);

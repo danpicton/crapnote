@@ -9,6 +9,7 @@ export interface ActiveFormats {
 	emphasis: boolean;
 	underline: boolean;
 	inlineCode: boolean;
+	link: boolean;
 	heading: number | null;
 	blockquote: boolean;
 	bulletList: boolean;
@@ -21,6 +22,7 @@ export const EMPTY_FORMATS: ActiveFormats = {
 	emphasis: false,
 	underline: false,
 	inlineCode: false,
+	link: false,
 	heading: null,
 	blockquote: false,
 	bulletList: false,
@@ -55,6 +57,7 @@ export function computeActiveFormats(state: EditorState): ActiveFormats {
 		emphasis: isMarkActive(state, 'emphasis'),
 		underline: isMarkActive(state, 'underline'),
 		inlineCode: isMarkActive(state, 'inlineCode'),
+		link: isMarkActive(state, 'link'),
 	};
 
 	// Walk the ancestors of the selection head, innermost first. The nearest

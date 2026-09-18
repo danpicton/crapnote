@@ -158,6 +158,11 @@ describe('Settings — Appearance', () => {
 		expect(screen.getByRole('combobox', { name: /theme/i })).toBeInTheDocument();
 	});
 
+	it('does not include the note body text-size control', () => {
+		render(SettingsPage);
+		expect(screen.queryByRole('combobox', { name: /text size/i })).not.toBeInTheDocument();
+	});
+
 	it('lists all available themes as options', () => {
 		render(SettingsPage);
 		const select = screen.getByRole('combobox', { name: /theme/i });

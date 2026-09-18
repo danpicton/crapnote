@@ -689,6 +689,15 @@
 				}
 			}
 
+			/* The local note-body preference applies only to desktop editors.
+			   Medium remains Editor.svelte's existing 1rem body size. */
+			@media (min-width: 641px) {
+				html[data-note-body-size="small"] { --note-body-font-size: 0.875rem; }
+				html[data-note-body-size="medium"] { --note-body-font-size: 1rem; }
+				html[data-note-body-size="large"] { --note-body-font-size: 1.125rem; }
+				html[data-note-body-size="x-large"] { --note-body-font-size: 1.25rem; }
+			}
+
 			/* Milkdown / ProseMirror editor ─ ensure it follows the theme */
 			.ProseMirror { color: var(--text) !important; caret-color: var(--text); font-family: var(--serif); font-size: 1.0625rem; line-height: 1.6; }
 			.ProseMirror h1 { font-family: var(--serif); font-weight: 700; font-size: 2rem; letter-spacing: -0.03em; line-height: 1.08; color: var(--text); }

@@ -23,7 +23,7 @@ vi.mock('$lib/api', () => {
 });
 vi.mock('$app/navigation', () => ({ goto: vi.fn() }));
 
-import { api, OfflineError } from '$lib/api';
+import { api, ApiError, OfflineError } from '$lib/api';
 
 const mockNote = (overrides = {}) => ({
 	id: 1, title: 'Archived Note', body: '', starred: false, pinned: false, archived: true, locked: false,
@@ -195,18 +195,26 @@ describe('Archive page', () => {
 });
 
 describe('Locked archived notes', () => {
-	it('refuses to delete a locked note and says why', async () => {
+	it('hides desktop and swipe delete actions for a locked note', async () => {
 		vi.mocked(api.notes.listArchived).mockResolvedValue([mockNote({ locked: true })]);
-		const alerts: string[] = [];
-		vi.stubGlobal('alert', (m: string) => alerts.push(m));
 
+		const { container } = render(ArchivePage);
+		await waitFor(() => screen.getByText('Archived Note'));
+
+		expect(screen.queryByTitle('Delete permanently')).not.toBeInTheDocument();
+		expect(container.querySelector('.mob-swipe-delete')).toBeNull();
+		expect(screen.getByTitle('Restore from archive')).toBeInTheDocument();
+	});
+
+	it('keeps a stale note visible and explains a 423 delete rejection', async () => {
+		vi.mocked(api.notes.delete).mockRejectedValue(new ApiError(423, 'locked'));
 		render(ArchivePage);
 		await waitFor(() => screen.getByText('Archived Note'));
 
 		await fireEvent.click(screen.getByTitle('Delete permanently'));
 
-		expect(api.notes.delete).not.toHaveBeenCalled();
-		expect(alerts.join(' ')).toMatch(/locked/i);
+		await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/unlock/i));
+		expect(screen.getByText('Archived Note')).toBeInTheDocument();
 	});
 
 	it('still deletes an unlocked note', async () => {

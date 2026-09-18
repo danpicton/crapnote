@@ -4,11 +4,13 @@
 	import { page } from '$app/stores';
 	import { ChevronLeft, ArchiveRestore, Trash2 } from 'lucide-svelte';
 	import { api, type Note } from '$lib/api';
+	import { canArchiveOrDelete, isLockRejection, LOCKED_ACTION_MESSAGE } from '$lib/noteActions';
 	import Editor from '$lib/components/Editor.svelte';
 
 	const noteId = $derived(Number($page.params.id));
 	let note = $state<Note | null>(null);
 	let loading = $state(true);
+	let actionError = $state<string | null>(null);
 
 	onMount(async () => {
 		try {
@@ -30,7 +32,14 @@
 
 	async function deleteNote() {
 		if (!confirm('Permanently delete this note?')) return;
-		await api.notes.delete(noteId);
+		try {
+			await api.notes.delete(noteId);
+		} catch (err) {
+			if (!isLockRejection(err)) throw err;
+			actionError = LOCKED_ACTION_MESSAGE;
+			note = note ? { ...note, locked: true } : note;
+			return;
+		}
 		goto('/archive');
 	}
 </script>
@@ -49,6 +58,7 @@
 		{/if}
 	</div>
 
+	{#if actionError}<div class="action-error" role="alert">{actionError}</div>{/if}
 	{#if loading}
 		<div class="loading">Loading…</div>
 	{:else if note}
@@ -59,9 +69,11 @@
 			<button class="footer-btn footer-restore" onclick={restore} title="Restore" aria-label="Restore">
 				<ArchiveRestore size={18} aria-hidden="true" />
 			</button>
-			<button class="footer-btn footer-delete" onclick={deleteNote} title="Delete permanently" aria-label="Delete permanently">
-				<Trash2 size={18} aria-hidden="true" />
-			</button>
+			{#if canArchiveOrDelete(note)}
+				<button class="footer-btn footer-delete" onclick={deleteNote} title="Delete permanently" aria-label="Delete permanently">
+					<Trash2 size={18} aria-hidden="true" />
+				</button>
+			{/if}
 		</div>
 	{/if}
 </div>
@@ -114,6 +126,8 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+
+	.action-error { padding: 0.75rem 1rem; background: #fee2e2; color: #991b1b; }
 
 	.loading {
 		flex: 1;

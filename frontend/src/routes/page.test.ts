@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/sv
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import Page from './+page.svelte';
 import { shortcuts } from '$lib/stores/shortcuts.svelte';
+import { noteBodyTextSize } from '$lib/stores/noteBodyTextSize.svelte';
 
 // Stub all heavy Milkdown imports — they use browser APIs that hang in jsdom
 vi.mock('@milkdown/kit/preset/commonmark', () => ({
@@ -146,7 +147,7 @@ vi.mock('$lib/offlineSync', () => ({
 
 
 import { beforeNavigate, onNavigate } from '$app/navigation';
-import { api, OfflineError } from '$lib/api';
+import { api, ApiError, OfflineError } from '$lib/api';
 import * as offlineDB from '$lib/offlineDB';
 import { markNoteDeletedOffline, markNoteArchivedOffline, markNoteFlagsOffline } from '$lib/offlineActions';
 import { syncOfflineChanges } from '$lib/offlineSync';
@@ -176,6 +177,8 @@ const mockNote = (overrides = {}) => ({
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	localStorage.clear();
+	noteBodyTextSize.set('medium');
 	vi.mocked(api.notes.list).mockResolvedValue([mockNote()]);
 	vi.mocked(api.tags.list).mockResolvedValue([]);
 });
@@ -197,6 +200,93 @@ describe('Notes page', () => {
 	it('shows the note list after load', async () => {
 		render(Page);
 		await waitFor(() => expect(screen.getByText('Test Note')).toBeInTheDocument());
+	});
+
+	it('hides the complete desktop sidebar and leaves a control to restore it', async () => {
+		const { container } = render(Page);
+		const hide = await screen.findByRole('button', { name: 'Hide sidebar' });
+
+		await fireEvent.click(hide);
+
+		expect(container.querySelector('aside')).not.toBeInTheDocument();
+		const show = screen.getByRole('button', { name: 'Show sidebar' });
+		expect(JSON.parse(localStorage.getItem('crapnote-sidebar')!)).toEqual({ hidden: true, width: 300 });
+
+		await fireEvent.click(show);
+		expect(container.querySelector('aside')).toBeInTheDocument();
+	});
+
+	it('reserves toolbar space for the restore control when the sidebar is hidden', async () => {
+		render(Page);
+		await fireEvent.click(await screen.findByRole('button', { name: 'Hide sidebar' }));
+
+		const toolbar = await screen.findByRole('toolbar', { name: /formatting/i });
+		expect(getComputedStyle(toolbar).paddingLeft).toBe('3rem');
+	});
+
+	it('restores the hidden state and last expanded width', async () => {
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: true, width: 420 }));
+		const { container } = render(Page);
+
+		const show = await screen.findByRole('button', { name: 'Show sidebar' });
+		expect(container.querySelector('aside')).not.toBeInTheDocument();
+
+		await fireEvent.click(show);
+		expect(container.querySelector('aside')).toHaveStyle({ width: '420px' });
+	});
+
+	it('resizes the sidebar from the keyboard and saves the width', async () => {
+		const { container } = render(Page);
+		const resize = await screen.findByRole('separator', { name: 'Resize sidebar' });
+
+		await fireEvent.keyDown(resize, { key: 'ArrowRight' });
+
+		expect(container.querySelector('aside')).toHaveStyle({ width: '310px' });
+		expect(JSON.parse(localStorage.getItem('crapnote-sidebar')!)).toEqual({ hidden: false, width: 310 });
+	});
+
+	it('resizes the sidebar by dragging its edge', async () => {
+		const { container } = render(Page);
+		const resize = await screen.findByRole('separator', { name: 'Resize sidebar' });
+		const pointer = (type: string, clientX: number) => {
+			const event = new MouseEvent(type, { bubbles: true, button: 0, clientX });
+			Object.defineProperty(event, 'pointerId', { value: 1 });
+			return event;
+		};
+
+		await fireEvent(resize, pointer('pointerdown', 300));
+		await fireEvent(resize, pointer('pointermove', 365));
+		await fireEvent(resize, pointer('pointerup', 365));
+
+		expect(container.querySelector('aside')).toHaveStyle({ width: '365px' });
+		expect(JSON.parse(localStorage.getItem('crapnote-sidebar')!)).toEqual({ hidden: false, width: 365 });
+	});
+
+	it('clamps a restored width when the desktop window is narrower', async () => {
+		vi.stubGlobal('innerWidth', 700);
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: false, width: 480 }));
+		const { container } = render(Page);
+
+		await screen.findByRole('button', { name: 'Hide sidebar' });
+		expect(container.querySelector('aside')).toHaveStyle({ width: '380px' });
+		vi.unstubAllGlobals();
+	});
+
+	it('updates accessible resize bounds when the window grows', async () => {
+		vi.stubGlobal('innerWidth', 700);
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: false, width: 480 }));
+		render(Page);
+		const resize = await screen.findByRole('separator', { name: 'Resize sidebar' });
+		expect(resize).toHaveAttribute('aria-valuemax', '380');
+
+		vi.stubGlobal('innerWidth', 1024);
+		window.dispatchEvent(new Event('resize'));
+
+		await waitFor(() => {
+			expect(resize).toHaveAttribute('aria-valuenow', '480');
+			expect(resize).toHaveAttribute('aria-valuemax', '480');
+		});
+		vi.unstubAllGlobals();
 	});
 
 	it('renders preview links underlined and unbracketed', async () => {
@@ -236,6 +326,18 @@ describe('Notes page', () => {
 		// Use title to target the sidebar header button specifically
 		await fireEvent.click(screen.getByTitle('New note'));
 		await waitFor(() => expect(api.notes.create).toHaveBeenCalled());
+	});
+
+	it('keeps the hide control on the first header row at minimum width while offline', async () => {
+		vi.stubGlobal('navigator', { ...navigator, onLine: false });
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: false, width: 220 }));
+		render(Page);
+
+		const hide = await screen.findByRole('button', { name: 'Hide sidebar' });
+		const header = hide.closest('header');
+		expect(header?.querySelector('.offline-row')).toHaveTextContent('Offline');
+		expect(hide.parentElement).toBe(header);
+		vi.unstubAllGlobals();
 	});
 
 	it('shows logout button', async () => {
@@ -279,11 +381,37 @@ describe('Notes page', () => {
 		await waitFor(() => screen.getByText('Test Note'));
 		await waitFor(() => expect(screen.getByRole('toolbar', { name: /formatting/i })).toBeInTheDocument());
 	});
+
+	it('offers the four named body text sizes and updates the shared display preference', async () => {
+		render(Page);
+		const select = await screen.findByRole('combobox', { name: 'Text size' }) as HTMLSelectElement;
+
+		expect(Array.from(select.options).map(({ text, value }) => ({ text, value }))).toEqual([
+			{ text: 'Small', value: 'small' },
+			{ text: 'Medium', value: 'medium' },
+			{ text: 'Large', value: 'large' },
+			{ text: 'X-large', value: 'x-large' },
+		]);
+		expect(select.value).toBe('medium');
+		expect(await fireEvent.mouseDown(select)).toBe(true);
+		await fireEvent.change(select, { target: { value: 'large' } });
+		expect(noteBodyTextSize.current).toBe('large');
+		expect(api.notes.update).not.toHaveBeenCalled();
+	});
 });
 
 describe('Mobile navigation', () => {
 	beforeEach(() => {
 		mockViewport(true); // mobile for every test in this block
+	});
+
+	it('keeps the mobile note list usable when the desktop sidebar is hidden', async () => {
+		localStorage.setItem('crapnote-sidebar', JSON.stringify({ hidden: true, width: 420 }));
+		render(Page);
+
+		await waitFor(() => expect(screen.getByText('Test Note')).toBeInTheDocument());
+		expect(screen.queryByRole('button', { name: /sidebar/i })).not.toBeInTheDocument();
+		expect(screen.queryByRole('separator', { name: /sidebar/i })).not.toBeInTheDocument();
 	});
 
 	it('clicking a note navigates to /notes/[id] on mobile', async () => {
@@ -335,6 +463,63 @@ describe('Mobile navigation', () => {
 
 		// No navigation on desktop
 		expect(goto).not.toHaveBeenCalledWith(expect.stringMatching(/\/notes\//));
+	});
+});
+
+describe('Formatting active state', () => {
+	it('reflects editor format changes on the desktop Bold toggle', async () => {
+		const { EMPTY_FORMATS } = await import('$lib/milkdown/formatState');
+		render(Page);
+		await waitFor(() => screen.getByTitle('Bold'));
+
+		const onformatchange = editorProps.current?.onformatchange as
+			| ((formats: typeof EMPTY_FORMATS) => void)
+			| undefined;
+		expect(onformatchange).toBeTypeOf('function');
+
+		onformatchange!({
+			...EMPTY_FORMATS,
+			strong: true,
+			emphasis: true,
+			underline: true,
+			inlineCode: true,
+			link: true,
+			heading: 2,
+			blockquote: true,
+			bulletList: true,
+			orderedList: true,
+			taskList: true,
+		});
+		for (const title of [
+			'Bold', 'Italic', 'Underline', 'Insert link (Ctrl+K)', 'Quote',
+			'Inline code', 'Bullet list', 'Numbered list', 'Task list', 'Headings',
+		]) {
+			await waitFor(() => expect(screen.getByTitle(title)).toHaveAttribute('aria-pressed', 'true'));
+			expect(screen.getByTitle(title)).toHaveClass('tb-btn-active');
+		}
+		for (const title of ['Code block', 'Horizontal rule', 'Undo', 'Redo', 'Insert image']) {
+			expect(screen.getByTitle(title)).not.toHaveAttribute('aria-pressed');
+		}
+
+		onformatchange!({ ...EMPTY_FORMATS });
+		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'false'));
+	});
+
+	it('clears stale formats as soon as another note is selected', async () => {
+		const { EMPTY_FORMATS } = await import('$lib/milkdown/formatState');
+		vi.mocked(api.notes.list).mockResolvedValue([
+			mockNote({ id: 1, title: 'First note' }),
+			mockNote({ id: 2, title: 'Second note' }),
+		]);
+		render(Page);
+		await waitFor(() => screen.getByTitle('Bold'));
+		const onformatchange = editorProps.current!.onformatchange as (formats: typeof EMPTY_FORMATS) => void;
+		onformatchange({ ...EMPTY_FORMATS, strong: true });
+		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'true'));
+
+		await fireEvent.click(screen.getByText('Second note').closest('.note-btn')!);
+
+		await waitFor(() => expect(screen.getByTitle('Bold')).toHaveAttribute('aria-pressed', 'false'));
 	});
 });
 
@@ -1771,15 +1956,46 @@ describe('Lock controls in the note list', () => {
 		expect(row().querySelector('.note-meta-icons [title="Unlock"]')).toBeNull();
 	});
 
-	// Deleting a locked note is rejected by the API with 423.
-	it('disables delete in the hover actions while a note is locked', async () => {
+	it('hides archive and delete everywhere in the list while a note is locked', async () => {
 		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ locked: true })]);
 
 		render(Page);
 		await waitFor(() => screen.getByText('Test Note'));
 
-		const del = row().querySelector('.note-hover-actions [title="Delete"]') as HTMLButtonElement;
-		expect(del.disabled).toBe(true);
+		expect(row().querySelector('.note-hover-actions [title="Move to archive"]')).toBeNull();
+		expect(row().querySelector('.note-hover-actions [title="Delete"]')).toBeNull();
+		const item = screen.getByText('Test Note').closest('.note-item') as HTMLElement;
+		expect(item.querySelector('.mob-swipe-archive')).toBeNull();
+		expect(item.querySelector('.mob-swipe-delete')).toBeNull();
+
+		await fireEvent.click(screen.getByText('Test Note').closest('.note-btn') as HTMLElement);
+		await fireEvent.click(await screen.findByTitle('More actions'));
+		expect(screen.queryByRole('menuitem', { name: /move to trash/i })).not.toBeInTheDocument();
+	});
+
+	it.each(['archive', 'delete'] as const)('keeps the note visible and explains a stale 423 from %s', async (action) => {
+		vi.mocked(api.notes[action]).mockRejectedValue(new ApiError(423, 'locked'));
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		await fireEvent.click(row().querySelector(action === 'archive'
+			? '[title="Move to archive"]'
+			: '[title="Delete"]') as HTMLElement);
+
+		await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/unlock/i));
+		expect(screen.getByText('Test Note')).toBeInTheDocument();
+	});
+
+	it('restores archive and delete actions after unlocking', async () => {
+		vi.mocked(api.notes.list).mockResolvedValue([mockNote({ locked: true })]);
+		vi.mocked(api.notes.toggleLock).mockResolvedValue(mockNote({ locked: false }));
+		render(Page);
+		await waitFor(() => screen.getByText('Test Note'));
+
+		await fireEvent.click(row().querySelector('.note-meta-icons [title="Unlock"]') as HTMLElement);
+
+		await waitFor(() => expect(row().querySelector('[title="Move to archive"]')).toBeTruthy());
+		expect(row().querySelector('[title="Delete"]')).toBeTruthy();
 	});
 
 	it('offers lock alongside pin and star in the mobile swipe panel', async () => {

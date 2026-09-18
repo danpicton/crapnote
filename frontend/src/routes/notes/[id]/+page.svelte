@@ -17,7 +17,9 @@
 	import { toggleUnderlineCommand } from '$lib/milkdown/underline';
 	import type { CmdKey } from '@milkdown/kit/core';
 	import { api, OfflineError, type Note, type Tag } from '$lib/api';
+	import { canArchiveOrDelete, isLockRejection, LOCKED_ACTION_MESSAGE } from '$lib/noteActions';
 	import Editor, { type EditorRef } from '$lib/components/Editor.svelte';
+	import NoteBodyTextSizeSelect from '$lib/components/NoteBodyTextSizeSelect.svelte';
 	import { getNote as getOfflineNote, updateCachedNote, noteFlags } from '$lib/offlineDB';
 	import { openOwnedOfflineDB, OfflineOwnershipError } from '$lib/localData';
 	import { auth } from '$lib/stores/auth.svelte';
@@ -62,7 +64,16 @@
 	 * screen a dropped save is indistinguishable from a successful one.
 	 */
 	let offlineWriteError = $state<string | null>(null);
+	let actionError = $state<string | null>(null);
+	let visibleError = $derived(actionError ?? offlineWriteError);
 	let activeFormats = $state<ActiveFormats>({ ...EMPTY_FORMATS });
+
+	// Route params can change without recreating this page component. Do not
+	// show the previous note's formats while the keyed editor remounts.
+	$effect(() => {
+		void noteId;
+		activeFormats = { ...EMPTY_FORMATS };
+	});
 
 	beforeNavigate(() => {
 		void commitTitleDraft();
@@ -169,6 +180,11 @@
 				goto('/');
 				return;
 			} catch (err) {
+				if (isLockRejection(err)) {
+					actionError = LOCKED_ACTION_MESSAGE;
+					note = note ? { ...note, locked: true } : note;
+					return;
+				}
 				// Only queue on a connectivity failure — a genuine server
 				// rejection must not hide a note that still exists.
 				if (!(err instanceof OfflineError)) throw err;
@@ -196,6 +212,11 @@
 				goto('/');
 				return;
 			} catch (err) {
+				if (isLockRejection(err)) {
+					actionError = LOCKED_ACTION_MESSAGE;
+					note = note ? { ...note, locked: true } : note;
+					return;
+				}
 				// See mobArchive — only queue on connectivity failure.
 				if (!(err instanceof OfflineError)) throw err;
 			}
@@ -535,10 +556,10 @@
 	onfocusin={() => (editorFocused = true)}
 	onfocusout={(e) => { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) editorFocused = false; }}
 >
-	{#if offlineWriteError}
+	{#if visibleError}
 		<div class="offline-write-error" role="alert">
-			<span>{offlineWriteError}</span>
-			<button onclick={() => (offlineWriteError = null)} aria-label="Dismiss">
+			<span>{visibleError}</span>
+			<button onclick={() => { offlineWriteError = null; actionError = null; }} aria-label="Dismiss">
 				<X size={14} />
 			</button>
 		</div>
@@ -546,14 +567,14 @@
 	<!-- ── Desktop toolbar (top) ─────────────────────────── -->
 	<div class="toolbar desk-toolbar" role="toolbar" aria-label="Formatting">
 		<button class="tb-btn" onclick={() => goto('/')} title="Back to notes" aria-label="Back to notes">
-			<ChevronLeft size={16} />
+			<ChevronLeft size={18} />
 		</button>
 		<span class="tb-sep"></span>
-		<button class="tb-btn" onclick={() => cmd(toggleStrongCommand.key)} title="Bold"><Bold size={14} /></button>
-		<button class="tb-btn" onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic"><Italic size={14} /></button>
-		<button class="tb-btn" onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline"><Underline size={14} /></button>
+		<button class="tb-btn" class:tb-btn-active={activeFormats.strong} onclick={() => cmd(toggleStrongCommand.key)} title="Bold" aria-pressed={activeFormats.strong}><Bold size={16} /></button>
+		<button class="tb-btn" class:tb-btn-active={activeFormats.emphasis} onclick={() => cmd(toggleEmphasisCommand.key)} title="Italic" aria-pressed={activeFormats.emphasis}><Italic size={16} /></button>
+		<button class="tb-btn" class:tb-btn-active={activeFormats.underline} onclick={() => cmd(toggleUnderlineCommand.key)} title="Underline" aria-pressed={activeFormats.underline}><Underline size={16} /></button>
 		<div class="link-btn-wrap">
-			<button class="tb-btn" onclick={openLinkDialog} title="Insert link (Ctrl+K)"><Link size={14} /></button>
+			<button class="tb-btn" class:tb-btn-active={activeFormats.link} onclick={openLinkDialog} title="Insert link (Ctrl+K)" aria-pressed={activeFormats.link}><Link size={16} /></button>
 			{#if showLinkDialog}
 				<div class="link-dialog-backdrop" onclick={() => (showLinkDialog = false)} role="presentation"></div>
 				<div class="link-dialog" role="dialog" aria-label="Insert link">
@@ -563,24 +584,25 @@
 			{/if}
 		</div>
 		<span class="tb-sep"></span>
-		<button class="tb-btn" onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote"><Quote size={14} /></button>
-		<button class="tb-btn" onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code"><Code size={14} /></button>
-		<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={14} /></button>
+		<button class="tb-btn" class:tb-btn-active={activeFormats.blockquote} onclick={() => cmd(wrapInBlockquoteCommand.key)} title="Quote" aria-pressed={activeFormats.blockquote}><Quote size={16} /></button>
+		<button class="tb-btn" class:tb-btn-active={activeFormats.inlineCode} onclick={() => cmd(toggleInlineCodeCommand.key)} title="Inline code" aria-pressed={activeFormats.inlineCode}><Code size={16} /></button>
+		<button class="tb-btn" onclick={() => cmd(createCodeBlockCommand.key)} title="Code block"><FileCode2 size={16} /></button>
 		<span class="tb-sep"></span>
-		<button class="tb-btn" onclick={() => cmd(wrapSelectedInBulletListCommand.key)} title="Bullet list"><List size={14} /></button>
-		<button class="tb-btn" onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list"><ListOrdered size={14} /></button>
-		<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={14} /></button>
+		<button class="tb-btn" class:tb-btn-active={activeFormats.bulletList} onclick={() => cmd(wrapSelectedInBulletListCommand.key)} title="Bullet list" aria-pressed={activeFormats.bulletList}><List size={16} /></button>
+		<button class="tb-btn" class:tb-btn-active={activeFormats.orderedList} onclick={() => cmd(wrapInOrderedListCommand.key)} title="Numbered list" aria-pressed={activeFormats.orderedList}><ListOrdered size={16} /></button>
+		<button class="tb-btn" onclick={() => cmd(insertHrCommand.key)} title="Horizontal rule"><Minus size={16} /></button>
 		<span class="tb-sep"></span>
-		<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={14} /></button>
-		<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo"><Redo2 size={14} /></button>
+		<button class="tb-btn" onclick={() => cmd(undoCommand.key)} title="Undo"><Undo2 size={16} /></button>
+		<button class="tb-btn" onclick={() => cmd(redoCommand.key)} title="Redo"><Redo2 size={16} /></button>
 		<span class="tb-sep"></span>
 		<button class="tb-btn" class:tb-lock-on={note.locked} onclick={toggleLock} title={note.locked ? 'Unlock note' : 'Lock note'} aria-pressed={note.locked}>
-			{#if note.locked}<Lock size={14} />{:else}<LockOpen size={14} />{/if}
+			{#if note.locked}<Lock size={16} />{:else}<LockOpen size={16} />{/if}
 		</button>
 		<button class="tb-btn" class:tb-private-on={note.private} onclick={togglePrivacy} title={note.private ? 'Private: hidden from MCP' : 'Visible to MCP'} aria-label={note.private ? 'Make note visible to MCP' : 'Make note private'} aria-pressed={!!note.private} disabled={note.locked}>
 			<EyeOff size={14} />
 		</button>
 		<span class="tb-spacer"></span>
+		<NoteBodyTextSizeSelect />
 		<span class="save-status">{saving ? 'Saving…' : ''}</span>
 	</div>
 
@@ -630,7 +652,7 @@
 				onclick={() => (showTagPopover = !showTagPopover)}
 				title="Tags"
 			>
-				<TagIcon size={11} />
+				<TagIcon size={16} />
 				{#if noteTags.length > 0}<span class="tb-tag-count">{noteTags.length}</span>{/if}
 			</button>
 			{#if showTagPopover}
@@ -646,7 +668,7 @@
 					{/each}
 					<div class="popover-new">
 						<input class="popover-new-input" type="text" placeholder="New tag…" bind:value={newTagName} onkeydown={(e) => e.key === 'Enter' && createAndAddTag()} />
-						<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={12} /></button>
+						<button class="popover-add-btn" onclick={createAndAddTag}><Plus size={16} /></button>
 					</div>
 				</div>
 			{/if}
@@ -693,11 +715,11 @@
 					<button class="mob-footer-tag" onclick={() => (showTagSheet = true)}>{tag.name}</button>
 				{/each}
 				<button class="mob-footer-tag-btn" onclick={() => (showTagSheet = true)} aria-label="Manage tags">
-					<TagIcon size={14} aria-hidden="true" />
+					<TagIcon size={20} aria-hidden="true" />
 					{#if noteTags.length === 0}<span class="mob-footer-tag-label">tag</span>{/if}
 				</button>
 				<button class="mob-footer-action-btn" onclick={() => (showActionSheet = true)} aria-label="Note actions">
-					<MoreHorizontal size={18} aria-hidden="true" />
+					<MoreHorizontal size={22} aria-hidden="true" />
 				</button>
 			</div>
 		</div>
@@ -708,28 +730,28 @@
 		<div class="mob-toolbar-scroll">
 			<!-- Heading -->
 			<div class="mob-tb-wrap">
-				<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.heading !== null} onclick={() => (showMobHeadingMenu = !showMobHeadingMenu)} aria-label="Headings" aria-expanded={showMobHeadingMenu}>H{activeFormats.heading ?? ''}</button>
+				<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.heading !== null} onclick={() => (showMobHeadingMenu = !showMobHeadingMenu)} aria-label="Headings" aria-expanded={showMobHeadingMenu} aria-pressed={activeFormats.heading !== null}>H{activeFormats.heading ?? ''}</button>
 				{#if showMobHeadingMenu}
 					<div class="mob-heading-backdrop" onclick={() => (showMobHeadingMenu = false)} role="presentation"></div>
 					<div class="mob-heading-menu">
 						{#each [1,2,3] as level}
-							<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.heading === level} onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, level); showMobHeadingMenu = false; }} aria-label="Heading {level}">H{level}</button>
+							<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.heading === level} onclick={() => { cmd(wrapInHeadingCommand.key as CmdKey<unknown>, level); showMobHeadingMenu = false; }} aria-label="Heading {level}" aria-pressed={activeFormats.heading === level}>H{level}</button>
 						{/each}
 					</div>
 				{/if}
 			</div>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.strong} onclick={() => cmd(toggleStrongCommand.key)} aria-label="Bold"><Bold size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.emphasis} onclick={() => cmd(toggleEmphasisCommand.key)} aria-label="Italic"><Italic size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.underline} onclick={() => cmd(toggleUnderlineCommand.key)} aria-label="Underline"><Underline size={20} /></button>
-			<button class="mob-tb-btn" onclick={openLinkDialog} aria-label="Insert link"><Link size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.blockquote} onclick={() => cmd(wrapInBlockquoteCommand.key)} aria-label="Quote"><Quote size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.inlineCode} onclick={() => cmd(toggleInlineCodeCommand.key)} aria-label="Inline code"><Code size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.bulletList} onclick={() => cmd(wrapSelectedInBulletListCommand.key)} aria-label="Bullet list"><List size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.orderedList} onclick={() => cmd(wrapInOrderedListCommand.key)} aria-label="Ordered list"><ListOrdered size={20} /></button>
-			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.taskList} onclick={() => cmd(wrapInTaskListCommand.key)} aria-label="Checklist"><ListTodo size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(insertHrCommand.key)} aria-label="Horizontal rule"><Minus size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(undoCommand.key)} aria-label="Undo"><Undo2 size={20} /></button>
-			<button class="mob-tb-btn" onclick={() => cmd(redoCommand.key)} aria-label="Redo"><Redo2 size={20} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.strong} onclick={() => cmd(toggleStrongCommand.key)} aria-label="Bold" aria-pressed={activeFormats.strong}><Bold size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.emphasis} onclick={() => cmd(toggleEmphasisCommand.key)} aria-label="Italic" aria-pressed={activeFormats.emphasis}><Italic size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.underline} onclick={() => cmd(toggleUnderlineCommand.key)} aria-label="Underline" aria-pressed={activeFormats.underline}><Underline size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.link} onclick={openLinkDialog} aria-label="Insert link" aria-pressed={activeFormats.link}><Link size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.blockquote} onclick={() => cmd(wrapInBlockquoteCommand.key)} aria-label="Quote" aria-pressed={activeFormats.blockquote}><Quote size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.inlineCode} onclick={() => cmd(toggleInlineCodeCommand.key)} aria-label="Inline code" aria-pressed={activeFormats.inlineCode}><Code size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.bulletList} onclick={() => cmd(wrapSelectedInBulletListCommand.key)} aria-label="Bullet list" aria-pressed={activeFormats.bulletList}><List size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.orderedList} onclick={() => cmd(wrapInOrderedListCommand.key)} aria-label="Ordered list" aria-pressed={activeFormats.orderedList}><ListOrdered size={22} /></button>
+			<button class="mob-tb-btn" class:mob-tb-btn-active={activeFormats.taskList} onclick={() => cmd(wrapInTaskListCommand.key)} aria-label="Checklist" aria-pressed={activeFormats.taskList}><ListTodo size={22} /></button>
+			<button class="mob-tb-btn" onclick={() => cmd(insertHrCommand.key)} aria-label="Horizontal rule"><Minus size={22} /></button>
+			<button class="mob-tb-btn" onclick={() => cmd(undoCommand.key)} aria-label="Undo"><Undo2 size={22} /></button>
+			<button class="mob-tb-btn" onclick={() => cmd(redoCommand.key)} aria-label="Redo"><Redo2 size={22} /></button>
 		</div>
 	</div>
 
@@ -768,18 +790,22 @@
 				<EyeOff size={18} aria-hidden="true" />
 				<span>{note.private ? 'Make visible to MCP' : 'Make private'}</span>
 			</button>
-			<button class="mob-sheet-row" onclick={mobArchive}>
-				<Archive size={18} aria-hidden="true" />
-				<span>Archive</span>
-			</button>
+			{#if canArchiveOrDelete(note)}
+				<button class="mob-sheet-row" onclick={mobArchive}>
+					<Archive size={18} aria-hidden="true" />
+					<span>Archive</span>
+				</button>
+			{/if}
 			<button class="mob-sheet-row" onclick={mobForceSync}>
 				<RefreshCw size={18} aria-hidden="true" />
 				<span>Force sync</span>
 			</button>
-			<button class="mob-sheet-row mob-sheet-danger" onclick={mobDelete} disabled={note.locked}>
-				<Trash2 size={18} aria-hidden="true" />
-				<span>Delete</span>
-			</button>
+			{#if canArchiveOrDelete(note)}
+				<button class="mob-sheet-row mob-sheet-danger" onclick={mobDelete}>
+					<Trash2 size={18} aria-hidden="true" />
+					<span>Delete</span>
+				</button>
+			{/if}
 		</div>
 	{/if}
 
@@ -882,18 +908,28 @@
 	}
 
 	.tb-btn {
-		padding: 0.3rem 0.4rem;
+		width: 32px;
+		height: 32px;
+		padding: 0;
 		background: none;
 		border: 1px solid transparent;
 		border-radius: 0.25rem;
 		cursor: pointer;
 		color: var(--text-2);
 		display: flex;
+		flex-shrink: 0;
 		align-items: center;
 		justify-content: center;
 	}
 	.tb-btn:hover { background: var(--border); border-color: var(--border-md); }
 	.tb-btn:active { background: var(--bg-active); border-color: var(--border-hi); }
+	.tb-btn-active,
+	.tb-btn-active:hover {
+		color: var(--accent-tx);
+		background: var(--accent-lt);
+		border-color: var(--accent);
+		box-shadow: inset 0 0 0 0.5px var(--accent);
+	}
 
 	.tb-sep {
 		width: 1px;
@@ -1008,8 +1044,11 @@
 	.tag-chip-btn {
 		display: inline-flex;
 		align-items: center;
+		justify-content: center;
 		gap: 0.2rem;
-		padding: 0.1rem 0.45rem;
+		min-width: 32px;
+		height: 32px;
+		padding: 0 0.45rem;
 		background: transparent;
 		color: var(--text-4);
 		border-radius: 999px;
@@ -1093,12 +1132,16 @@
 	.popover-new-input:focus { border-color: var(--accent); }
 
 	.popover-add-btn {
+		width: 32px;
+		height: 32px;
 		background: none;
 		border: none;
 		cursor: pointer;
 		color: var(--accent);
-		padding: 0.1rem;
+		padding: 0;
 		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	/* ─── Shared elements ──────────────────────────── */
@@ -1214,7 +1257,7 @@
 			color: var(--text-3);
 			letter-spacing: 0.2px;
 			padding: 0 4px 0 12px;
-			min-height: 36px;
+			min-height: 44px;
 			border-top: 1px solid var(--border);
 			background: var(--bg-alt);
 			flex-shrink: 0;
@@ -1238,11 +1281,18 @@
 			display: flex;
 			align-items: center;
 			gap: 2px;
-			flex-shrink: 0;
+			flex: 1 1 auto;
+			min-width: 0;
+			overflow-x: auto;
+			scrollbar-width: none;
 		}
+		.mob-footer-right::-webkit-scrollbar { display: none; }
 		.mob-footer-tag {
 			display: inline-flex;
 			align-items: center;
+			justify-content: center;
+			min-width: 44px;
+			min-height: 44px;
 			padding: 4px 8px;
 			background: var(--accent-lt);
 			color: var(--accent);
@@ -1256,13 +1306,15 @@
 			max-width: 72px;
 			overflow: hidden;
 			text-overflow: ellipsis;
+			flex-shrink: 0;
 		}
 		.mob-footer-tag-btn {
 			display: flex;
 			align-items: center;
 			gap: 3px;
-			width: 36px;
+			width: 44px;
 			height: 44px;
+			flex-shrink: 0;
 			justify-content: center;
 			background: none;
 			border: none;
@@ -1280,6 +1332,7 @@
 			justify-content: center;
 			width: 44px;
 			height: 44px;
+			flex-shrink: 0;
 			background: none;
 			border: none;
 			cursor: pointer;
@@ -1304,6 +1357,7 @@
 		.mob-toolbar-scroll {
 			display: flex;
 			align-items: center;
+			gap: 2px;
 			overflow-x: auto;
 			scrollbar-width: none;
 			padding: 0 4px;
@@ -1312,8 +1366,8 @@
 
 		.mob-tb-wrap { position: relative; display: inline-flex; }
 		.mob-tb-btn {
-			width: 42px;
-			height: 42px;
+			width: 44px;
+			height: 44px;
 			flex-shrink: 0;
 			display: flex;
 			align-items: center;
@@ -1325,7 +1379,7 @@
 			color: var(--text-2);
 			font-family: var(--serif);
 			font-weight: 700;
-			font-size: 15px;
+			font-size: 17px;
 		}
 		.mob-tb-btn:hover { background: var(--bg-hover); }
 		/* Pronounced active state: accent icon on a tinted pill */

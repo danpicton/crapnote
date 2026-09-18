@@ -470,6 +470,9 @@ func TestNotesHandler_Delete_LockedReturns423(t *testing.T) {
 	if w.Code != http.StatusLocked {
 		t.Fatalf("expected 423, got %d: %s", w.Code, w.Body.String())
 	}
+	if !strings.Contains(w.Body.String(), "unlock") {
+		t.Fatalf("423 should explain how to proceed: %s", w.Body.String())
+	}
 }
 
 func TestNotesHandler_Archive_LockedReturns423(t *testing.T) {
@@ -486,6 +489,9 @@ func TestNotesHandler_Archive_LockedReturns423(t *testing.T) {
 
 	if w.Code != http.StatusLocked {
 		t.Fatalf("expected 423, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "unlock") {
+		t.Fatalf("423 should explain how to proceed: %s", w.Body.String())
 	}
 }
 
