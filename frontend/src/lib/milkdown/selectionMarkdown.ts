@@ -1,4 +1,9 @@
-import { Fragment, type Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
+import {
+	Fragment,
+	type Node as ProseMirrorNode,
+	type NodeType,
+	type Slice,
+} from '@milkdown/kit/prose/model';
 import type { Selection } from '@milkdown/kit/prose/state';
 
 export type MarkdownSerializer = (doc: ProseMirrorNode) => string;
@@ -15,14 +20,20 @@ function flattenUnsupportedMarks(content: Fragment): Fragment {
 	return Fragment.fromArray(children);
 }
 
+export function sliceToMarkdown(
+	slice: Slice,
+	documentType: NodeType,
+	serialize: MarkdownSerializer,
+): string {
+	const content = flattenUnsupportedMarks(slice.content);
+	return serialize(documentType.create(null, content));
+}
+
 /** Serialize only the document content covered by a ProseMirror selection. */
 export function selectionToMarkdown(
 	selection: Selection,
 	serialize: MarkdownSerializer,
 ): string {
 	if (selection.empty) return '';
-
-	const content = flattenUnsupportedMarks(selection.content().content);
-	const selectedDoc = selection.$from.doc.type.create(null, content);
-	return serialize(selectedDoc);
+	return sliceToMarkdown(selection.content(), selection.$from.doc.type, serialize);
 }

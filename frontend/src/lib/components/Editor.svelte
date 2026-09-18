@@ -16,6 +16,7 @@
 	import { taskListPlugin } from '$lib/milkdown/tasklist';
 	import { listMovePlugin } from '$lib/milkdown/listmove';
 	import { listEditPlugin } from '$lib/milkdown/listedit';
+	import { markdownClipboardPlugin } from '$lib/milkdown/clipboardMarkdown';
 	import {
 		shouldPlaceCaretAtEnd,
 		pointerTravel,
@@ -91,6 +92,7 @@
 			.use(underlinePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(imagePlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(linkPlugin as Parameters<typeof Editor.prototype.use>[0])
+			.use(markdownClipboardPlugin as Parameters<typeof Editor.prototype.use>[0])
 			.use(formatListener as Parameters<typeof Editor.prototype.use>[0])
 			.use(history)
 			.use(listener)
