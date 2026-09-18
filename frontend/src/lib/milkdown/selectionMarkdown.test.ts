@@ -46,4 +46,12 @@ describe('selectionToMarkdown', () => {
 			expect(markdown).toBe('3. Third\n4. Fourth\n');
 		});
 	});
+
+	it('retains nesting and task states', async () => {
+		await withDocument('- Parent\n  - [ ] Child\n  - [x] Done', (doc, serialize) => {
+			const markdown = selectionToMarkdown(new AllSelection(doc), serialize);
+
+			expect(markdown).toBe('* Parent\n\n  * [ ] Child\n\n  * [x] Done\n');
+		});
+	});
 });
