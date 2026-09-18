@@ -77,6 +77,16 @@ describe('Settings page', () => {
 		expect(field).toHaveAttribute('autocomplete', 'off');
 	});
 
+	it('separates archive export from account-password submission', () => {
+		render(SettingsPage);
+
+		const exportForm = screen.getByLabelText('Archive password (optional)').closest('form');
+		const accountForm = screen.getByLabelText('New password').closest('form');
+		expect(exportForm).toHaveAccessibleName('Export notes');
+		expect(accountForm).toHaveAccessibleName('Change account password');
+		expect(exportForm).not.toBe(accountForm);
+	});
+
 	it('renders heading', () => {
 		render(SettingsPage);
 		expect(screen.getAllByRole('heading', { name: /settings/i }).length).toBeGreaterThan(0);

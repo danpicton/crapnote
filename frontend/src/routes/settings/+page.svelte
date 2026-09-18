@@ -76,7 +76,8 @@
 		!auth.loading && !!auth.user && (auth.user.is_admin || !!auth.user.api_tokens_enabled),
 	);
 
-	async function doExport() {
+	async function doExport(e: SubmitEvent) {
+		e.preventDefault();
 		exportError = '';
 		exportSubmitting = true;
 		try {
@@ -164,7 +165,7 @@
 			</div>
 			<div class="section-body">
 				{#if exportError}<p role="alert" class="msg-error">{exportError}</p>{/if}
-				<div class="export-row">
+				<form class="export-row" aria-label="Export notes" autocomplete="off" onsubmit={doExport}>
 					<div class="export-field">
 						<label for="export-archive-password" class="field-label">Archive password (optional)</label>
 						<input
@@ -177,10 +178,10 @@
 							disabled={exportSubmitting}
 						/>
 					</div>
-					<button class="btn-primary" onclick={doExport} disabled={exportSubmitting}>
+					<button type="submit" class="btn-primary" disabled={exportSubmitting}>
 						{exportSubmitting ? 'Exporting…' : 'Export notes'}
 					</button>
-				</div>
+				</form>
 				<p class="hint">A ZIP of individual <code>.md</code> files. Password-protected if supplied.</p>
 			</div>
 		</section>
@@ -211,7 +212,7 @@
 			<div class="section-body">
 				{#if pwError}<p role="alert" class="msg-error">{pwError}</p>{/if}
 				{#if pwSuccess}<p role="status" class="msg-success">{pwSuccess}</p>{/if}
-				<form class="pw-form" onsubmit={changePassword} novalidate>
+				<form class="pw-form" aria-label="Change account password" onsubmit={changePassword} novalidate>
 					<div class="pw-field">
 						<label for="account-new-password" class="field-label">New password</label>
 						<PasswordInput
