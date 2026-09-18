@@ -179,6 +179,24 @@ The four `notes_fts_*` tables are managed entirely by SQLite — never written t
 Expired trash is purged once on every server startup and hourly thereafter. A
 failed run is logged and retried at the next hourly interval.
 
+### Importing exports
+
+Settings can import ZIP archives produced by Crapnote's exporter, including
+AES-256 password-protected exports. Import always creates new active notes for
+the signed-in user; importing the same archive again creates another set rather
+than overwriting or merging notes. Bundled images receive new IDs and stay
+private to that user.
+
+The export format does not contain restoration metadata. Imported notes are
+therefore unpinned, unlocked and unstarred, with fresh IDs and timestamps; tags
+and archived state are not reconstructed.
+
+Import accepts at most **100 MB compressed**, **2,000 ZIP entries**, and **200
+MB decompressed** in total. The normal 10 MB per-image limit and configured
+per-user image quota also apply. Invalid paths, unsupported entries, corrupt
+archives, missing bundled images, and archives with no note entries are
+rejected before anything is committed.
+
 ---
 
 ## Adding Go dependencies

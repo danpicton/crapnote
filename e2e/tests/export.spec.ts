@@ -55,4 +55,53 @@ test.describe('Export', () => {
       /^crapnote-export-\d{4}-\d{2}-\d{2}\.zip$/,
     );
   });
+
+  test('exports then imports and opens a note with its restored image', async ({ page }) => {
+    const png = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+      0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+      0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+      0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+      0x00, 0x00, 0x02, 0x00, 0x01, 0xe2, 0x21, 0xbc,
+      0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+      0x44, 0xae, 0x42, 0x60, 0x82,
+    ]);
+    const uploaded = await page.request.post('/api/images', {
+      multipart: { image: { name: 'pixel.png', mimeType: 'image/png', buffer: png } },
+    });
+    expect(uploaded.status()).toBe(201);
+    const oldImageURL = ((await uploaded.json()) as { url: string }).url;
+    const title = `Import image ${Date.now()}`;
+    const created = await page.request.post('/api/notes', {
+      data: { title, body: `![restored pixel](${oldImageURL})` },
+    });
+    expect(created.status()).toBe(201);
+    const source = (await created.json()) as { id: number };
+
+    await page.goto('/settings');
+    const downloadEvent = page.waitForEvent('download');
+    await page.getByPlaceholder(/password \(optional\)/i).fill('round-trip-password');
+    await page.getByRole('button', { name: /export notes/i }).click();
+    const download = await downloadEvent;
+    const archivePath = await download.path();
+    expect(archivePath).not.toBeNull();
+
+    // Remove the source so the only active note with this title is the import.
+    expect((await page.request.delete(`/api/notes/${source.id}`)).status()).toBe(204);
+    await page.getByLabel(/crapnote export zip/i).setInputFiles(archivePath!);
+    await page.getByLabel(/export password/i).fill('round-trip-password');
+    await page.getByRole('button', { name: /import notes/i }).click();
+    await expect(page.getByRole('status')).toContainText(/Imported \d+ notes/);
+
+    await page.goto('/');
+    const imported = page.locator('.note-item').filter({ hasText: title });
+    await expect(imported).toHaveCount(1);
+    await imported.click();
+    const restoredImage = page.getByAltText('restored pixel');
+    await expect(restoredImage).toBeVisible();
+    await expect(restoredImage).not.toHaveAttribute('src', oldImageURL);
+    await expect(restoredImage).toHaveAttribute('src', /^\/api\/images\/[a-f0-9-]+$/);
+  });
 });
