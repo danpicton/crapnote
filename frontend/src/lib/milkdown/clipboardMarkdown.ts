@@ -13,5 +13,5 @@ export function createMarkdownClipboardPlugin(serialize: MarkdownSerializer): Pl
 }
 
 export const markdownClipboardPlugin = $prose((ctx) =>
-	createMarkdownClipboardPlugin(ctx.get(serializerCtx)),
+	createMarkdownClipboardPlugin((doc) => ctx.get(serializerCtx)(doc)),
 );
