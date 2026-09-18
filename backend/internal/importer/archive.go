@@ -84,10 +84,11 @@ func Parse(data []byte, password string, limits Limits) (*Archive, error) {
 		if file.IsEncrypted() && password == "" {
 			return nil, ErrPasswordRequired
 		}
-		declared += file.UncompressedSize64
-		if declared > uint64(limits.MaxTotalBytes) {
+		maxTotal := uint64(limits.MaxTotalBytes)
+		if file.UncompressedSize64 > maxTotal-declared {
 			return nil, fmt.Errorf("archive expands beyond the %d MB limit", limits.MaxTotalBytes>>20)
 		}
+		declared += file.UncompressedSize64
 	}
 
 	result := &Archive{Images: make(map[string]Image)}

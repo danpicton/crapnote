@@ -12,12 +12,13 @@ import (
 
 // Handler serves the authenticated archive import endpoint.
 type Handler struct {
-	service *Service
+	service        *Service
+	maxUploadBytes int64
 }
 
 // NewHandler creates an import handler.
 func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+	return &Handler{service: service, maxUploadBytes: MaxUploadBytes}
 }
 
 // Import handles POST /api/import with multipart fields archive and password.
@@ -30,8 +31,12 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 
 	// Allow a small multipart envelope in addition to the compressed archive,
 	// then enforce the archive's own size exactly while reading the file part.
-	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadBytes+(1<<20))
-	if err := r.ParseMultipartForm(MaxUploadBytes); err != nil {
+	maxUploadBytes := h.maxUploadBytes
+	if maxUploadBytes <= 0 {
+		maxUploadBytes = MaxUploadBytes
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes+(1<<20))
+	if err := r.ParseMultipartForm(maxUploadBytes); err != nil {
 		writeImportError(w, http.StatusBadRequest, "import upload is too large or malformed")
 		return
 	}
@@ -45,12 +50,12 @@ func (h *Handler) Import(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close() //nolint:errcheck
 
-	data, err := io.ReadAll(io.LimitReader(file, MaxUploadBytes+1))
+	data, err := io.ReadAll(io.LimitReader(file, maxUploadBytes+1))
 	if err != nil {
 		writeImportError(w, http.StatusBadRequest, "could not read the uploaded archive")
 		return
 	}
-	if int64(len(data)) > MaxUploadBytes {
+	if int64(len(data)) > maxUploadBytes {
 		writeImportError(w, http.StatusRequestEntityTooLarge, "compressed archive exceeds the 100 MB limit")
 		return
 	}
