@@ -11,11 +11,25 @@ import (
 	"github.com/danpicton/crapnote/internal/httpx"
 )
 
+const lockedMessage = "note is locked; unlock it first"
+
 const (
-	maxTitleLen   = 500
-	maxBodyLen    = 500_000
-	lockedMessage = "note is locked; unlock it first"
+	// MaxTitleLen is the maximum note title size accepted by creation paths.
+	MaxTitleLen = 500
+	// MaxBodyLen is the maximum Markdown body size accepted by creation paths.
+	MaxBodyLen = 500_000
 )
+
+// ValidateContent applies the note size limits shared by API creation and import.
+func ValidateContent(title, body string) error {
+	if len(title) > MaxTitleLen {
+		return errors.New("title exceeds maximum length")
+	}
+	if len(body) > MaxBodyLen {
+		return errors.New("body exceeds maximum length")
+	}
+	return nil
+}
 
 // Handler holds HTTP handlers for notes endpoints.
 type Handler struct {
@@ -84,12 +98,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if len(req.Title) > maxTitleLen {
-		writeError(w, http.StatusBadRequest, "title exceeds maximum length")
-		return
-	}
-	if len(req.Body) > maxBodyLen {
-		writeError(w, http.StatusBadRequest, "body exceeds maximum length")
+	if err := ValidateContent(req.Title, req.Body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -151,11 +161,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Title != nil && len(*req.Title) > maxTitleLen {
+	if req.Title != nil && len(*req.Title) > MaxTitleLen {
 		writeError(w, http.StatusBadRequest, "title exceeds maximum length")
 		return
 	}
-	if req.Body != nil && len(*req.Body) > maxBodyLen {
+	if req.Body != nil && len(*req.Body) > MaxBodyLen {
 		writeError(w, http.StatusBadRequest, "body exceeds maximum length")
 		return
 	}

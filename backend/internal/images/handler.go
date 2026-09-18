@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +15,8 @@ import (
 	"github.com/danpicton/crapnote/internal/ratelimit"
 )
 
-const maxImageSize = 10 << 20 // 10 MB
+// MaxImageSize is the largest image accepted by upload and import.
+const MaxImageSize = 10 << 20 // 10 MB
 
 // Config controls per-user upload throttling and storage quota. See issue #15.
 type Config struct {
@@ -46,6 +48,19 @@ var allowedImageMIMEs = map[string]struct{}{
 func isAllowedImage(mime string) bool {
 	_, ok := allowedImageMIMEs[mime]
 	return ok
+}
+
+// ValidateData applies the image size and content-type checks shared by upload
+// and import. It returns the MIME type detected from the bytes.
+func ValidateData(data []byte) (string, error) {
+	if len(data) > MaxImageSize {
+		return "", fmt.Errorf("image exceeds maximum size of %d MB", MaxImageSize>>20)
+	}
+	mimeType := http.DetectContentType(data)
+	if !isAllowedImage(mimeType) {
+		return "", errors.New("not a supported image (PNG, JPEG, GIF or WebP required)")
+	}
+	return mimeType, nil
 }
 
 // Data holds the raw bytes and MIME type of a stored image.
@@ -125,8 +140,8 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxImageSize+512)
-	if err := r.ParseMultipartForm(maxImageSize); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, MaxImageSize+512)
+	if err := r.ParseMultipartForm(MaxImageSize); err != nil {
 		writeError(w, http.StatusBadRequest, "image too large or bad request")
 		return
 	}
@@ -138,7 +153,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	data, err := io.ReadAll(io.LimitReader(file, maxImageSize))
+	data, err := io.ReadAll(io.LimitReader(file, MaxImageSize+1))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
@@ -147,8 +162,8 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	// Reject anything that does not sniff as one of the allowed image types.
 	// Trusting the client-supplied Content-Type would let attackers store
 	// arbitrary payloads in the images table.
-	mimeType := http.DetectContentType(data)
-	if !isAllowedImage(mimeType) {
+	mimeType, err := ValidateData(data)
+	if err != nil {
 		writeError(w, http.StatusUnsupportedMediaType, "not an image")
 		return
 	}
@@ -164,7 +179,7 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	id := newID()
+	id := NewID()
 
 	_, err = h.db.ExecContext(r.Context(),
 		`INSERT INTO images (id, user_id, mime_type, data) VALUES (?, ?, ?, ?)`,
@@ -242,7 +257,8 @@ func (h *Handler) Serve(w http.ResponseWriter, r *http.Request) {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-func newID() string {
+// NewID returns a cryptographically random image identifier.
+func NewID() string {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		panic(fmt.Sprintf("images: rand.Read: %v", err))

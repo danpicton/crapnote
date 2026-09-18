@@ -13,6 +13,7 @@ import (
 	"github.com/danpicton/crapnote/internal/db"
 	"github.com/danpicton/crapnote/internal/export"
 	"github.com/danpicton/crapnote/internal/images"
+	"github.com/danpicton/crapnote/internal/importer"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/ratelimit"
 	"github.com/danpicton/crapnote/internal/settings"
@@ -62,6 +63,7 @@ func newTestMux(t *testing.T) *http.ServeMux {
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
 		export.NewHandler(notesSvc, database),
+		importer.NewHandler(importer.NewService(database, importer.DefaultConfig())),
 		images.NewHandler(database),
 		tokens.NewHandler(tokensSvc),
 		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
@@ -109,6 +111,7 @@ func newAuthedMux(t *testing.T, observe ...func(http.Handler) http.Handler) (*ht
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
 		export.NewHandler(notesSvc, database),
+		importer.NewHandler(importer.NewService(database, importer.DefaultConfig())),
 		images.NewHandler(database),
 		tokens.NewHandler(tokensSvc),
 		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
@@ -321,6 +324,7 @@ func TestLogin_RateLimited(t *testing.T) {
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
 		export.NewHandler(notesSvc, database),
+		importer.NewHandler(importer.NewService(database, importer.DefaultConfig())),
 		images.NewHandler(database),
 		tokens.NewHandler(tokensSvc),
 		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
@@ -374,6 +378,7 @@ func TestLogin_RateLimited_SpoofedForwardedForDoesNotBypass(t *testing.T) {
 		tags.NewHandler(tags.NewService(tags.NewRepo(database))),
 		trash.NewHandler(trash.NewService(trash.NewRepo(database))),
 		export.NewHandler(notesSvc, database),
+		importer.NewHandler(importer.NewService(database, importer.DefaultConfig())),
 		images.NewHandler(database),
 		tokens.NewHandler(tokensSvc),
 		settings.NewHandler(settings.NewService(settings.NewRepo(database))),
