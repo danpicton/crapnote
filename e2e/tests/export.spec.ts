@@ -42,17 +42,28 @@ test.describe('Export', () => {
     expect(body[6] & 0x01).toBe(1);
   });
 
-  test('the settings page downloads the export', async ({ page }) => {
+  test('POST /api/export returns an unencrypted ZIP when no password is supplied', async ({ page }) => {
+    const res = await page.request.post('/api/export', { data: {} });
+
+    expect(res.status()).toBe(200);
+    const body = await res.body();
+    expect(body.subarray(0, 2).toString('latin1')).toBe('PK');
+    expect(body[6] & 0x01).toBe(0);
+  });
+
+  test('the settings page downloads the export and clears its password', async ({ page }) => {
     await page.goto('/settings');
 
     // Register the listener before clicking: the export is small enough that
     // the download can land before an after-the-fact wait attaches.
     const download = page.waitForEvent('download');
-    await page.getByPlaceholder(/password \(optional\)/i).fill('e2e-export-pass');
+    const password = page.getByLabel('Archive password (optional)');
+    await password.fill('e2e-export-pass');
     await page.getByRole('button', { name: /export notes/i }).click();
 
     expect((await download).suggestedFilename()).toMatch(
       /^crapnote-export-\d{4}-\d{2}-\d{2}\.zip$/,
     );
+    await expect(password).toHaveValue('');
   });
 });
