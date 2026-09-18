@@ -16,13 +16,37 @@ function isUnderlineTag(node: ProseMirrorNode): boolean {
 		&& /^<\/?u(?:\s[^>]*)?>$/i.test(node.attrs.value.trim());
 }
 
-function flattenUnsupportedMarks(content: Fragment): Fragment {
+function selectedOrderedListStarts(selection?: Selection): number[] {
+	if (!selection) return [];
+
+	const starts: number[] = [];
+	for (let depth = 0; depth <= selection.$from.depth; depth++) {
+		const node = selection.$from.node(depth);
+		if (node.type.name !== 'ordered_list') continue;
+		const order = typeof node.attrs.order === 'number' ? node.attrs.order : 1;
+		starts.push(order + selection.$from.index(depth));
+	}
+	return starts;
+}
+
+function flattenUnsupportedMarks(
+	content: Fragment,
+	orderedListStarts: readonly number[],
+	nextOrderedList: { value: number },
+): Fragment {
 	const children: ProseMirrorNode[] = [];
 	content.forEach((node) => {
 		if (isUnderlineTag(node)) return;
 		const marks = node.marks.filter((mark) => markdownMarks.has(mark.type.name));
-		const flattened = node.isLeaf ? node.mark(marks) : node.copy(flattenUnsupportedMarks(node.content)).mark(marks);
-		children.push(flattened);
+		const order = node.type.name === 'ordered_list'
+			&& nextOrderedList.value < orderedListStarts.length
+			? orderedListStarts[nextOrderedList.value++]
+			: undefined;
+		const childContent = node.isLeaf
+			? node.content
+			: flattenUnsupportedMarks(node.content, orderedListStarts, nextOrderedList);
+		const attrs = order == null ? node.attrs : { ...node.attrs, order };
+		children.push(node.isText ? node.mark(marks) : node.type.create(attrs, childContent, marks));
 	});
 	return Fragment.fromArray(children);
 }
@@ -31,8 +55,10 @@ export function sliceToMarkdown(
 	slice: Slice,
 	documentType: NodeType,
 	serialize: MarkdownSerializer,
+	selection?: Selection,
 ): string {
-	const content = flattenUnsupportedMarks(slice.content);
+	const orderedListStarts = selectedOrderedListStarts(selection);
+	const content = flattenUnsupportedMarks(slice.content, orderedListStarts, { value: 0 });
 	return serialize(documentType.create(null, content));
 }
 
@@ -42,5 +68,5 @@ export function selectionToMarkdown(
 	serialize: MarkdownSerializer,
 ): string {
 	if (selection.empty) return '';
-	return sliceToMarkdown(selection.content(), selection.$from.doc.type, serialize);
+	return sliceToMarkdown(selection.content(), selection.$from.doc.type, serialize, selection);
 }

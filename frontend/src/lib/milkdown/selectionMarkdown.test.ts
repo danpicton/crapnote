@@ -49,6 +49,22 @@ describe('selectionToMarkdown', () => {
 		});
 	});
 
+	it('starts a partial ordered-list copy at the selected item number', async () => {
+		await withDocument('3. Third\n4. Fourth\n5. Fifth', (doc, serialize) => {
+			const textPositions: number[] = [];
+			doc.descendants((node, pos) => {
+				if (node.isText) textPositions.push(pos);
+			});
+			const fourth = textPositions[1];
+			const markdown = selectionToMarkdown(
+				TextSelection.create(doc, fourth, fourth + 'Fourth'.length),
+				serialize,
+			);
+
+			expect(markdown).toBe('4. Fourth\n');
+		});
+	});
+
 	it('retains nesting and task states', async () => {
 		await withDocument('- Parent\n  - [ ] Child\n  - [x] Done', (doc, serialize) => {
 			const markdown = selectionToMarkdown(new AllSelection(doc), serialize);

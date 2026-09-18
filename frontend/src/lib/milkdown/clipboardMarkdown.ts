@@ -7,7 +7,7 @@ export function createMarkdownClipboardPlugin(serialize: MarkdownSerializer): Pl
 	return new Plugin({
 		props: {
 			clipboardTextSerializer: (slice, view) =>
-				sliceToMarkdown(slice, view.state.doc.type, serialize),
+				sliceToMarkdown(slice, view.state.doc.type, serialize, view.state.selection),
 		},
 	});
 }
