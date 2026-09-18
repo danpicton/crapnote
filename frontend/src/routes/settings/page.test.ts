@@ -103,6 +103,30 @@ describe('Settings page', () => {
 	});
 });
 
+describe('Settings — Export', () => {
+	beforeEach(() => {
+		mockApi.export.mockReset();
+	});
+
+	it('clears the archive password without persisting it after a successful export', async () => {
+		mockApi.export.mockResolvedValueOnce(undefined);
+		localStorage.clear();
+		sessionStorage.clear();
+		render(SettingsPage);
+		const field = screen.getByLabelText('Archive password (optional)') as HTMLInputElement;
+
+		await fireEvent.input(field, { target: { value: 'archive-secret' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Export notes' }));
+
+		await waitFor(() => {
+			expect(mockApi.export).toHaveBeenCalledWith('archive-secret');
+			expect(field.value).toBe('');
+		});
+		expect(localStorage).toHaveLength(0);
+		expect(sessionStorage).toHaveLength(0);
+	});
+});
+
 // The Administration → User management link is gated on auth.user?.is_admin.
 // A previous bug returned {status:"ok"} from POST /api/auth/login, so on a
 // fresh login the SPA stored a user object with no is_admin field and the
