@@ -54,4 +54,31 @@ describe('selectionToMarkdown', () => {
 			expect(markdown).toBe('* Parent\n\n  * [ ] Child\n\n  * [x] Done\n');
 		});
 	});
+
+	it('retains supported block and inline formatting', async () => {
+		const source = [
+			'## **Bold and _italic_** ~~gone~~ [site](https://example.com)',
+			'',
+			'> `inline`',
+			'',
+			'```ts',
+			'const value = 1;',
+			'```',
+		].join('\n');
+
+		await withDocument(source, (doc, serialize) => {
+			const markdown = selectionToMarkdown(new AllSelection(doc), serialize);
+
+			expect(markdown).toBe([
+				'## **Bold and** _**italic**_ ~~gone~~ [site](https://example.com)',
+				'',
+				'> `inline`',
+				'',
+				'```ts',
+				'const value = 1;',
+				'```',
+				'',
+			].join('\n'));
+		});
+	});
 });
