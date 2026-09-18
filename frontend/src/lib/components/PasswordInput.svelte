@@ -9,6 +9,7 @@
 
 	interface Props {
 		id: string;
+		name?: string;
 		value: string;
 		autocomplete?: Autocomplete;
 		placeholder?: string;
@@ -21,6 +22,7 @@
 
 	let {
 		id,
+		name,
 		value = $bindable(''),
 		autocomplete,
 		placeholder,
@@ -44,6 +46,7 @@
 <div class="pw-wrap" class:pw-wrap-invalid={invalid}>
 	<input
 		{id}
+		{name}
 		type={visible ? 'text' : 'password'}
 		value={value}
 		autocomplete={autocomplete ?? 'current-password'}

@@ -465,6 +465,17 @@ describe('Settings — Change password', () => {
 		mockApi.auth.changePassword.mockReset();
 	});
 
+	it('gives account-password fields explicit semantics distinct from archive export', () => {
+		render(SettingsPage);
+
+		const newPassword = screen.getByLabelText('New password');
+		const confirmation = screen.getByLabelText('Confirm new password');
+		expect(newPassword).toHaveAttribute('id', 'account-new-password');
+		expect(newPassword).toHaveAttribute('name', 'account-new-password');
+		expect(confirmation).toHaveAttribute('id', 'account-new-password-confirmation');
+		expect(confirmation).toHaveAttribute('name', 'account-new-password-confirmation');
+	});
+
 	it('shows a change password section', () => {
 		render(SettingsPage);
 		expect(screen.getByRole('heading', { name: /change password/i })).toBeInTheDocument();

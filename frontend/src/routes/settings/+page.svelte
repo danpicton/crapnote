@@ -213,9 +213,10 @@
 				{#if pwSuccess}<p role="status" class="msg-success">{pwSuccess}</p>{/if}
 				<form class="pw-form" onsubmit={changePassword} novalidate>
 					<div class="pw-field">
-						<label for="new-password" class="field-label">New password</label>
+						<label for="account-new-password" class="field-label">New password</label>
 						<PasswordInput
-							id="new-password"
+							id="account-new-password"
+							name="account-new-password"
 							autocomplete="new-password"
 							bind:value={newPassword}
 							disabled={pwSubmitting}
@@ -224,9 +225,10 @@
 						/>
 					</div>
 					<div class="pw-field">
-						<label for="new-password-confirm" class="field-label">Confirm new password</label>
+						<label for="account-new-password-confirmation" class="field-label">Confirm new password</label>
 						<PasswordInput
-							id="new-password-confirm"
+							id="account-new-password-confirmation"
+							name="account-new-password-confirmation"
 							autocomplete="new-password"
 							bind:value={newPasswordConfirm}
 							disabled={pwSubmitting}
