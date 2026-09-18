@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/danpicton/crapnote/internal/db"
 	"github.com/danpicton/crapnote/internal/settings"
@@ -49,6 +50,46 @@ func TestNewLogger_JSONFormat(t *testing.T) {
 	l := newLogger()
 	if l == nil {
 		t.Fatal("expected non-nil logger")
+	}
+}
+
+func TestRunTrashPurge_RunsAtStartupAndRetriesAfterFailure(t *testing.T) {
+	if trashPurgeInterval > time.Hour {
+		t.Fatalf("trash purge interval %s exceeds one hour", trashPurgeInterval)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ticks := make(chan time.Time)
+	attempted := make(chan int, 2)
+	attempts := 0
+	purge := func(context.Context) error {
+		attempts++
+		attempted <- attempts
+		if attempts == 1 {
+			return errors.New("database busy")
+		}
+		return nil
+	}
+	var logs bytes.Buffer
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runTrashPurge(ctx, ticks, purge, newBufferLogger(&logs))
+	}()
+
+	if got := <-attempted; got != 1 {
+		t.Fatalf("startup attempt = %d, want 1", got)
+	}
+	ticks <- time.Now()
+	if got := <-attempted; got != 2 {
+		t.Fatalf("scheduled retry = %d, want 2", got)
+	}
+	cancel()
+	<-done
+
+	if !strings.Contains(logs.String(), "level=ERROR") || !strings.Contains(logs.String(), "database busy") {
+		t.Fatalf("expected first failure to be logged, got %q", logs.String())
 	}
 }
 

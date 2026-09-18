@@ -43,6 +43,7 @@ const (
 	defaultTrustProxy         = "false"
 	defaultLogFormat          = "text"
 	defaultLogLevel           = "info"
+	trashPurgeInterval        = time.Hour
 )
 
 // serverEnvDefaults maps every env var main.go reads to the default it falls
@@ -174,17 +175,17 @@ func main() {
 		}
 	}()
 
-	// Background job: purge trash entries older than 7 days, runs once per day.
+	// Background job: purge expired trash immediately at startup and hourly.
+	// Each tick is independent, so a transient failure is retried on the next.
 	go func() {
-		ticker := time.NewTicker(24 * time.Hour)
+		ticker := time.NewTicker(trashPurgeInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			if err := trashSvc.PurgeExpired(context.Background(), time.Now()); err != nil {
-				logger.Error("purge expired trash", "error", err)
-			} else {
-				logger.Info("purged expired trash entries")
-			}
-		}
+		runTrashPurge(
+			context.Background(),
+			ticker.C,
+			func(ctx context.Context) error { return trashSvc.PurgeExpired(ctx, time.Now()) },
+			logger,
+		)
 	}()
 
 	// Background job: lock notes whose content has gone untouched, runs once at
@@ -322,6 +323,33 @@ func main() {
 	if err := http.ListenAndServe(addr, handler); err != nil {
 		logger.Error("server error", "error", err)
 		os.Exit(1)
+	}
+}
+
+// runTrashPurge attempts cleanup immediately, then once for every scheduler
+// tick. Failures are logged and deliberately do not stop later attempts.
+func runTrashPurge(
+	ctx context.Context,
+	ticks <-chan time.Time,
+	purge func(context.Context) error,
+	logger *slog.Logger,
+) {
+	run := func() {
+		if err := purge(ctx); err != nil {
+			logger.Error("purge expired trash", "error", err)
+			return
+		}
+		logger.Info("purged expired trash entries")
+	}
+
+	run()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticks:
+			run()
+		}
 	}
 }
 
