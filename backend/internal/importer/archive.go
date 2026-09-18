@@ -140,7 +140,10 @@ func Parse(data []byte, password string, limits Limits) (*Archive, error) {
 }
 
 func validateEntry(name string, regular bool) error {
-	if name == "" || !utf8.ValidString(name) || strings.Contains(name, "\\") || path.IsAbs(name) || path.Clean(name) != name || strings.HasPrefix(name, "../") || !regular {
+	// Older exporter builds truncated filenames by bytes and could split a
+	// multi-byte rune at the 80-byte boundary. Names are never extracted to
+	// disk, so accept that legacy encoding while still enforcing safe paths.
+	if name == "" || strings.Contains(name, "\\") || path.IsAbs(name) || path.Clean(name) != name || strings.HasPrefix(name, "../") || !regular {
 		return fmt.Errorf("invalid archive entry %q", name)
 	}
 	if strings.Contains(name, "/") && (path.Dir(name) != "images" || path.Base(name) == ".") {
