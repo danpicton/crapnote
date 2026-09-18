@@ -165,7 +165,18 @@
 			<div class="section-body">
 				{#if exportError}<p role="alert" class="msg-error">{exportError}</p>{/if}
 				<div class="export-row">
-					<input type="password" placeholder="Password (optional)" bind:value={exportPassword} autocomplete="new-password" class="field-input" disabled={exportSubmitting} />
+					<div class="export-field">
+						<label for="export-archive-password" class="field-label">Archive password (optional)</label>
+						<input
+							id="export-archive-password"
+							name="export-archive-password"
+							type="password"
+							bind:value={exportPassword}
+							autocomplete="off"
+							class="field-input"
+							disabled={exportSubmitting}
+						/>
+					</div>
 					<button class="btn-primary" onclick={doExport} disabled={exportSubmitting}>
 						{exportSubmitting ? 'Exporting…' : 'Export notes'}
 					</button>
@@ -489,7 +500,8 @@
 	.admin-link-label { font-weight: 500; }
 	:global(.admin-link-chevron) { color: var(--text-3); }
 
-	.export-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+	.export-row { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.5rem; }
+	.export-field { display: flex; flex-direction: column; }
 
 	/* Theme selector */
 	.theme-select-row {

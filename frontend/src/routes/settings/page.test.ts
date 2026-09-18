@@ -5,6 +5,7 @@ import SettingsPage from './+page.svelte';
 
 const mockApi = vi.hoisted(() => ({
 	auth: { changePassword: vi.fn() },
+	export: vi.fn(),
 	tokens: { list: vi.fn().mockResolvedValue([]) },
 	version: { get: vi.fn().mockResolvedValue({ version: 'v2.1.0', update_available: false }) },
 }));
@@ -67,6 +68,15 @@ const mockTheme = vi.hoisted(() => ({
 vi.mock('$lib/stores/theme.svelte', () => ({ theme: mockTheme }));
 
 describe('Settings page', () => {
+	it('gives the archive password distinct non-account field semantics', () => {
+		render(SettingsPage);
+
+		const field = screen.getByLabelText('Archive password (optional)');
+		expect(field).toHaveAttribute('id', 'export-archive-password');
+		expect(field).toHaveAttribute('name', 'export-archive-password');
+		expect(field).toHaveAttribute('autocomplete', 'off');
+	});
+
 	it('renders heading', () => {
 		render(SettingsPage);
 		expect(screen.getAllByRole('heading', { name: /settings/i }).length).toBeGreaterThan(0);
