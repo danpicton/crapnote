@@ -179,7 +179,7 @@ func main() {
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()
 		for range ticker.C {
-			if err := trashSvc.PurgeExpired(context.Background()); err != nil {
+			if err := trashSvc.PurgeExpired(context.Background(), time.Now()); err != nil {
 				logger.Error("purge expired trash", "error", err)
 			} else {
 				logger.Info("purged expired trash entries")

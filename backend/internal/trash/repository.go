@@ -2,8 +2,6 @@ package trash
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -124,39 +122,18 @@ func (r *Repo) Empty(ctx context.Context, userID int64) error {
 	return nil
 }
 
-// PurgeExpired permanently deletes all notes that have been in trash for
-// longer than PurgeDays days. Safe to call from a background goroutine.
-func (r *Repo) PurgeExpired(ctx context.Context) error {
-	cutoff := time.Now().Add(-PurgeDays * 24 * time.Hour).UTC()
-
-	rows, err := r.db.QueryContext(ctx,
-		`SELECT note_id FROM trash WHERE deleted_at < ?`, cutoff,
-	)
+// PurgeExpired permanently deletes notes whose seven-day retention period has
+// ended. now is supplied by the scheduler so boundary behaviour is testable.
+func (r *Repo) PurgeExpired(ctx context.Context, now time.Time) error {
+	cutoff := now.UTC().Add(-PurgeDays * 24 * time.Hour)
+	_, err := r.db.ExecContext(ctx, `
+		DELETE FROM notes
+		WHERE id IN (
+			SELECT note_id FROM trash
+			WHERE julianday(deleted_at) <= julianday(?)
+		)`, cutoff)
 	if err != nil {
-		return fmt.Errorf("purge expired query: %w", err)
-	}
-	var ids []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		ids = append(ids, id)
-	}
-	rows.Close()
-	if rows.Err() != nil {
-		return rows.Err()
-	}
-
-	for _, id := range ids {
-		if _, err := r.db.ExecContext(ctx, `DELETE FROM notes WHERE id=?`, id); err != nil {
-			return fmt.Errorf("purge note %d: %w", id, err)
-		}
+		return fmt.Errorf("purge expired trash: %w", err)
 	}
 	return nil
 }
-
-// Ensure ErrNotFound is exported from the sql package check path.
-var _ = sql.ErrNoRows
-var _ = errors.New

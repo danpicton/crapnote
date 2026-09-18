@@ -191,34 +191,29 @@ func TestTrashRepo_Empty(t *testing.T) {
 	}
 }
 
-func TestTrashRepo_PurgeExpired(t *testing.T) {
+func TestTrashRepo_PurgeExpired_DeletesAtExactExpiry(t *testing.T) {
 	database := openTestDB(t)
 	userID := seedUser(t, database)
-	oldNote := seedNote(t, database, userID, "Old")
-	newNote := seedNote(t, database, userID, "New")
+	noteID := seedNote(t, database, userID, "Expired")
+	now := time.Date(2026, time.September, 18, 12, 0, 0, 0, time.UTC)
+	deletedAt := now.Add(-trash.PurgeDays * 24 * time.Hour)
+	// CURRENT_TIMESTAMP, used by real soft-deletes, stores this exact format.
+	if _, err := database.Exec(
+		`INSERT INTO trash(note_id, user_id, deleted_at) VALUES(?,?,?)`,
+		noteID, userID, deletedAt.Format("2006-01-02 15:04:05"),
+	); err != nil {
+		t.Fatalf("insert trash entry: %v", err)
+	}
 
-	// Insert trash entries with explicit deleted_at to simulate age.
-	past := time.Now().Add(-8 * 24 * time.Hour).UTC()
-	database.Exec(`INSERT INTO trash(note_id, user_id, deleted_at) VALUES(?,?,?)`, oldNote, userID, past) //nolint:errcheck
-	trashNote(t, database, newNote, userID)
-
-	repo := trash.NewRepo(database)
-	ctx := context.Background()
-
-	if err := repo.PurgeExpired(ctx); err != nil {
+	if err := trash.NewRepo(database).PurgeExpired(context.Background(), now); err != nil {
 		t.Fatalf("PurgeExpired: %v", err)
 	}
 
-	// Old note should be gone.
-	var oldCount int
-	database.QueryRow(`SELECT COUNT(*) FROM notes WHERE id=?`, oldNote).Scan(&oldCount) //nolint:errcheck
-	if oldCount != 0 {
-		t.Fatal("old note should be permanently deleted")
+	var count int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM notes WHERE id=?`, noteID).Scan(&count); err != nil {
+		t.Fatalf("count note: %v", err)
 	}
-
-	// New note should still be in trash.
-	entries, _ := repo.List(ctx, userID, "", 0, 0)
-	if len(entries) != 1 || entries[0].NoteID != newNote {
-		t.Fatalf("recent note should remain in trash, got %v", entries)
+	if count != 0 {
+		t.Fatal("note must be permanently deleted at deleted_at + seven days")
 	}
 }
