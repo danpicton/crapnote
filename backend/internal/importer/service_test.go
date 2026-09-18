@@ -36,7 +36,7 @@ func TestServiceImport_RestoresNotesAndSharedImageReferences(t *testing.T) {
 	var exported bytes.Buffer
 	if err := export.Build(&exported, []*notes.Note{
 		{Title: "Same title", Body: body},
-		{Title: "Same title", Body: "![shared](/api/images/" + oldID + ")"},
+		{Title: "Same title", Body: "![shared][asset]\n\n[asset]: /api/images/" + oldID + ` "Shared image"`},
 	}, map[string]images.Data{oldID: {MimeType: "image/png", Bytes: testPNG()}}, ""); err != nil {
 		t.Fatalf("build export: %v", err)
 	}

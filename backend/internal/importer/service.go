@@ -24,6 +24,7 @@ var (
 
 var imageReferencePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(!\[[^\]\r\n]*\]\(\s*<?)(images/[A-Za-z0-9._+-]+)`),
+	regexp.MustCompile(`(?m)(^[ \t]{0,3}\[[^\]\r\n]+\]:[ \t]*(?:\r?\n[ \t]+)?<?)(images/[A-Za-z0-9._+-]+)`),
 	regexp.MustCompile(`(?i)(<img\b[^>]*\bsrc\s*=\s*["']?)(images/[A-Za-z0-9._+-]+)`),
 }
 
