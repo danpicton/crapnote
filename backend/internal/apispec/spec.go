@@ -57,6 +57,9 @@ const (
 	// RequestMultipartImage sends the single base64 body param as a
 	// multipart form file field named "image".
 	RequestMultipartImage RequestKind = "multipart-image"
+	// RequestMultipartFile sends body params as multipart form fields, with
+	// base64 parameters represented as file parts.
+	RequestMultipartFile RequestKind = "multipart-file"
 )
 
 // ResponseKind is a coarse hint for clients that must re-encode the
@@ -374,6 +377,16 @@ func Registry() []Operation {
 			Response:    ResponseBinary,
 			Params: []Param{
 				{Name: "password", In: InBody, Type: TypeString, Description: "Optional password to encrypt the ZIP."},
+			},
+		},
+		{
+			Name: "import", Method: "POST", Path: "/api/import", Scope: ScopeWrite,
+			CookieOnly:  true,
+			Description: "Import notes and bundled images from a Crapnote export ZIP. Creates new active notes and accepts AES-256 export passwords.",
+			Request:     RequestMultipartFile,
+			Params: []Param{
+				{Name: "archive", In: InBody, Type: TypeBase64, Required: true, Description: "Crapnote export ZIP (maximum 100 MB compressed)."},
+				{Name: "password", In: InBody, Type: TypeString, Description: "Password used to encrypt the export, when applicable."},
 			},
 		},
 

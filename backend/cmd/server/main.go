@@ -16,6 +16,7 @@ import (
 	"github.com/danpicton/crapnote/internal/export"
 	"github.com/danpicton/crapnote/internal/httpx"
 	"github.com/danpicton/crapnote/internal/images"
+	"github.com/danpicton/crapnote/internal/importer"
 	"github.com/danpicton/crapnote/internal/middleware"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/ratelimit"
@@ -224,6 +225,9 @@ func main() {
 		imagesCfg.QuotaBytes = int64(v) << 20
 	}
 	imagesHandler := images.NewHandlerWith(database, imagesCfg)
+	importConfig := importer.DefaultConfig()
+	importConfig.ImageQuotaBytes = imagesCfg.QuotaBytes
+	importHandler := importer.NewHandler(importer.NewService(database, importConfig))
 
 	// Background job: reap orphaned uploads — images older than the grace
 	// period that no note body references — so they stop consuming quota.
@@ -301,7 +305,7 @@ func main() {
 	observe := func(h http.Handler) http.Handler {
 		return middleware.Metrics()(middleware.Logging(logger)(middleware.SecurityHeaders()(h)))
 	}
-	mux := newMux(authHandler, adminHandler, setupHandler, notesHandler, tagsHandler, trashHandler, exportHandler, imagesHandler, tokensHandler, settingsHandler, versionHandler, loginLimiter, bearerLimiter, observe)
+	mux := newMux(authHandler, adminHandler, setupHandler, notesHandler, tagsHandler, trashHandler, exportHandler, importHandler, imagesHandler, tokensHandler, settingsHandler, versionHandler, loginLimiter, bearerLimiter, observe)
 
 	handler := observe(mux)
 

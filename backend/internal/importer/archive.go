@@ -24,13 +24,13 @@ const (
 
 var (
 	ErrPasswordRequired = errors.New("this export is password-protected; enter its password")
-	ErrDecrypt           = errors.New("could not decrypt export; check the password or archive")
-	ErrNoNotes           = errors.New("archive contains no note entries")
+	ErrDecrypt          = errors.New("could not decrypt export; check the password or archive")
+	ErrNoNotes          = errors.New("archive contains no note entries")
 )
 
 // Limits controls ZIP resource limits. Production callers should use DefaultLimits.
 type Limits struct {
-	MaxEntries   int
+	MaxEntries    int
 	MaxTotalBytes int64
 }
 

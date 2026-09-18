@@ -725,6 +725,33 @@
       "response": "binary"
     },
     {
+      "name": "import",
+      "method": "POST",
+      "path": "/api/import",
+      "scope": "write",
+      "admin_only": false,
+      "cookie_only": true,
+      "description": "Import notes and bundled images from a Crapnote export ZIP. Creates new active notes and accepts AES-256 export passwords.",
+      "params": [
+        {
+          "name": "archive",
+          "in": "body",
+          "type": "base64",
+          "required": true,
+          "description": "Crapnote export ZIP (maximum 100 MB compressed)."
+        },
+        {
+          "name": "password",
+          "in": "body",
+          "type": "string",
+          "required": false,
+          "description": "Password used to encrypt the export, when applicable."
+        }
+      ],
+      "request": "multipart-file",
+      "response": "json"
+    },
+    {
       "name": "images_upload",
       "method": "POST",
       "path": "/api/images",

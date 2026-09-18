@@ -9,6 +9,7 @@ import (
 	"github.com/danpicton/crapnote/internal/auth"
 	"github.com/danpicton/crapnote/internal/export"
 	"github.com/danpicton/crapnote/internal/images"
+	"github.com/danpicton/crapnote/internal/importer"
 	"github.com/danpicton/crapnote/internal/mcp"
 	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/ratelimit"
@@ -27,6 +28,7 @@ func newMux(
 	tagsHandler *tags.Handler,
 	trashHandler *trash.Handler,
 	exportHandler *export.Handler,
+	importHandler *importer.Handler,
 	imagesHandler *images.Handler,
 	tokensHandler *tokens.Handler,
 	settingsHandler *settings.Handler,
@@ -104,6 +106,7 @@ func newMux(
 		"tags_delete": tagsHandler.Delete,
 
 		"export": exportHandler.Export,
+		"import": importHandler.Import,
 
 		"images_upload": imagesHandler.Upload,
 		"images_get":    imagesHandler.Serve,
