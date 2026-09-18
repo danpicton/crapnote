@@ -4,6 +4,7 @@ import type { Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
 import { AllSelection } from '@milkdown/kit/prose/state';
 import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
+import { underlinePlugin } from './underline';
 import { selectionToMarkdown } from './selectionMarkdown';
 
 async function withDocument(
@@ -18,6 +19,7 @@ async function withDocument(
 		})
 		.use(commonmark)
 		.use(gfm)
+		.use(underlinePlugin)
 		.create();
 
 	try {
@@ -52,6 +54,20 @@ describe('selectionToMarkdown', () => {
 			const markdown = selectionToMarkdown(new AllSelection(doc), serialize);
 
 			expect(markdown).toBe('* Parent\n\n  * [ ] Child\n\n  * [x] Done\n');
+		});
+	});
+
+	it('flattens underline while retaining supported marks on the same text', async () => {
+		await withDocument('hello', (doc, serialize) => {
+			const text = doc.type.schema.text('hello', [
+				doc.type.schema.marks.strong.create(),
+				doc.type.schema.marks.underline.create(),
+			]);
+			const markedDoc = doc.type.create(null, doc.type.schema.nodes.paragraph.create(null, text));
+
+			const markdown = selectionToMarkdown(new AllSelection(markedDoc), serialize);
+
+			expect(markdown).toBe('**hello**\n');
 		});
 	});
 
