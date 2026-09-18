@@ -10,9 +10,16 @@ export type MarkdownSerializer = (doc: ProseMirrorNode) => string;
 
 const markdownMarks = new Set(['strong', 'emphasis', 'strike_through', 'link', 'inlineCode']);
 
+function isUnderlineTag(node: ProseMirrorNode): boolean {
+	return node.type.name === 'html'
+		&& typeof node.attrs.value === 'string'
+		&& /^<\/?u(?:\s[^>]*)?>$/i.test(node.attrs.value.trim());
+}
+
 function flattenUnsupportedMarks(content: Fragment): Fragment {
 	const children: ProseMirrorNode[] = [];
 	content.forEach((node) => {
+		if (isUnderlineTag(node)) return;
 		const marks = node.marks.filter((mark) => markdownMarks.has(mark.type.name));
 		const flattened = node.isLeaf ? node.mark(marks) : node.copy(flattenUnsupportedMarks(node.content)).mark(marks);
 		children.push(flattened);

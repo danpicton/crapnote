@@ -80,6 +80,14 @@ describe('selectionToMarkdown', () => {
 		});
 	});
 
+	it('flattens stored underline HTML while retaining nested Markdown marks', async () => {
+		await withDocument('<u>**hello**</u>', (doc, serialize) => {
+			const markdown = selectionToMarkdown(new AllSelection(doc), serialize);
+
+			expect(markdown).toBe('**hello**\n');
+		});
+	});
+
 	it('flattens underline while retaining supported marks on the same text', async () => {
 		await withDocument('hello', (doc, serialize) => {
 			const text = doc.type.schema.text('hello', [
