@@ -161,6 +161,17 @@ describe('api.tags', () => {
 });
 
 describe('api.trash', () => {
+	it('list: bypasses stale browser caches', async () => {
+		mockFetch.mockResolvedValueOnce(ok([]));
+
+		await api.trash.list();
+
+		expect(mockFetch).toHaveBeenCalledWith(
+			expect.stringMatching(/^\/api\/trash\?/),
+			expect.objectContaining({ method: 'GET', cache: 'no-store' }),
+		);
+	});
+
 	it('list: fetches every page', async () => {
 		const entry = { note_id: 1, title: 'T', deleted_at: '', permanent_delete_at: '' };
 		mockFetch

@@ -191,34 +191,142 @@ func TestTrashRepo_Empty(t *testing.T) {
 	}
 }
 
-func TestTrashRepo_PurgeExpired(t *testing.T) {
+func TestTrashRepo_PurgeExpired_UsesSevenDayBoundaryAcrossStoredTimestampFormats(t *testing.T) {
 	database := openTestDB(t)
 	userID := seedUser(t, database)
-	oldNote := seedNote(t, database, userID, "Old")
-	newNote := seedNote(t, database, userID, "New")
+	now := time.Date(2026, time.September, 18, 12, 0, 0, 0, time.UTC)
+	cutoff := now.Add(-trash.PurgeDays * 24 * time.Hour)
 
-	// Insert trash entries with explicit deleted_at to simulate age.
-	past := time.Now().Add(-8 * 24 * time.Hour).UTC()
-	database.Exec(`INSERT INTO trash(note_id, user_id, deleted_at) VALUES(?,?,?)`, oldNote, userID, past) //nolint:errcheck
-	trashNote(t, database, newNote, userID)
+	tests := []struct {
+		name      string
+		deletedAt any
+		wantNote  bool
+	}{
+		{
+			name: "just before expiry remains recoverable",
+			// RFC3339 offsets can be produced by imported or legacy rows.
+			deletedAt: cutoff.Add(time.Second).In(time.FixedZone("UTC+0530", 5*60*60+30*60)).Format(time.RFC3339),
+			wantNote:  true,
+		},
+		{
+			name: "exact expiry is purged",
+			// CURRENT_TIMESTAMP, used by real soft-deletes, stores this format.
+			deletedAt: cutoff.Format("2006-01-02 15:04:05"),
+			wantNote:  false,
+		},
+		{
+			name: "just after expiry is purged",
+			// Binding time.Time is the other format used by this Go SQLite driver.
+			deletedAt: cutoff.Add(-time.Second),
+			wantNote:  false,
+		},
+	}
+
+	noteIDs := make(map[string]int64, len(tests))
+	for _, tt := range tests {
+		noteID := seedNote(t, database, userID, tt.name)
+		noteIDs[tt.name] = noteID
+		if _, err := database.Exec(
+			`INSERT INTO trash(note_id, user_id, deleted_at) VALUES(?,?,?)`,
+			noteID, userID, tt.deletedAt,
+		); err != nil {
+			t.Fatalf("insert %s: %v", tt.name, err)
+		}
+	}
 
 	repo := trash.NewRepo(database)
-	ctx := context.Background()
+	if err := repo.PurgeExpired(context.Background(), now); err != nil {
+		t.Fatalf("PurgeExpired: %v", err)
+	}
+	// Repeated runs must remain harmless.
+	if err := repo.PurgeExpired(context.Background(), now); err != nil {
+		t.Fatalf("second PurgeExpired: %v", err)
+	}
 
-	if err := repo.PurgeExpired(ctx); err != nil {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var noteCount, trashCount int
+			if err := database.QueryRow(`SELECT COUNT(*) FROM notes WHERE id=?`, noteIDs[tt.name]).Scan(&noteCount); err != nil {
+				t.Fatalf("count note: %v", err)
+			}
+			if err := database.QueryRow(`SELECT COUNT(*) FROM trash WHERE note_id=?`, noteIDs[tt.name]).Scan(&trashCount); err != nil {
+				t.Fatalf("count trash: %v", err)
+			}
+			want := 0
+			if tt.wantNote {
+				want = 1
+			}
+			if noteCount != want || trashCount != want {
+				t.Fatalf("note count=%d trash count=%d; want both %d", noteCount, trashCount, want)
+			}
+		})
+	}
+}
+
+func TestTrashRepo_PurgeExpired_RemovesRelatedRows(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	noteID := seedNote(t, database, userID, "Expired with tag")
+	res, err := database.Exec(`INSERT INTO tags(user_id, name) VALUES(?,?)`, userID, "related")
+	if err != nil {
+		t.Fatalf("insert tag: %v", err)
+	}
+	tagID, err := res.LastInsertId()
+	if err != nil {
+		t.Fatalf("tag id: %v", err)
+	}
+	if _, err := database.Exec(`INSERT INTO note_tags(note_id, tag_id) VALUES(?,?)`, noteID, tagID); err != nil {
+		t.Fatalf("link tag: %v", err)
+	}
+	now := time.Date(2026, time.September, 18, 12, 0, 0, 0, time.UTC)
+	if _, err := database.Exec(
+		`INSERT INTO trash(note_id, user_id, deleted_at) VALUES(?,?,?)`,
+		noteID, userID, now.Add(-7*24*time.Hour),
+	); err != nil {
+		t.Fatalf("insert trash: %v", err)
+	}
+
+	if err := trash.NewRepo(database).PurgeExpired(context.Background(), now); err != nil {
 		t.Fatalf("PurgeExpired: %v", err)
 	}
 
-	// Old note should be gone.
-	var oldCount int
-	database.QueryRow(`SELECT COUNT(*) FROM notes WHERE id=?`, oldNote).Scan(&oldCount) //nolint:errcheck
-	if oldCount != 0 {
-		t.Fatal("old note should be permanently deleted")
+	var links int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM note_tags WHERE note_id=?`, noteID).Scan(&links); err != nil {
+		t.Fatalf("count note tags: %v", err)
+	}
+	if links != 0 {
+		t.Fatalf("expected related note_tags rows removed, got %d", links)
+	}
+}
+
+func TestTrashRepo_PurgeExpired_PreservesActiveAndRestoredNotes(t *testing.T) {
+	database := openTestDB(t)
+	userID := seedUser(t, database)
+	activeID := seedNote(t, database, userID, "Active")
+	restoredID := seedNote(t, database, userID, "Restored")
+	now := time.Date(2026, time.September, 18, 12, 0, 0, 0, time.UTC)
+	if _, err := database.Exec(
+		`INSERT INTO trash(note_id, user_id, deleted_at) VALUES(?,?,?)`,
+		restoredID, userID, now.Add(-8*24*time.Hour),
+	); err != nil {
+		t.Fatalf("insert trash: %v", err)
+	}
+	repo := trash.NewRepo(database)
+	if err := repo.Restore(context.Background(), restoredID, userID); err != nil {
+		t.Fatalf("restore: %v", err)
 	}
 
-	// New note should still be in trash.
-	entries, _ := repo.List(ctx, userID, "", 0, 0)
-	if len(entries) != 1 || entries[0].NoteID != newNote {
-		t.Fatalf("recent note should remain in trash, got %v", entries)
+	if err := repo.PurgeExpired(context.Background(), now); err != nil {
+		t.Fatalf("PurgeExpired: %v", err)
+	}
+
+	for _, noteID := range []int64{activeID, restoredID} {
+		var count int
+		if err := database.QueryRow(`SELECT COUNT(*) FROM notes WHERE id=?`, noteID).Scan(&count); err != nil {
+			t.Fatalf("count note %d: %v", noteID, err)
+		}
+		if count != 1 {
+			t.Fatalf("active/restored note %d was removed", noteID)
+		}
 	}
 }

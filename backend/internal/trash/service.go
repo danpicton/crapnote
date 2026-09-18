@@ -1,6 +1,9 @@
 package trash
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Service implements trash business logic.
 type Service struct {
@@ -28,6 +31,6 @@ func (s *Service) Empty(ctx context.Context, userID int64) error {
 	return s.repo.Empty(ctx, userID)
 }
 
-func (s *Service) PurgeExpired(ctx context.Context) error {
-	return s.repo.PurgeExpired(ctx)
+func (s *Service) PurgeExpired(ctx context.Context, now time.Time) error {
+	return s.repo.PurgeExpired(ctx, now)
 }

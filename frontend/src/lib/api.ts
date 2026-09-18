@@ -116,6 +116,7 @@ async function request<T>(
 	body?: unknown,
 	timeoutMs?: number,
 	signal?: AbortSignal,
+	cache?: RequestCache,
 ): Promise<T> {
 	const headers: Record<string, string> = {};
 	if (body !== undefined) headers['Content-Type'] = 'application/json';
@@ -135,6 +136,7 @@ async function request<T>(
 			body: body !== undefined ? JSON.stringify(body) : undefined,
 			credentials: 'include',
 			signal: controller?.signal ?? signal,
+			...(cache !== undefined && { cache }),
 		});
 	} catch (error) {
 		// An explicit caller cancellation is control flow, not an offline
@@ -170,6 +172,7 @@ async function requestAllPages<T>(
 	path: string,
 	params: Record<string, string | number | boolean | undefined> = {},
 	signal?: AbortSignal,
+	cache?: RequestCache,
 ): Promise<T[]> {
 	const results: T[] = [];
 	for (let offset = 0; ; offset += PAGE_SIZE) {
@@ -180,6 +183,7 @@ async function requestAllPages<T>(
 			undefined,
 			undefined,
 			signal,
+			cache,
 		);
 		signal?.throwIfAborted();
 		results.push(...page);
@@ -276,7 +280,7 @@ export const api = {
 
 	trash: {
 		list: (params?: { search?: string }, signal?: AbortSignal) =>
-			requestAllPages<TrashEntry>('/api/trash', params, signal),
+			requestAllPages<TrashEntry>('/api/trash', params, signal, 'no-store'),
 		restore: (id: number) => request<void>('POST', `/api/trash/${id}/restore`),
 		deleteOne: (id: number) => request<void>('DELETE', `/api/trash/${id}`),
 		empty: () => request<void>('DELETE', '/api/trash'),

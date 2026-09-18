@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/danpicton/crapnote/internal/auth"
+	"github.com/danpicton/crapnote/internal/notes"
 	"github.com/danpicton/crapnote/internal/trash"
 )
 
@@ -67,6 +69,52 @@ func TestTrashHandler_ListSearch(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&entries) //nolint:errcheck
 	if len(entries) != 1 || entries[0]["title"] != "Deleted elephant" {
 		t.Fatalf("unexpected trash search: %v", entries)
+	}
+}
+
+func TestTrashHandlers_AfterCleanupListFetchAndRestoreAreNotFound(t *testing.T) {
+	database := openTestDB(t)
+	userRepo := auth.NewUserRepo(database)
+	user, err := userRepo.Create(context.Background(), "cleanup-user", "$2a$12$x", false)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	noteID := seedNote(t, database, user.ID, "Expired")
+	now := time.Date(2026, time.September, 18, 12, 0, 0, 0, time.UTC)
+	if _, err := database.Exec(
+		`INSERT INTO trash(note_id, user_id, deleted_at) VALUES(?,?,?)`,
+		noteID, user.ID, now.Add(-7*24*time.Hour),
+	); err != nil {
+		t.Fatalf("insert trash: %v", err)
+	}
+	trashSvc := trash.NewService(trash.NewRepo(database))
+	if err := trashSvc.PurgeExpired(context.Background(), now); err != nil {
+		t.Fatalf("PurgeExpired: %v", err)
+	}
+	trashHandler := trash.NewHandler(trashSvc)
+
+	listReq := withUser(httptest.NewRequest(http.MethodGet, "/api/trash", nil), user)
+	listResponse := httptest.NewRecorder()
+	trashHandler.List(listResponse, listReq)
+	if listResponse.Code != http.StatusOK || listResponse.Body.String() != "[]\n" {
+		t.Fatalf("list after cleanup: status=%d body=%s", listResponse.Code, listResponse.Body.String())
+	}
+
+	restoreReq := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/trash/%d/restore", noteID), nil)
+	restoreReq.SetPathValue("id", fmt.Sprint(noteID))
+	restoreResponse := httptest.NewRecorder()
+	trashHandler.Restore(restoreResponse, withUser(restoreReq, user))
+	if restoreResponse.Code != http.StatusNotFound {
+		t.Fatalf("restore after cleanup: got %d, want 404", restoreResponse.Code)
+	}
+
+	noteHandler := notes.NewHandler(notes.NewService(notes.NewRepo(database)))
+	getReq := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/notes/%d", noteID), nil)
+	getReq.SetPathValue("id", fmt.Sprint(noteID))
+	getResponse := httptest.NewRecorder()
+	noteHandler.Get(getResponse, withUser(getReq, user))
+	if getResponse.Code != http.StatusNotFound {
+		t.Fatalf("fetch after cleanup: got %d, want 404", getResponse.Code)
 	}
 }
 

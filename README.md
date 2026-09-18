@@ -166,7 +166,7 @@ Migrations live in `backend/internal/db/migrations/` as versioned SQL files (`00
 | `notes` | The notes themselves — title, body (markdown), starred/pinned/archived flags, per-user |
 | `tags` | Tag definitions — name, per-user, unique per user |
 | `note_tags` | Many-to-many join between notes and tags |
-| `trash` | Soft-delete records — points to a note in `notes`, records when it was deleted (permanent deletion after 30 days) |
+| `trash` | Soft-delete records — points to a note in `notes`, records when it was deleted (permanent deletion after 7 days) |
 | `schema_migrations` | Migration tracking — records which `.up.sql` files have been applied |
 | `notes_fts` | FTS5 virtual table mirroring `notes.title` + `notes.body`; kept in sync via INSERT/UPDATE/DELETE triggers |
 | `notes_fts_data` | FTS5 internal: inverted index B-tree data |
@@ -175,6 +175,9 @@ Migrations live in `backend/internal/db/migrations/` as versioned SQL files (`00
 | `notes_fts_idx` | FTS5 internal: segment index for fast prefix lookups |
 
 The four `notes_fts_*` tables are managed entirely by SQLite — never written to directly.
+
+Expired trash is purged once on every server startup and hourly thereafter. A
+failed run is logged and retried at the next hourly interval.
 
 ---
 

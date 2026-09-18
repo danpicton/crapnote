@@ -55,6 +55,21 @@ describe('Trash page', () => {
 		});
 	});
 
+	it('fetches the current trash again when the page is re-entered', async () => {
+		vi.mocked(api.trash.list)
+			.mockResolvedValueOnce([mockEntry()])
+			.mockResolvedValueOnce([]);
+		const firstVisit = render(TrashPage);
+		await screen.findByText('Deleted Note');
+
+		firstVisit.unmount();
+		render(TrashPage);
+
+		await screen.findByText(/trash is empty/i);
+		expect(screen.queryByText('Deleted Note')).not.toBeInTheDocument();
+		expect(api.trash.list).toHaveBeenCalledTimes(2);
+	});
+
 	it('searches deleted note titles and bodies as the user types', async () => {
 		vi.mocked(api.trash.list)
 			.mockResolvedValueOnce([mockEntry(), mockEntry({ note_id: 2, title: 'Other note' })])
