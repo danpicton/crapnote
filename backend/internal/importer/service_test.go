@@ -101,6 +101,75 @@ func TestServiceImport_RestoresNotesAndSharedImageReferences(t *testing.T) {
 	}
 }
 
+func TestServiceImport_PreservesOrdinaryRelativeImagePaths(t *testing.T) {
+	const oldID = "12345678-1234-4234-8234-123456789abc"
+	const relativeBody = "![logo](images/logo.png)\n" +
+		"![hex name](images/deadbeef.png)\n" +
+		"![reference][logo]\n[logo]: images/logo.png\n" +
+		"<img alt=\"a > b\" src=\"images/logo.png\">\n" +
+		"`images/logo.png`"
+	for _, password := range []string{"", "secret"} {
+		for _, withBundle := range []bool{false, true} {
+			name := "plain"
+			if password != "" {
+				name = "encrypted"
+			}
+			if withBundle {
+				name += "/with-bundle"
+			}
+			t.Run(name, func(t *testing.T) {
+				_, user, database := importHandlerFixture(t)
+				body := relativeBody
+				var bundled map[string]images.Data
+				if withBundle {
+					body += "\n![owned](/api/images/" + oldID + ")"
+					bundled = map[string]images.Data{oldID: {MimeType: "image/png", Bytes: testPNG()}}
+				}
+				var exported bytes.Buffer
+				if err := export.Build(&exported, []*notes.Note{{Title: "Relative images", Body: body}}, bundled, password); err != nil {
+					t.Fatal(err)
+				}
+				result, err := importer.NewService(database, importer.DefaultConfig()).Import(t.Context(), user.ID, exported.Bytes(), password)
+				if err != nil {
+					t.Fatalf("import valid export: %v", err)
+				}
+				if result.ImportedNotes != 1 {
+					t.Fatalf("imported %d notes", result.ImportedNotes)
+				}
+				wantBody := body
+				if withBundle {
+					var newID string
+					if err := database.QueryRow(`SELECT id FROM images WHERE user_id = ?`, user.ID).Scan(&newID); err != nil {
+						t.Fatal(err)
+					}
+					if newID == oldID {
+						t.Fatal("bundled image did not get a fresh ID")
+					}
+					wantBody = strings.ReplaceAll(body, "/api/images/"+oldID, "/api/images/"+newID)
+				}
+				got, err := notes.NewRepo(database).List(t.Context(), user.ID, notes.ListFilter{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(got) != 1 || got[0].Body != wantBody {
+					t.Fatalf("import changed relative links: got %#v, want body %q", got, wantBody)
+				}
+				var imageCount int
+				if err := database.QueryRow(`SELECT COUNT(*) FROM images`).Scan(&imageCount); err != nil {
+					t.Fatal(err)
+				}
+				wantImages := 0
+				if withBundle {
+					wantImages = 1
+				}
+				if imageCount != wantImages {
+					t.Fatalf("stored %d images, want %d", imageCount, wantImages)
+				}
+			})
+		}
+	}
+}
+
 func TestServiceImport_CreatesNewAccountScopedNotesEveryTime(t *testing.T) {
 	database, err := db.Open(db.Config{SQLitePath: ":memory:"})
 	if err != nil {
@@ -219,13 +288,13 @@ func TestServiceImport_MissingImageAndQuotaFailuresStoreNothing(t *testing.T) {
 	}{
 		{
 			name:    "missing referenced image",
-			entries: map[string][]byte{"note.md": []byte("# Note\n\n![missing](images/missing.png)\n")},
+			entries: map[string][]byte{"note.md": []byte("# Note\n\n![missing](images/abcdef01-1234-4234-8234-123456789abc.png)\n")},
 			quota:   100 << 20,
 			wantErr: importer.ErrMissingImage,
 		},
 		{
 			name:    "missing reference-style image",
-			entries: map[string][]byte{"note.md": []byte("# Note\n\n![ref][escaped\\]]\n[escaped\\]]: images/missing.png\n")},
+			entries: map[string][]byte{"note.md": []byte("# Note\n\n![ref][escaped\\]]\n[escaped\\]]: images/abcdef01-1234-4234-8234-123456789abc.png\n")},
 			quota:   100 << 20,
 			wantErr: importer.ErrMissingImage,
 		},
@@ -261,6 +330,82 @@ func TestServiceImport_MissingImageAndQuotaFailuresStoreNothing(t *testing.T) {
 			_ = database.QueryRow(`SELECT COUNT(*) FROM images`).Scan(&imagesCount)
 			if notesCount != 0 || imagesCount != 0 {
 				t.Fatalf("failure stored %d notes and %d images", notesCount, imagesCount)
+			}
+		})
+	}
+}
+
+func TestServiceImport_MissingExportedBundleRollsBack(t *testing.T) {
+	const keptID = "12345678-1234-4234-8234-123456789abc"
+	const missingID = "abcdef01-1234-4234-8234-123456789abc"
+	for _, password := range []string{"", "secret"} {
+		name := "plain"
+		if password != "" {
+			name = "encrypted"
+		}
+		t.Run(name, func(t *testing.T) {
+			_, user, database := importHandlerFixture(t)
+			var exported bytes.Buffer
+			if err := export.Build(&exported, []*notes.Note{
+				{Title: "A", Body: "![owned](/api/images/" + keptID + ")"},
+				{Title: "Z", Body: "![logo](images/logo.png)\n![missing][asset]\n[asset]: /api/images/" + missingID},
+			}, map[string]images.Data{
+				keptID:    {MimeType: "image/png", Bytes: testPNG()},
+				missingID: {MimeType: "image/png", Bytes: testPNG()},
+			}, password); err != nil {
+				t.Fatal(err)
+			}
+
+			// Damage a real export by omitting one bundled image, leaving the
+			// exporter's rewritten note references and other entries intact.
+			zr, err := yzip.NewReader(bytes.NewReader(exported.Bytes()), int64(exported.Len()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var damaged bytes.Buffer
+			zw := yzip.NewWriter(&damaged)
+			for _, file := range zr.File {
+				if file.Name == "images/"+missingID+".png" {
+					continue
+				}
+				if file.IsEncrypted() {
+					file.SetPassword(password)
+				}
+				source, err := file.Open()
+				if err != nil {
+					t.Fatal(err)
+				}
+				var target io.Writer
+				if password == "" {
+					target, err = zw.Create(file.Name)
+				} else {
+					target, err = zw.Encrypt(file.Name, password, yzip.AES256Encryption)
+				}
+				if err != nil {
+					source.Close()
+					t.Fatal(err)
+				}
+				_, err = io.Copy(target, source)
+				closeErr := source.Close()
+				if err != nil || closeErr != nil {
+					t.Fatalf("copy entry: %v, close: %v", err, closeErr)
+				}
+			}
+			if err := zw.Close(); err != nil {
+				t.Fatal(err)
+			}
+			_, err = importer.NewService(database, importer.DefaultConfig()).Import(t.Context(), user.ID, damaged.Bytes(), password)
+			if !errors.Is(err, importer.ErrMissingImage) {
+				t.Fatalf("error = %v, want missing bundled image", err)
+			}
+			for _, table := range []string{"notes", "images"} {
+				var count int
+				if err := database.QueryRow("SELECT COUNT(*) FROM " + table).Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				if count != 0 {
+					t.Fatalf("missing bundle left %d rows in %s", count, table)
+				}
 			}
 		})
 	}
@@ -308,7 +453,7 @@ func TestServiceImport_LateArchiveFailuresRollBackNotesAndImages(t *testing.T) {
 				last.Title = "Z\n"
 			}
 			if failure == "missing image" {
-				last.Body = "![missing][x]\n[x]: images/missing.png"
+				last.Body = "![missing][x]\n[x]: images/abcdef01-1234-4234-8234-123456789abc.png"
 			}
 			imageBytes := testPNG()
 			if failure == "invalid image" {

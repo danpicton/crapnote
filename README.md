@@ -185,7 +185,9 @@ Settings can import ZIP archives produced by Crapnote's exporter, including
 AES-256 password-protected exports. Import always creates new active notes for
 the signed-in user; importing the same archive again creates another set rather
 than overwriting or merging notes. Bundled images receive new IDs and stay
-private to that user.
+private to that user. Pre-existing relative links such as `images/logo.png`
+are preserved unchanged; missing-bundle detection is limited to the
+`images/<UUID>.<extension>` naming scheme used for Crapnote's generated image IDs.
 
 The export format does not contain restoration metadata. Imported notes are
 therefore unpinned, unlocked and unstarred, with fresh IDs and timestamps; tags
