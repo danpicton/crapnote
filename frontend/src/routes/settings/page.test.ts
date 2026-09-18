@@ -5,6 +5,7 @@ import SettingsPage from './+page.svelte';
 
 const mockApi = vi.hoisted(() => ({
 	auth: { changePassword: vi.fn() },
+	export: vi.fn(),
 	tokens: { list: vi.fn().mockResolvedValue([]) },
 	version: { get: vi.fn().mockResolvedValue({ version: 'v2.1.0', update_available: false }) },
 }));
@@ -67,6 +68,27 @@ const mockTheme = vi.hoisted(() => ({
 vi.mock('$lib/stores/theme.svelte', () => ({ theme: mockTheme }));
 
 describe('Settings page', () => {
+	it('does not expose the archive secret as a browser credential field', () => {
+		render(SettingsPage);
+
+		const field = screen.getByLabelText('Archive password (optional)');
+		expect(field).toHaveAttribute('id', 'export-archive-secret');
+		expect(field).toHaveAttribute('name', 'export-archive-secret');
+		expect(field).toHaveAttribute('type', 'text');
+		expect(field).toHaveAttribute('autocomplete', 'off');
+		expect(field).toHaveClass('archive-secret-input');
+	});
+
+	it('separates archive export from account-password submission', () => {
+		render(SettingsPage);
+
+		const exportForm = screen.getByLabelText('Archive password (optional)').closest('form');
+		const accountForm = screen.getByLabelText('New password').closest('form');
+		expect(exportForm).toHaveAccessibleName('Export notes');
+		expect(accountForm).toHaveAccessibleName('Change account password');
+		expect(exportForm).not.toBe(accountForm);
+	});
+
 	it('renders heading', () => {
 		render(SettingsPage);
 		expect(screen.getAllByRole('heading', { name: /settings/i }).length).toBeGreaterThan(0);
@@ -80,6 +102,30 @@ describe('Settings page', () => {
 	it('shows back link to notes', () => {
 		render(SettingsPage);
 		expect(screen.getAllByRole('link', { name: /back to notes/i }).length).toBeGreaterThan(0);
+	});
+});
+
+describe('Settings — Export', () => {
+	beforeEach(() => {
+		mockApi.export.mockReset();
+	});
+
+	it('clears the archive password without persisting it after a successful export', async () => {
+		mockApi.export.mockResolvedValueOnce(undefined);
+		localStorage.clear();
+		sessionStorage.clear();
+		render(SettingsPage);
+		const field = screen.getByLabelText('Archive password (optional)') as HTMLInputElement;
+
+		await fireEvent.input(field, { target: { value: 'archive-secret' } });
+		await fireEvent.click(screen.getByRole('button', { name: 'Export notes' }));
+
+		await waitFor(() => {
+			expect(mockApi.export).toHaveBeenCalledWith('archive-secret');
+			expect(field.value).toBe('');
+		});
+		expect(localStorage).toHaveLength(0);
+		expect(sessionStorage).toHaveLength(0);
 	});
 });
 
@@ -453,6 +499,17 @@ describe('Settings — Global theme (admin)', () => {
 describe('Settings — Change password', () => {
 	beforeEach(() => {
 		mockApi.auth.changePassword.mockReset();
+	});
+
+	it('gives account-password fields explicit semantics distinct from archive export', () => {
+		render(SettingsPage);
+
+		const newPassword = screen.getByLabelText('New password');
+		const confirmation = screen.getByLabelText('Confirm new password');
+		expect(newPassword).toHaveAttribute('id', 'account-new-password');
+		expect(newPassword).toHaveAttribute('name', 'account-new-password');
+		expect(confirmation).toHaveAttribute('id', 'account-new-password-confirmation');
+		expect(confirmation).toHaveAttribute('name', 'account-new-password-confirmation');
 	});
 
 	it('shows a change password section', () => {

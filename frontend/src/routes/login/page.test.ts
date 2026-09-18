@@ -57,6 +57,16 @@ describe('Login page', () => {
 		expect(screen.getByRole('button', { name: /log in/i })).toBeInTheDocument();
 	});
 
+	it('exposes standard account-credential semantics for browser autofill', () => {
+		render(LoginPage);
+		const username = screen.getByLabelText('Username');
+		const password = screen.getByLabelText('Password');
+		expect(username).toHaveAttribute('name', 'username');
+		expect(username).toHaveAttribute('autocomplete', 'username');
+		expect(password).toHaveAttribute('name', 'password');
+		expect(password).toHaveAttribute('autocomplete', 'current-password');
+	});
+
 	it('has a show-password toggle that reveals the password', async () => {
 		render(LoginPage);
 		const field = screen.getByLabelText('Password') as HTMLInputElement;

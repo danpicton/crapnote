@@ -129,6 +129,7 @@
 				<label for="username">Username</label>
 				<input
 					id="username"
+					name="username"
 					type="text"
 					autocomplete="username"
 					bind:value={username}
@@ -141,6 +142,7 @@
 				<label for="password">Password</label>
 				<PasswordInput
 					id="password"
+					name="password"
 					autocomplete="current-password"
 					bind:value={password}
 					disabled={submitting}

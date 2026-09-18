@@ -76,7 +76,8 @@
 		!auth.loading && !!auth.user && (auth.user.is_admin || !!auth.user.api_tokens_enabled),
 	);
 
-	async function doExport() {
+	async function doExport(e: SubmitEvent) {
+		e.preventDefault();
 		exportError = '';
 		exportSubmitting = true;
 		try {
@@ -164,12 +165,25 @@
 			</div>
 			<div class="section-body">
 				{#if exportError}<p role="alert" class="msg-error">{exportError}</p>{/if}
-				<div class="export-row">
-					<input type="password" placeholder="Password (optional)" bind:value={exportPassword} autocomplete="new-password" class="field-input" disabled={exportSubmitting} />
-					<button class="btn-primary" onclick={doExport} disabled={exportSubmitting}>
+				<form class="export-row" aria-label="Export notes" autocomplete="off" onsubmit={doExport}>
+					<div class="export-field">
+						<label for="export-archive-secret" class="field-label">Archive password (optional)</label>
+						<input
+							id="export-archive-secret"
+							name="export-archive-secret"
+							type="text"
+							bind:value={exportPassword}
+							autocomplete="off"
+							autocapitalize="none"
+							spellcheck={false}
+							class="field-input archive-secret-input"
+							disabled={exportSubmitting}
+						/>
+					</div>
+					<button type="submit" class="btn-primary" disabled={exportSubmitting}>
 						{exportSubmitting ? 'Exporting…' : 'Export notes'}
 					</button>
-				</div>
+				</form>
 				<p class="hint">A ZIP of individual <code>.md</code> files. Password-protected if supplied.</p>
 			</div>
 		</section>
@@ -200,11 +214,12 @@
 			<div class="section-body">
 				{#if pwError}<p role="alert" class="msg-error">{pwError}</p>{/if}
 				{#if pwSuccess}<p role="status" class="msg-success">{pwSuccess}</p>{/if}
-				<form class="pw-form" onsubmit={changePassword} novalidate>
+				<form class="pw-form" aria-label="Change account password" onsubmit={changePassword} novalidate>
 					<div class="pw-field">
-						<label for="new-password" class="field-label">New password</label>
+						<label for="account-new-password" class="field-label">New password</label>
 						<PasswordInput
-							id="new-password"
+							id="account-new-password"
+							name="account-new-password"
 							autocomplete="new-password"
 							bind:value={newPassword}
 							disabled={pwSubmitting}
@@ -213,9 +228,10 @@
 						/>
 					</div>
 					<div class="pw-field">
-						<label for="new-password-confirm" class="field-label">Confirm new password</label>
+						<label for="account-new-password-confirmation" class="field-label">Confirm new password</label>
 						<PasswordInput
-							id="new-password-confirm"
+							id="account-new-password-confirmation"
+							name="account-new-password-confirmation"
 							autocomplete="new-password"
 							bind:value={newPasswordConfirm}
 							disabled={pwSubmitting}
@@ -489,7 +505,13 @@
 	.admin-link-label { font-weight: 500; }
 	:global(.admin-link-chevron) { color: var(--text-3); }
 
-	.export-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-bottom: 0.5rem; }
+	.export-row { display: flex; gap: 0.5rem; align-items: flex-end; flex-wrap: wrap; margin-bottom: 0.5rem; }
+	.export-field { display: flex; flex-direction: column; }
+
+	/* Chrome treats every type=password field on this page as an account
+	   credential, even in a separate autocomplete=off form. Keep the archive
+	   secret out of that heuristic while preserving the obscured display. */
+	.archive-secret-input { -webkit-text-security: disc; }
 
 	/* Theme selector */
 	.theme-select-row {
