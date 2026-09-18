@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Editor, rootCtx, defaultValueCtx, editorViewCtx, serializerCtx } from '@milkdown/kit/core';
 import type { Node as ProseMirrorNode } from '@milkdown/kit/prose/model';
-import { AllSelection } from '@milkdown/kit/prose/state';
+import { AllSelection, TextSelection } from '@milkdown/kit/prose/state';
 import { commonmark } from '@milkdown/kit/preset/commonmark';
 import { gfm } from '@milkdown/kit/preset/gfm';
 import { underlinePlugin } from './underline';
@@ -54,6 +54,29 @@ describe('selectionToMarkdown', () => {
 			const markdown = selectionToMarkdown(new AllSelection(doc), serialize);
 
 			expect(markdown).toBe('* Parent\n\n  * [ ] Child\n\n  * [x] Done\n');
+		});
+	});
+
+	it('closes formatting delimiters around a partial text selection', async () => {
+		await withDocument('Before **bold** after', (doc, serialize) => {
+			const markdown = selectionToMarkdown(TextSelection.create(doc, 9, 12), serialize);
+
+			expect(markdown).toBe('**old**\n');
+		});
+	});
+
+	it('keeps list structure while omitting text outside a partial selection', async () => {
+		await withDocument('- First item\n- Second item', (doc, serialize) => {
+			const textPositions: number[] = [];
+			doc.descendants((node, pos) => {
+				if (node.isText) textPositions.push(pos);
+			});
+			const markdown = selectionToMarkdown(
+				TextSelection.create(doc, textPositions[0] + 1, textPositions[1] + 6),
+				serialize,
+			);
+
+			expect(markdown).toBe('* irst item\n\n* Second\n');
 		});
 	});
 
