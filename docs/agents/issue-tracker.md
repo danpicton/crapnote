@@ -24,6 +24,11 @@ PRs as a request surface: no.
 
 ## Wayfinding operations
 
+Use these operations only when the user explicitly requests wayfinding or
+invokes `$wayfinder`. Wayfinder decision tickets are separate from
+`ready-for-agent` implementation issues; the sequential issue workflow must
+not pick them up.
+
 A wayfinder map is one issue labelled `wayfinder:map`. Decision tickets are
 child issues linked as GitHub sub-issues. If sub-issues are unavailable, put
 them in a task list on the map and add `Part of #<map>` to each child.
